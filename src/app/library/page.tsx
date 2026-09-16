@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAppStore } from "@/lib/store";
+import { useRouter } from "next/navigation";
 import { Library as LibraryIcon, Search, LayoutGrid } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy, useSortable } from "@dnd-kit/sortable";
@@ -41,6 +42,7 @@ function SortableItem({ id, index }: { id: string, index: number }) {
 
 export default function LibraryPage() {
   const { contentType } = useAppStore();
+  const router = useRouter();
   
   // Initialize with 9 slots (some empty, some filled for demo)
   const [items, setItems] = useState([
