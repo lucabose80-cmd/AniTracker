@@ -1,5 +1,5 @@
 import { db } from "@/lib/firebase";
-import { doc, setDoc, getDoc, updateDoc } from "firebase/firestore";
+import { doc, setDoc, getDoc, updateDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { UserWork } from "@/types/database";
 
 // Speichert oder aktualisiert eine Bewertung/Tracking für ein bestimmtes Werk durch einen User
@@ -51,4 +51,25 @@ export async function getUserWork(userId: string, workId: string): Promise<UserW
   }
   
   return null;
+}
+
+// Holt alle Werke eines Users
+export async function getAllUserWorks(userId: string): Promise<UserWork[]> {
+  if (!db) return [];
+
+  try {
+    const worksRef = collection(db, "user_works");
+    const q = query(worksRef, where("user_id", "==", userId));
+    const querySnapshot = await getDocs(q);
+    
+    const works: UserWork[] = [];
+    querySnapshot.forEach((doc) => {
+      works.push(doc.data() as UserWork);
+    });
+    
+    return works;
+  } catch (error) {
+    console.error("Fehler beim Laden der Bibliothek:", error);
+    return [];
+  }
 }

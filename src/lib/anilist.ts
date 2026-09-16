@@ -118,3 +118,24 @@ export const GET_WORK_DETAILS = `
     }
   }
 `;
+
+export const GET_WORKS_BATCH = `
+  query($ids: [Int]!) {
+    Page(page: 1, perPage: 50) {
+      media(id_in: $ids) {
+        id
+        title {
+          romaji
+          english
+        }
+        coverImage {
+          extraLarge
+          large
+        }
+        type
+        format
+        averageScore
+      }
+    }
+  }
+`;

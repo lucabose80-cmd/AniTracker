@@ -39,3 +39,11 @@ export async function addToHistory(uid: string, workId: string) {
     read_watch_history: arrayUnion(workId)
   });
 }
+
+export async function updateTop9List(uid: string, list: string[]) {
+  if (!db) return;
+  const docRef = doc(db, "users", uid);
+  await updateDoc(docRef, {
+    top_9_list: list
+  });
+}

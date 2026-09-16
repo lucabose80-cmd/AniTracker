@@ -7,9 +7,15 @@ import { Library as LibraryIcon, Search, LayoutGrid } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { auth } from "@/lib/firebase";
+import { getUserProfile, updateTop9List } from "@/lib/db/users";
+import { getAllUserWorks } from "@/lib/db/works";
+import { fetchAniList, GET_WORKS_BATCH } from "@/lib/anilist";
+import { UserWork } from "@/types/database";
+import Link from "next/link";
 
 // Simple Sortable Item Component
-function SortableItem({ id, index }: { id: string, index: number }) {
+function SortableItem({ id, index, workDetails }: { id: string, index: number, workDetails?: any }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   
   const style = {
@@ -27,14 +33,18 @@ function SortableItem({ id, index }: { id: string, index: number }) {
       {...listeners}
       className={`aspect-[3/4] relative cursor-grab active:cursor-grabbing rounded-xl bg-[#1a1d24] border ${isDragging ? 'border-blue-500 shadow-2xl scale-105' : 'border-gray-800'} flex items-center justify-center font-bold text-gray-500 overflow-hidden`}
     >
-      <span className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white backdrop-blur-md z-10">
+      <span className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white backdrop-blur-md z-10 pointer-events-none">
         {index + 1}
       </span>
       {/* We will load real covers later, for now we show IDs or Empty */}
       {id.startsWith("empty") ? (
-        <span className="text-gray-700 text-3xl font-light">+</span>
+        <span className="text-gray-700 text-3xl font-light pointer-events-none">+</span>
+      ) : workDetails ? (
+        <Link href={`/work/${id}`} className="absolute inset-0 block h-full w-full">
+          <img src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" className="h-full w-full object-cover pointer-events-none" />
+        </Link>
       ) : (
-        <span className="text-xs text-center p-2 text-white line-clamp-3">Work {id}</span>
+        <span className="text-xs text-center p-2 text-white line-clamp-3 pointer-events-none">Lade...</span>
       )}
     </div>
   );
@@ -44,24 +54,81 @@ export default function LibraryPage() {
   const { contentType } = useAppStore();
   const router = useRouter();
   
-  // Initialize with 9 slots (some empty, some filled for demo)
-  const [items, setItems] = useState([
-    "101922", "11061", "empty-3", "21087", "empty-5", "empty-6", "empty-7", "empty-8", "empty-9"
-  ]);
+  const [items, setItems] = useState<string[]>(Array(9).fill("").map((_, i) => `empty-${i}`));
+  const [allWorks, setAllWorks] = useState<UserWork[]>([]);
+  const [aniListDetails, setAniListDetails] = useState<Record<string, any>>({});
+  const [isLoading, setIsLoading] = useState(true);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      if (user) {
+        try {
+          const [profile, works] = await Promise.all([
+            getUserProfile(user.uid),
+            getAllUserWorks(user.uid)
+          ]);
+
+          let currentTop9 = profile?.top_9_list || [];
+          // Fill up to 9
+          while(currentTop9.length < 9) {
+            currentTop9.push(`empty-${currentTop9.length}`);
+          }
+
+          // Auto-fill empty slots if there are works not in Top 9
+          const worksInTop9 = currentTop9.filter(id => !id.startsWith("empty"));
+          const worksNotInTop9 = works.filter(w => !worksInTop9.includes(w.work_id));
+
+          for (let i = 0; i < currentTop9.length; i++) {
+            if (currentTop9[i].startsWith("empty") && worksNotInTop9.length > 0) {
+              const nextWork = worksNotInTop9.shift();
+              if (nextWork) currentTop9[i] = nextWork.work_id;
+            }
+          }
+
+          setItems(currentTop9);
+          setAllWorks(works);
+
+          // Fetch AniList Data for all unique works
+          const allIdsToFetch = works.map(w => parseInt(w.work_id, 10));
+          if (allIdsToFetch.length > 0) {
+            const data = await fetchAniList(GET_WORKS_BATCH, { ids: allIdsToFetch });
+            const map: Record<string, any> = {};
+            data.Page.media.forEach((m: any) => {
+              map[m.id.toString()] = m;
+            });
+            setAniListDetails(map);
+          }
+        } catch (error) {
+          console.error("Fehler beim Laden der Bibliothek:", error);
+        } finally {
+          setIsLoading(false);
+        }
+      } else {
+        setIsLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (over && active.id !== over.id) {
-      setItems((items) => {
-        const oldIndex = items.indexOf(active.id as string);
-        const newIndex = items.indexOf(over.id as string);
-        const newItems = arrayMove(items, oldIndex, newIndex);
-        // Here we would also sync the new array to Firestore's top_9_list
+      setItems((prevItems) => {
+        const oldIndex = prevItems.indexOf(active.id as string);
+        const newIndex = prevItems.indexOf(over.id as string);
+        const newItems = arrayMove(prevItems, oldIndex, newIndex);
+        
+        // Sync to Firestore
+        if (auth.currentUser) {
+          updateTop9List(auth.currentUser.uid, newItems).catch(console.error);
+        }
+        
         return newItems;
       });
     }
@@ -100,7 +167,7 @@ export default function LibraryPage() {
           <SortableContext items={items} strategy={rectSortingStrategy}>
             <div className="grid grid-cols-3 gap-3">
               {items.map((id, index) => (
-                <SortableItem key={id} id={id} index={index} />
+                <SortableItem key={id} id={id} index={index} workDetails={aniListDetails[id]} />
               ))}
             </div>
           </SortableContext>
@@ -109,9 +176,35 @@ export default function LibraryPage() {
       
       <section className="mt-4">
         <h3 className="mb-3 text-lg font-bold">Alle Werke</h3>
-        <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-8 text-center text-gray-500">
-          Noch keine Werke hinzugefügt.
-        </div>
+        
+        {isLoading ? (
+          <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-8 text-center text-gray-500 animate-pulse">
+            Lade Bibliothek...
+          </div>
+        ) : allWorks.length === 0 ? (
+          <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-8 text-center text-gray-500">
+            Noch keine Werke hinzugefügt. Suche oben, um anzufangen!
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+            {allWorks.map(work => {
+              const details = aniListDetails[work.work_id];
+              return (
+                <Link href={`/work/${work.work_id}`} key={work.work_id} className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500 hover:shadow-lg">
+                  {details ? (
+                    <img src={details.coverImage?.extraLarge || details.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
+                  ) : (
+                    <div className="flex h-full items-center justify-center p-2 text-xs text-gray-500 text-center">Lade...</div>
+                  )}
+                  {/* Status Badge */}
+                  <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/90 to-transparent p-2 text-center text-[10px] font-bold text-white opacity-0 transition group-hover:opacity-100">
+                    {work.status}
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        )}
       </section>
     </div>
   );
