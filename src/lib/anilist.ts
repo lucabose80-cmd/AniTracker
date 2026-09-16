@@ -137,6 +137,7 @@ export const GET_WORKS_BATCH = `
         averageScore
         status
         episodes
+        chapters
         nextAiringEpisode {
           episode
         }

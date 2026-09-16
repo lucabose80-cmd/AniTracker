@@ -29,10 +29,14 @@ function SortableItem({ id, index, workDetails, userWork }: { id: string, index:
   if (workDetails && userWork) {
     const currentEp = userWork.current_episode || 0;
     let maxAiredEp = 0;
-    if (workDetails.status === "RELEASING" && workDetails.nextAiringEpisode) {
-      maxAiredEp = workDetails.nextAiringEpisode.episode - 1;
-    } else if (workDetails.status === "FINISHED") {
-      maxAiredEp = workDetails.episodes || 0;
+    if (workDetails.type === "MANGA") {
+      maxAiredEp = workDetails.chapters || 0;
+    } else {
+      if (workDetails.status === "RELEASING" && workDetails.nextAiringEpisode) {
+        maxAiredEp = workDetails.nextAiringEpisode.episode - 1;
+      } else if (workDetails.status === "FINISHED") {
+        maxAiredEp = workDetails.episodes || 0;
+      }
     }
     behindCount = maxAiredEp - currentEp;
   }
@@ -210,10 +214,14 @@ export default function LibraryPage() {
               if (details) {
                 const currentEp = work.current_episode || 0;
                 let maxAiredEp = 0;
-                if (details.status === "RELEASING" && details.nextAiringEpisode) {
-                  maxAiredEp = details.nextAiringEpisode.episode - 1;
-                } else if (details.status === "FINISHED") {
-                  maxAiredEp = details.episodes || 0;
+                if (details.type === "MANGA") {
+                  maxAiredEp = details.chapters || 0;
+                } else {
+                  if (details.status === "RELEASING" && details.nextAiringEpisode) {
+                    maxAiredEp = details.nextAiringEpisode.episode - 1;
+                  } else if (details.status === "FINISHED") {
+                    maxAiredEp = details.episodes || 0;
+                  }
                 }
                 behindCount = maxAiredEp - currentEp;
               }

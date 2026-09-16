@@ -166,7 +166,7 @@ export default function WorkDetailPage() {
     const user = auth?.currentUser;
     if (!user) return alert("Bitte einloggen");
     
-    const maxEps = work?.episodes || 9999;
+    const maxEps = work?.episodes || work?.chapters || 9999;
     let newEp = currentEpisode + increment;
     if (newEp < 0) newEp = 0;
     if (newEp > maxEps) newEp = maxEps;
@@ -230,14 +230,16 @@ export default function WorkDetailPage() {
 
         {/* EPISODE TRACKING */}
         <div className="mt-6 flex items-center justify-between bg-gray-900 border border-gray-800 rounded-xl p-4">
-          <span className="font-bold text-gray-300">Folgen geschaut</span>
+          <span className="font-bold text-gray-300">
+            {work.type === "MANGA" ? "Kapitel gelesen" : "Folgen geschaut"}
+          </span>
           <div className="flex items-center gap-4">
             <button 
               onClick={() => handleUpdateEpisode(-1)}
               className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-800 text-white font-bold hover:bg-gray-700 active:scale-95"
             >-</button>
             <span className="font-mono font-bold text-lg text-blue-400">
-              {currentEpisode} <span className="text-sm text-gray-500">/ {work.episodes || "?"}</span>
+              {currentEpisode} <span className="text-sm text-gray-500">/ {work.episodes || work.chapters || "?"}</span>
             </span>
             <button 
               onClick={() => handleUpdateEpisode(1)}
