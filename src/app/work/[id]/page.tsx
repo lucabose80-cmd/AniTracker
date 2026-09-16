@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { fetchAniList, GET_WORK_DETAILS } from "@/lib/anilist";
 import { calculateOverallScore } from "@/lib/scoring";
 import { UserWork, EmotionalImpact, WatchMode } from "@/types/database";
-import { Star, ChevronLeft, Save } from "lucide-react";
+import { Star, ChevronLeft, Save, Library as LibraryIcon, Check } from "lucide-react";
 import Link from "next/link";
 import { auth } from "@/lib/firebase";
 import { saveUserWork, getUserWork } from "@/lib/db/works";
@@ -17,6 +17,8 @@ export default function WorkDetailPage() {
   
   const [work, setWork] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [inLibrary, setInLibrary] = useState(false);
+  const [showEvaluation, setShowEvaluation] = useState(false);
 
   // Form State for Deep Evaluation
   const [evaluation, setEvaluation] = useState<UserWork["evaluation"]>({
@@ -56,6 +58,7 @@ export default function WorkDetailPage() {
         if (user) {
           const userWork = await getUserWork(user.uid, id);
           if (userWork) {
+            setInLibrary(true);
             setEvaluation(userWork.evaluation);
             setWatchMode(userWork.classification?.watchMode || "SUB");
             // If they had an ending score > 0, check the box
@@ -82,6 +85,27 @@ export default function WorkDetailPage() {
 
   const handleSlider = (field: keyof UserWork["evaluation"], value: string) => {
     setEvaluation(prev => ({ ...prev, [field]: parseFloat(value) }));
+  };
+
+  const handleQuickAdd = async () => {
+    const user = auth?.currentUser;
+    if (!user) {
+      alert("Bitte erst einloggen!");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      await saveUserWork(user.uid, id, {
+        status: "PLANNING",
+        evaluation: evaluation
+      });
+      await addToHistory(user.uid, id);
+      setInLibrary(true);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleSave = async () => {
@@ -116,6 +140,7 @@ export default function WorkDetailPage() {
       });
       
       await addToHistory(user.uid, id);
+      setInLibrary(true);
       setSaveMessage("Gespeichert!");
       setTimeout(() => setSaveMessage(""), 3000);
     } catch (err) {
@@ -176,8 +201,34 @@ export default function WorkDetailPage() {
 
         <p className="mt-4 text-sm text-gray-300 line-clamp-4" dangerouslySetInnerHTML={{ __html: work.description || "" }} />
 
+        {/* ACTION BUTTONS */}
+        <div className="mt-6 flex flex-col gap-3">
+          {!inLibrary ? (
+            <button 
+              onClick={handleQuickAdd}
+              disabled={isSaving}
+              className="w-full rounded-xl bg-blue-600 py-3.5 font-bold text-white shadow-lg transition hover:bg-blue-700 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <LibraryIcon size={20} /> Zur Bibliothek hinzufügen
+            </button>
+          ) : (
+            <div className="w-full rounded-xl bg-green-900/40 border border-green-800/50 py-3.5 font-bold text-green-400 text-center flex items-center justify-center gap-2">
+              <Check size={20} /> In Bibliothek gespeichert
+            </div>
+          )}
+          
+          <button 
+            onClick={() => setShowEvaluation(!showEvaluation)}
+            className="w-full rounded-xl bg-[#1a1d24] border border-gray-800 py-3.5 font-bold text-white transition hover:bg-gray-800 active:scale-95 flex items-center justify-center gap-2"
+          >
+            <Star size={20} className={showEvaluation ? "text-yellow-500" : "text-gray-400"} /> 
+            {showEvaluation ? "Deep Evaluation schließen" : "Deep Evaluation öffnen"}
+          </button>
+        </div>
+
         {/* --- DEEP EVALUATION UI --- */}
-        <div className="mt-10 rounded-2xl border border-gray-800 bg-[#1a1d24] p-5 shadow-lg">
+        {showEvaluation && (
+          <div className="mt-6 rounded-2xl border border-gray-800 bg-[#1a1d24] p-5 shadow-lg animate-in fade-in slide-in-from-top-4">
           <h2 className="text-xl font-bold mb-6 text-white flex justify-between items-center">
             Deep Evaluation
             <span className="text-2xl text-blue-500">{currentScore.toFixed(2)}<span className="text-sm text-gray-500">/10</span></span>
@@ -307,6 +358,7 @@ export default function WorkDetailPage() {
             )}
           </div>
         </div>
+        )}
       </div>
     </div>
   );
