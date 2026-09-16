@@ -50,6 +50,119 @@ function CommentSection({ activityId, userProfiles, currentUserUid }: { activity
     }
   };
 
+  const buildTree = (allComments: ActivityComment[]) => {
+    const map = new Map<string, any>();
+    const roots: any[] = [];
+    allComments.forEach(c => map.set(c.comment_id, { ...c, children: [] }));
+    allComments.forEach(c => {
+      if (c.parent_comment_id && map.has(c.parent_comment_id)) {
+        map.get(c.parent_comment_id).children.push(map.get(c.comment_id));
+      } else {
+        roots.push(map.get(c.comment_id));
+      }
+    });
+    return roots;
+  };
+
+  const commentTree = buildTree(comments);
+
+  const CommentNode = ({ node, level = 0 }: { node: any, level?: number }) => {
+    const author = userProfiles[node.user_id] || { username: "Unbekannt" };
+    const [replyOpen, setReplyOpen] = useState(false);
+    const [replyText, setReplyText] = useState("");
+    const [isReplying, setIsReplying] = useState(false);
+    const [collapsed, setCollapsed] = useState(false);
+
+    const handleReply = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!replyText.trim() || !currentUserUid) return;
+      setIsReplying(true);
+      try {
+        const added = await addActivityComment(activityId, currentUserUid, replyText.trim(), node.comment_id);
+        if (added) {
+          setComments(prev => [...prev, added]);
+          setReplyOpen(false);
+          setReplyText("");
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setIsReplying(false);
+      }
+    };
+
+    return (
+      <div className="flex gap-2 text-sm mt-3 relative group">
+        <div className="h-6 w-6 shrink-0 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-[10px] mt-1 z-10">
+          {author.avatar_url ? <img src={author.avatar_url} alt="" className="w-full h-full object-cover" /> : (author.username?.[0]?.toUpperCase() || "?")}
+        </div>
+        
+        {/* Thread line for children */}
+        {!collapsed && node.children.length > 0 && (
+          <div 
+            onClick={() => setCollapsed(true)}
+            className="absolute left-3 top-8 bottom-[-10px] w-0.5 bg-gray-700/50 hover:bg-blue-500/50 cursor-pointer transition z-0" 
+          />
+        )}
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-blue-400">{author.username}</span>
+            <span className="text-[10px] text-gray-500">{formatDistanceToNow(new Date(node.timestamp), { addSuffix: true, locale: de })}</span>
+            {collapsed && (
+              <button onClick={() => setCollapsed(false)} className="text-[10px] bg-gray-800 px-2 rounded-full hover:bg-gray-700">
+                +{node.children.length} Antworten
+              </button>
+            )}
+          </div>
+          
+          {!collapsed && (
+            <>
+              <p className="text-gray-300 mt-0.5 break-words bg-black/20 p-2 rounded-r-lg rounded-bl-lg border border-gray-800/50 inline-block">{node.text}</p>
+              
+              <div className="flex items-center gap-3 mt-1">
+                {currentUserUid && (
+                  <button onClick={() => setReplyOpen(!replyOpen)} className="text-[10px] text-gray-500 hover:text-gray-300 transition font-bold">
+                    Antworten
+                  </button>
+                )}
+                {node.user_id === currentUserUid && (
+                  <button onClick={() => handleDelete(node.comment_id)} className="text-[10px] text-red-500/50 hover:text-red-500 transition font-bold">
+                    Löschen
+                  </button>
+                )}
+              </div>
+
+              {replyOpen && (
+                <form onSubmit={handleReply} className="flex gap-2 mt-2 max-w-sm">
+                  <input 
+                    type="text" 
+                    value={replyText}
+                    onChange={e => setReplyText(e.target.value)}
+                    placeholder="Antworten..." 
+                    className="flex-1 bg-black/40 border border-gray-700 rounded text-xs px-2 py-1 focus:outline-none focus:border-blue-500 text-white"
+                    disabled={isReplying}
+                  />
+                  <button type="submit" disabled={!replyText.trim() || isReplying} className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-[10px] font-bold px-2 py-1 rounded transition">
+                    Senden
+                  </button>
+                </form>
+              )}
+
+              {node.children.length > 0 && (
+                <div className="ml-1 pl-3 border-l-2 border-transparent">
+                  {node.children.map((child: any) => (
+                    <CommentNode key={child.comment_id} node={child} level={level + 1} />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="mt-3">
       <button 
@@ -57,38 +170,16 @@ function CommentSection({ activityId, userProfiles, currentUserUid }: { activity
         className="flex items-center gap-1.5 text-xs font-bold text-gray-400 hover:text-white transition"
       >
         <MessageCircle size={14} /> 
-        {isOpen ? "Kommentare verbergen" : "Kommentieren"}
+        {isOpen ? "Kommentare verbergen" : `${comments.length} Kommentare`}
       </button>
 
       {isOpen && (
-        <div className="mt-3 flex flex-col gap-3 pt-3 border-t border-gray-800">
-          {comments.map(c => {
-            const author = userProfiles[c.user_id] || { username: "Unbekannt" };
-            return (
-              <div key={c.comment_id} className="flex gap-2 text-sm bg-black/20 p-2 rounded-lg relative group">
-                <div className="h-6 w-6 shrink-0 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-[10px]">
-                  {author.avatar_url ? <img src={author.avatar_url} alt="" className="w-full h-full object-cover" /> : (author.username?.[0]?.toUpperCase() || "?")}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-blue-400">{author.username}</span>
-                    <span className="text-[10px] text-gray-500">{formatDistanceToNow(new Date(c.timestamp), { addSuffix: true, locale: de })}</span>
-                  </div>
-                  <p className="text-gray-300 mt-0.5 break-words">{c.text}</p>
-                </div>
-                {c.user_id === currentUserUid && (
-                  <button 
-                    onClick={() => handleDelete(c.comment_id)}
-                    className="absolute top-2 right-2 text-red-500/50 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"
-                  >
-                    X
-                  </button>
-                )}
-              </div>
-            );
-          })}
+        <div className="mt-3 flex flex-col pt-3 border-t border-gray-800">
+          {commentTree.map(node => (
+            <CommentNode key={node.comment_id} node={node} />
+          ))}
 
-          {comments.length === 0 && <p className="text-xs text-gray-500 italic">Noch keine Kommentare. Sei der erste!</p>}
+          {comments.length === 0 && <p className="text-xs text-gray-500 italic mt-2">Noch keine Kommentare. Sei der erste!</p>}
 
           {currentUserUid ? (
             <form onSubmit={handleSubmit} className="flex gap-2 mt-1">
@@ -289,15 +380,7 @@ export default function FeedPage() {
             const avatarUrl = authorProfile?.avatar_url || `https://api.dicebear.com/9.x/notionists/svg?seed=${activity.user_id}`;
 
             return (
-              <div key={activity.activity_id} className="bg-[#1a1d24] border border-gray-800 rounded-xl p-4 shadow-md relative">
-                {activity.user_id === currentUserUid && (
-                  <button 
-                    onClick={() => handleDeletePost(activity.activity_id)}
-                    className="absolute top-3 right-3 text-gray-500 hover:text-red-500 transition"
-                  >
-                    X
-                  </button>
-                )}
+              <div key={activity.activity_id} className="bg-[#1a1d24] border border-gray-800 rounded-xl p-4 shadow-md">
                 <div className="flex gap-3">
                   <img 
                     src={avatarUrl} 
@@ -314,9 +397,20 @@ export default function FeedPage() {
                           </span>
                         )}
                       </div>
-                      <span className="text-[10px] text-gray-500">
-                        {formatDistanceToNow(new Date(activity.timestamp), { addSuffix: true, locale: de })}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-gray-500">
+                          {formatDistanceToNow(new Date(activity.timestamp), { addSuffix: true, locale: de })}
+                        </span>
+                        {activity.user_id === currentUserUid && (
+                          <button 
+                            onClick={() => handleDeletePost(activity.activity_id)}
+                            className="text-gray-600 hover:text-red-500 transition font-bold text-xs bg-black/20 rounded-full w-5 h-5 flex items-center justify-center"
+                            title="Beitrag löschen"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {/* Manual Post Text or System Details */}

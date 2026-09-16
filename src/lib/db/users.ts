@@ -68,6 +68,15 @@ export async function updateNotificationSettings(uid: string, settings: any) {
   }, { merge: true });
 }
 
+export async function updateUserProfileData(uid: string, username: string, avatar_url: string) {
+  if (!db) return;
+  const docRef = doc(db, "users", uid);
+  await setDoc(docRef, {
+    username,
+    avatar_url
+  }, { merge: true });
+}
+
 export async function updateWeeklyRanking(uid: string, type: "ANIME" | "MANGA", currentList: string[]) {
   if (!db) return;
   const docRef = doc(db, "users", uid);

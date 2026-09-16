@@ -118,4 +118,5 @@ export interface ActivityComment {
   user_id: string;
   text: string;
   timestamp: string;
+  parent_comment_id?: string;
 }

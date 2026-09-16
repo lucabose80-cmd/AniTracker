@@ -6,7 +6,7 @@ import { signOut, onAuthStateChanged, User } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getUserProfile, updateNotificationSettings, updateTop9List } from "@/lib/db/users";
+import { getUserProfile, updateNotificationSettings, updateTop9List, updateUserProfileData } from "@/lib/db/users";
 import { requestForToken } from "@/lib/fcm";
 import { getAllUserWorks } from "@/lib/db/works";
 import { fetchAniListBatch } from "@/lib/anilist";
@@ -42,6 +42,10 @@ export default function ProfilePage() {
   const [isPushEnabled, setIsPushEnabled] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [editUsername, setEditUsername] = useState("");
+  const [editAvatarUrl, setEditAvatarUrl] = useState("");
+
   const [notifySettings, setNotifySettings] = useState({
     releases: true,
     likes: true,
@@ -114,6 +118,22 @@ export default function ProfilePage() {
     }
   };
 
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setIsSaving(true);
+    try {
+      await updateUserProfileData(user.uid, editUsername, editAvatarUrl);
+      setDbUser((prev: any) => ({ ...prev, username: editUsername, avatar_url: editAvatarUrl }));
+      setIsEditingProfile(false);
+    } catch (e) {
+      console.error(e);
+      alert("Fehler beim Speichern");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   useEffect(() => {
     if (!dbUser || Object.keys(aniListDetails).length === 0) return;
 
@@ -147,12 +167,29 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      <div className="flex flex-col items-center gap-4 rounded-2xl border border-gray-800 bg-[#1a1d24] p-6 shadow-lg">
-        <div className="h-24 w-24 rounded-full bg-blue-600 flex items-center justify-center text-3xl font-bold text-white shadow-[0_0_15px_-3px_rgba(37,99,235,0.5)]">
-          {auth?.currentUser?.email?.[0].toUpperCase() || "U"}
+      <div className="flex flex-col items-center gap-4 rounded-2xl border border-gray-800 bg-[#1a1d24] p-6 shadow-lg relative">
+        {user && (
+          <button 
+            onClick={() => {
+              setEditUsername(dbUser?.username || "");
+              setEditAvatarUrl(dbUser?.avatar_url || "");
+              setIsEditingProfile(true);
+            }}
+            className="absolute top-4 right-4 text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1 rounded transition text-gray-300 font-bold"
+          >
+            Profil bearbeiten
+          </button>
+        )}
+        
+        <div className="h-24 w-24 rounded-full bg-gray-800 flex items-center justify-center text-3xl font-bold text-white shadow-[0_0_15px_-3px_rgba(37,99,235,0.5)] overflow-hidden">
+          {dbUser?.avatar_url ? (
+            <img src={dbUser.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+          ) : (
+            dbUser?.username?.[0]?.toUpperCase() || auth?.currentUser?.email?.[0]?.toUpperCase() || "U"
+          )}
         </div>
         <div className="text-center">
-          <h3 className="text-lg font-bold">{user?.displayName || "AniTracker User"}</h3>
+          <h3 className="text-lg font-bold">{dbUser?.username || user?.displayName || "AniTracker User"}</h3>
           <p className="text-sm text-gray-400">{user?.email || "Nicht angemeldet"}</p>
         </div>
 
@@ -288,6 +325,54 @@ export default function ProfilePage() {
           </div>
         </div>
       </section>
+
+      {/* Profil Edit Modal */}
+      {isEditingProfile && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <form onSubmit={handleSaveProfile} className="bg-[#1a1d24] border border-gray-800 rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <h3 className="text-lg font-bold mb-4">Profil bearbeiten</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-400 mb-1">Benutzername</label>
+                <input 
+                  type="text" 
+                  value={editUsername} 
+                  onChange={e => setEditUsername(e.target.value)}
+                  className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-400 mb-1">Profilbild (URL)</label>
+                <input 
+                  type="url" 
+                  value={editAvatarUrl} 
+                  onChange={e => setEditAvatarUrl(e.target.value)}
+                  placeholder="https://imgur.com/..." 
+                  className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                />
+                <p className="text-[10px] text-gray-500 mt-1">Füge einen Link zu einem Bild ein (Discord, Imgur, etc.)</p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button 
+                type="button" 
+                onClick={() => setIsEditingProfile(false)}
+                className="px-4 py-2 text-sm font-bold text-gray-400 hover:text-white"
+              >
+                Abbrechen
+              </button>
+              <button 
+                type="submit" 
+                disabled={isSaving}
+                className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-lg text-sm transition"
+              >
+                {isSaving ? "Speichert..." : "Speichern"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

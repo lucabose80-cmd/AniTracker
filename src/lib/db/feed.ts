@@ -89,7 +89,7 @@ export async function deleteActivity(activityId: string): Promise<void> {
   await deleteDoc(docRef);
 }
 
-export async function addActivityComment(activityId: string, userId: string, text: string): Promise<ActivityComment | null> {
+export async function addActivityComment(activityId: string, userId: string, text: string, parentCommentId?: string): Promise<ActivityComment | null> {
   if (!db) return null;
   const commentsRef = collection(db, "activity_comments");
   const newDocRef = doc(commentsRef);
@@ -103,6 +103,7 @@ export async function addActivityComment(activityId: string, userId: string, tex
     text,
     timestamp
   };
+  if (parentCommentId) comment.parent_comment_id = parentCommentId;
 
   await setDoc(newDocRef, comment);
   
