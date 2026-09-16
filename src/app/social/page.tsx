@@ -6,15 +6,123 @@ import { getGlobalFeed } from "@/lib/db/feed";
 import { ActivityFeed } from "@/types/database";
 import { fetchAniListBatch } from "@/lib/anilist";
 import { getUserProfile } from "@/lib/db/users";
+import { auth } from "@/lib/firebase";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
+import { deleteActivity, getActivityComments, addActivityComment, deleteActivityComment } from "@/lib/db/feed";
+import { ActivityComment } from "@/types/database";
+
+function CommentSection({ activityId, userProfiles, currentUserUid }: { activityId: string, userProfiles: Record<string, any>, currentUserUid?: string }) {
+  const [comments, setComments] = useState<ActivityComment[]>([]);
+  const [isOpen, setIsOpen] = useState(false);
+  const [newText, setNewText] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      getActivityComments(activityId).then(setComments).catch(console.error);
+    }
+  }, [isOpen, activityId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newText.trim() || !currentUserUid) return;
+    setIsSubmitting(true);
+    try {
+      const added = await addActivityComment(activityId, currentUserUid, newText.trim());
+      if (added) setComments(prev => [...prev, added]);
+      setNewText("");
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDelete = async (commentId: string) => {
+    if (!confirm("Kommentar wirklich löschen?")) return;
+    try {
+      await deleteActivityComment(commentId, activityId);
+      setComments(prev => prev.filter(c => c.comment_id !== commentId));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  return (
+    <div className="mt-3">
+      <button 
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-1.5 text-xs font-bold text-gray-400 hover:text-white transition"
+      >
+        <MessageSquare size={14} /> 
+        {isOpen ? "Kommentare verbergen" : "Kommentieren"}
+      </button>
+
+      {isOpen && (
+        <div className="mt-3 flex flex-col gap-3 pt-3 border-t border-gray-800">
+          {comments.map(c => {
+            const author = userProfiles[c.user_id] || { username: "Unbekannt" };
+            return (
+              <div key={c.comment_id} className="flex gap-2 text-sm bg-black/20 p-2 rounded-lg relative group">
+                <div className="h-6 w-6 shrink-0 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-[10px]">
+                  {author.avatar_url ? <img src={author.avatar_url} alt="" className="w-full h-full object-cover" /> : (author.username?.[0]?.toUpperCase() || "?")}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-blue-400">{author.username}</span>
+                    <span className="text-[10px] text-gray-500">{formatDistanceToNow(new Date(c.timestamp), { addSuffix: true, locale: de })}</span>
+                  </div>
+                  <p className="text-gray-300 mt-0.5 break-words">{c.text}</p>
+                </div>
+                {c.user_id === currentUserUid && (
+                  <button 
+                    onClick={() => handleDelete(c.comment_id)}
+                    className="absolute top-2 right-2 text-red-500/50 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"
+                  >
+                    X
+                  </button>
+                )}
+              </div>
+            );
+          })}
+
+          {comments.length === 0 && <p className="text-xs text-gray-500 italic">Noch keine Kommentare. Sei der erste!</p>}
+
+          {currentUserUid ? (
+            <form onSubmit={handleSubmit} className="flex gap-2 mt-1">
+              <input 
+                type="text" 
+                value={newText}
+                onChange={e => setNewText(e.target.value)}
+                placeholder="Schreibe einen Kommentar..." 
+                className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 text-white"
+                disabled={isSubmitting}
+              />
+              <button 
+                type="submit" 
+                disabled={!newText.trim() || isSubmitting}
+                className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition"
+              >
+                Senden
+              </button>
+            </form>
+          ) : (
+            <p className="text-xs text-gray-500">Du musst angemeldet sein, um zu kommentieren.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function SocialPage() {
   const [feed, setFeed] = useState<ActivityFeed[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [workDetails, setWorkDetails] = useState<Record<string, any>>({});
   const [userProfiles, setUserProfiles] = useState<Record<string, any>>({});
+  const currentUserUid = auth.currentUser?.uid;
 
   useEffect(() => {
     async function loadFeed() {
@@ -62,6 +170,17 @@ export default function SocialPage() {
     loadFeed();
   }, []);
 
+  const handleDeletePost = async (activityId: string) => {
+    if (!confirm("Diesen Beitrag wirklich löschen?")) return;
+    try {
+      await deleteActivity(activityId);
+      setFeed(prev => prev.filter(a => a.activity_id !== activityId));
+    } catch (e) {
+      console.error(e);
+      alert("Fehler beim Löschen");
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-lg mx-auto">
       <h2 className="flex items-center gap-2 text-xl font-bold">
@@ -86,6 +205,12 @@ export default function SocialPage() {
               return (
                 <div key={activity.activity_id} className="rounded-xl border-2 border-blue-900/50 bg-[#141a29] p-4 shadow-lg relative overflow-hidden group">
                   <div className="absolute top-0 right-0 p-2">
+                    <span className="text-[10px] bg-blue-600 text-white px-2 py-1 rounded-full font-bold shadow-md">
+                      OFFIZIELLER THREAD
+                    </span>
+                  </div>
+                  
+                  <div className="absolute top-2 right-2 flex gap-2">
                     <span className="text-[10px] bg-blue-600 text-white px-2 py-1 rounded-full font-bold shadow-md">
                       OFFIZIELLER THREAD
                     </span>
@@ -121,10 +246,21 @@ export default function SocialPage() {
             }
 
             if (activity.action_type === "WEEKLY_RANKING") {
-              const rankedIds = activity.details ? activity.details.split(",") : (activity.work_id ? [activity.work_id] : []);
+              const isOldPost = activity.details?.startsWith("Wochen-Ranking");
+              const rankedIds = (activity.details && !isOldPost) 
+                ? activity.details.split(",") 
+                : (activity.work_id ? [activity.work_id] : []);
               
               return (
-                <div key={activity.activity_id} className="rounded-xl border border-yellow-700/50 bg-[#1a1d24] p-4 shadow-lg">
+                <div key={activity.activity_id} className="rounded-xl border border-yellow-700/50 bg-[#1a1d24] p-4 shadow-lg relative">
+                  {activity.user_id === currentUserUid && (
+                    <button 
+                      onClick={() => handleDeletePost(activity.activity_id)}
+                      className="absolute top-3 right-3 text-gray-500 hover:text-red-500 transition"
+                    >
+                      X
+                    </button>
+                  )}
                   <div className="flex items-center gap-3 mb-3">
                     <div className="h-10 w-10 rounded-full bg-yellow-600/20 flex items-center justify-center font-bold overflow-hidden border border-yellow-600/50 text-yellow-500">
                       <Trophy size={20} />
@@ -157,14 +293,23 @@ export default function SocialPage() {
                       })}
                     </div>
                   </div>
+                  <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} />
                 </div>
               );
             }
             
             // Render other activity types (RATING, TOP9_UPDATE, MANUAL_POST)
             return (
-              <div key={activity.activity_id} className="rounded-xl border border-gray-800 bg-[#1a1d24] p-4">
-                <div className="flex items-center gap-3 mb-3">
+              <div key={activity.activity_id} className="rounded-xl border border-gray-800 bg-[#1a1d24] p-4 relative">
+                {activity.user_id === currentUserUid && (
+                  <button 
+                    onClick={() => handleDeletePost(activity.activity_id)}
+                    className="absolute top-3 right-3 text-gray-500 hover:text-red-500 transition"
+                  >
+                    X
+                  </button>
+                )}
+                <div className="flex items-center gap-3 mb-3 pr-6">
                   <div className="h-10 w-10 rounded-full bg-gray-700 flex items-center justify-center font-bold overflow-hidden border border-gray-600">
                     {user.avatar_url ? (
                       <img src={user.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
@@ -194,6 +339,8 @@ export default function SocialPage() {
                     </Link>
                   </div>
                 )}
+                
+                <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} />
               </div>
             );
           })

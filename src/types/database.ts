@@ -109,4 +109,13 @@ export interface ActivityFeed {
   text?: string;
   timestamp: string; // ISO string
   details?: string;
+  comments_count?: number; // Optional cache for number of comments
+}
+
+export interface ActivityComment {
+  comment_id: string;
+  activity_id: string;
+  user_id: string;
+  text: string;
+  timestamp: string;
 }
