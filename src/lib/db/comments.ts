@@ -33,6 +33,28 @@ export async function addComment(
   };
 
   await setDoc(newDocRef, newComment);
+
+  // Send Notification if this is a reply
+  if (parent_comment_id && author_uid) {
+    const parentDoc = await getDoc(doc(db, "comments", parent_comment_id));
+    if (parentDoc.exists()) {
+      const parentData = parentDoc.data() as Comment;
+      if (parentData.author_uid !== author_uid) {
+        fetch("/api/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targetUserId: parentData.author_uid,
+            title: "Neue Antwort",
+            body: `${author_name} hat auf deinen Kommentar geantwortet.`,
+            type: "replies",
+            link: `/work/${work_id}`
+          })
+        }).catch(console.error);
+      }
+    }
+  }
+
   return newComment;
 }
 
@@ -77,4 +99,19 @@ export async function voteComment(comment_id: string, uid: string, voteType: "UP
     upvotes,
     downvotes
   });
+
+  // Send Notification for UPVOTE
+  if (voteType === "UP" && uid !== comment.author_uid) {
+    fetch("/api/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        targetUserId: comment.author_uid,
+        title: "Neuer Like",
+        body: `Jemand hat deinen Kommentar gelikt!`,
+        type: "likes",
+        link: `/work/${comment.work_id}`
+      })
+    }).catch(console.error);
+  }
 }

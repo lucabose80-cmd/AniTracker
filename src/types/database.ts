@@ -10,6 +10,13 @@ export interface UserProfile {
   following_array: string[]; // array of uids
   top_9_list: string[]; // array of work_ids
   read_watch_history: string[]; // array of work_ids
+  notification_settings?: {
+    releases: boolean;
+    likes: boolean;
+    replies: boolean;
+    social: boolean;
+  };
+  fcm_tokens?: string[];
 }
 
 export interface Work {

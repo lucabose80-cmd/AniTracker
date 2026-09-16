@@ -27,6 +27,22 @@ export async function createActivity(
   };
 
   await setDoc(newDocRef, newActivity);
+
+  if (action_type === "MANUAL_POST") {
+    // Send broadcast notification to all users who have 'social' notifications enabled
+    fetch("/api/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        targetUserId: "ALL",
+        title: "Neuer Social Beitrag",
+        body: text || "Jemand hat etwas im Social Feed gepostet.",
+        type: "social",
+        link: "/feed"
+      })
+    }).catch(console.error);
+  }
+
   return newActivity;
 }
 

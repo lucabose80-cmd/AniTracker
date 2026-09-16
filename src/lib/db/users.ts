@@ -47,3 +47,11 @@ export async function updateTop9List(uid: string, list: string[]) {
     top_9_list: list
   }, { merge: true });
 }
+
+export async function updateNotificationSettings(uid: string, settings: any) {
+  if (!db) return;
+  const docRef = doc(db, "users", uid);
+  await setDoc(docRef, {
+    notification_settings: settings
+  }, { merge: true });
+}
