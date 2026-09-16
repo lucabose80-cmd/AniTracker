@@ -20,7 +20,8 @@ const GET_RECENT_RELEASES = `
 export async function GET(req: Request) {
   try {
     const authHeader = req.headers.get("authorization");
-    if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+    // Hardcoded secret for cron-job.org
+    if (authHeader !== `Bearer anitracker123`) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

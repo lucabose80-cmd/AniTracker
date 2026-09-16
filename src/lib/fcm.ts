@@ -2,8 +2,8 @@ import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import { app, db } from "./firebase";
 import { doc, updateDoc, arrayUnion } from "firebase/firestore";
 
-// You will need to replace this with your actual VAPID key from Firebase Console
-const VAPID_KEY = process.env.NEXT_PUBLIC_VAPID_KEY || "";
+// Hardcoded VAPID Key provided by user
+const VAPID_KEY = "BBNHu2VQ73Ua2oZA4uKgHG3jm8vF3yAouKzfdiStItZU6R0R4nL74TWDDYp5hPNf7e9u6wv5gApyc3JZ_zN5DRw";
 
 export const requestForToken = async (userId: string) => {
   if (typeof window !== "undefined" && "serviceWorker" in navigator) {
