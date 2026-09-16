@@ -47,23 +47,25 @@ export default function WorkDetailPage() {
       if (!id) return;
       setIsLoading(true);
       try {
-        // 1. Load AniList Data
-        const data = await fetchAniList(GET_WORK_DETAILS, { id: parseInt(id, 10) });
+        // Parallelize AniList and Firestore fetches
+        const user = auth?.currentUser;
+        
+        const [data, userWork] = await Promise.all([
+          fetchAniList(GET_WORK_DETAILS, { id: parseInt(id, 10) }),
+          user ? getUserWork(user.uid, id) : Promise.resolve(null)
+        ]);
+
+        // Process AniList Data
         setWork(data.Media);
         const isRomance = data.Media.genres?.includes("Romance") || false;
         setIsRomanceMainFocus(isRomance);
 
-        // 2. Load Firestore Data (if logged in)
-        const user = auth?.currentUser;
-        if (user) {
-          const userWork = await getUserWork(user.uid, id);
-          if (userWork) {
-            setInLibrary(true);
-            setEvaluation(userWork.evaluation);
-            setWatchMode(userWork.classification?.watchMode || "SUB");
-            // If they had an ending score > 0, check the box
-            if (userWork.evaluation.ending > 0) setHasEnding(true);
-          }
+        // Process Firestore Data
+        if (userWork) {
+          setInLibrary(true);
+          setEvaluation(userWork.evaluation);
+          setWatchMode(userWork.classification?.watchMode || "SUB");
+          if (userWork.evaluation.ending > 0) setHasEnding(true);
         }
       } catch (err) {
         console.error(err);
@@ -101,8 +103,9 @@ export default function WorkDetailPage() {
       });
       await addToHistory(user.uid, id);
       setInLibrary(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      alert("Fehler beim Hinzufügen: " + err.message);
     } finally {
       setIsSaving(false);
     }
@@ -209,7 +212,7 @@ export default function WorkDetailPage() {
               disabled={isSaving}
               className="w-full rounded-xl bg-blue-600 py-3.5 font-bold text-white shadow-lg transition hover:bg-blue-700 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              <LibraryIcon size={20} /> Zur Bibliothek hinzufügen
+              <LibraryIcon size={20} /> {isSaving ? "Füge hinzu..." : "Zur Bibliothek hinzufügen"}
             </button>
           ) : (
             <div className="w-full rounded-xl bg-green-900/40 border border-green-800/50 py-3.5 font-bold text-green-400 text-center flex items-center justify-center gap-2">

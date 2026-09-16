@@ -64,6 +64,7 @@ export const SEARCH_WORKS = `
           english
         }
         coverImage {
+          extraLarge
           large
         }
         format
@@ -86,6 +87,7 @@ export const GET_WORK_DETAILS = `
       }
       coverImage {
         extraLarge
+        large
       }
       bannerImage
       description
