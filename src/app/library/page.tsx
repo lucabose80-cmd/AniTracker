@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import { useRouter } from "next/navigation";
 import { Library as LibraryIcon, Search, LayoutGrid } from "lucide-react";
-import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from "@dnd-kit/core";
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent, useDraggable } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { auth } from "@/lib/firebase";
@@ -99,6 +99,23 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, onRemove
   );
 }
 
+function DraggableLibraryItem({ id, children }: { id: string, children: React.ReactNode }) {
+  const {attributes, listeners, setNodeRef, transform, isDragging} = useDraggable({
+    id: `library-${id}`,
+  });
+  const style = transform ? {
+    transform: CSS.Translate.toString(transform),
+    zIndex: isDragging ? 50 : 1,
+    opacity: isDragging ? 0.8 : 1,
+  } : undefined;
+
+  return (
+    <div ref={setNodeRef} style={style} {...listeners} {...attributes} className="cursor-grab active:cursor-grabbing">
+      {children}
+    </div>
+  );
+}
+
 export default function LibraryPage() {
   const { contentType } = useAppStore();
   const router = useRouter();
@@ -179,10 +196,39 @@ export default function LibraryPage() {
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
-    if (over && active.id !== over.id) {
-      const oldIndex = items.indexOf(active.id as string);
-      const newIndex = items.indexOf(over.id as string);
-      const newItems = arrayMove(items, oldIndex, newIndex);
+    if (!over) return;
+    
+    let newItems = [...items];
+    const activeIdStr = String(active.id);
+    const overIdStr = String(over.id);
+
+    // Drag from library into Ranking
+    if (activeIdStr.startsWith("library-")) {
+      const workId = activeIdStr.replace("library-", "");
+      if (newItems.includes(workId)) return; // Already in ranking
+      
+      const overIndex = newItems.indexOf(overIdStr);
+      if (overIndex !== -1) {
+        newItems[overIndex] = workId;
+        setItems(newItems);
+        
+        if (auth.currentUser) {
+          try {
+            const { updateWeeklyRanking } = await import("@/lib/db/users");
+            await updateWeeklyRanking(auth.currentUser.uid, contentType as "ANIME" | "MANGA", newItems);
+          } catch(e) {
+            console.error(e);
+          }
+        }
+      }
+      return;
+    }
+
+    // Sort within Ranking
+    if (active.id !== over.id) {
+      const oldIndex = newItems.indexOf(activeIdStr);
+      const newIndex = newItems.indexOf(overIdStr);
+      newItems = arrayMove(newItems, oldIndex, newIndex);
       setItems(newItems);
       
       if (auth.currentUser) {
@@ -271,24 +317,24 @@ export default function LibraryPage() {
         <button type="submit" className="hidden" />
       </form>
 
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="text-lg font-bold flex items-center gap-2">
-              <LayoutGrid size={18} className="text-blue-500" />
-              Wochen-Ranking ({contentType})
-            </h3>
-            <p className="text-xs text-gray-400">Sortiere deine aktuellen Favoriten dieser Woche.</p>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="text-lg font-bold flex items-center gap-2">
+                <LayoutGrid size={18} className="text-blue-500" />
+                Wochen-Ranking ({contentType})
+              </h3>
+              <p className="text-xs text-gray-400">Sortiere deine aktuellen Favoriten dieser Woche.</p>
+            </div>
+            <button 
+              onClick={handleSaveSnapshot}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-lg"
+            >
+              <Share size={14} /> Speichern & Teilen
+            </button>
           </div>
-          <button 
-            onClick={handleSaveSnapshot}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-lg"
-          >
-            <Share size={14} /> Speichern & Teilen
-          </button>
-        </div>
-        
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          
           <SortableContext items={items} strategy={horizontalListSortingStrategy}>
             <div className="flex gap-3 overflow-x-auto pb-4 snap-x snap-mandatory [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
               {items.map((id, index) => {
@@ -303,64 +349,66 @@ export default function LibraryPage() {
               })}
             </div>
           </SortableContext>
-        </DndContext>
-      </section>
-      
-      <section className="mt-4">
-        <h3 className="mb-3 text-lg font-bold">Alle Werke</h3>
+        </section>
         
-        {isLoading ? (
-          <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-8 text-center text-gray-500 animate-pulse">
-            Lade Bibliothek...
-          </div>
-        ) : allWorks.length === 0 ? (
-          <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-8 text-center text-gray-500">
-            Noch keine Werke hinzugefügt. Suche oben, um anzufangen!
-          </div>
-        ) : (
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-            {filteredWorks.map(work => {
-              const details = aniListDetails[work.work_id];
-              let behindCount = 0;
-              if (details) {
-                const currentEp = work.current_episode || 0;
-                let maxAiredEp = 0;
-                if (work.manual_max_episode !== undefined && work.manual_max_episode !== null) {
-                  maxAiredEp = work.manual_max_episode;
-                } else if (details.type === "MANGA") {
-                  maxAiredEp = details.chapters || 0;
-                } else {
-                  if (details.status === "RELEASING" && details.nextAiringEpisode) {
-                    maxAiredEp = details.nextAiringEpisode.episode - 1;
-                  } else if (details.status === "FINISHED") {
-                    maxAiredEp = details.episodes || 0;
+        <section className="mt-4">
+          <h3 className="mb-3 text-lg font-bold">Alle Werke</h3>
+          
+          {isLoading ? (
+            <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-8 text-center text-gray-500 animate-pulse">
+              Lade Bibliothek...
+            </div>
+          ) : allWorks.length === 0 ? (
+            <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-8 text-center text-gray-500">
+              Noch keine Werke hinzugefügt. Suche oben, um anzufangen!
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+              {filteredWorks.map(work => {
+                const details = aniListDetails[work.work_id];
+                let behindCount = 0;
+                if (details) {
+                  const currentEp = work.current_episode || 0;
+                  let maxAiredEp = 0;
+                  if (work.manual_max_episode !== undefined && work.manual_max_episode !== null) {
+                    maxAiredEp = work.manual_max_episode;
+                  } else if (details.type === "MANGA") {
+                    maxAiredEp = details.chapters || 0;
+                  } else {
+                    if (details.status === "RELEASING" && details.nextAiringEpisode) {
+                      maxAiredEp = details.nextAiringEpisode.episode - 1;
+                    } else if (details.status === "FINISHED") {
+                      maxAiredEp = details.episodes || 0;
+                    }
                   }
+                  behindCount = Math.max(0, maxAiredEp - currentEp);
                 }
-                behindCount = Math.max(0, maxAiredEp - currentEp);
-              }
 
-              return (
-                <Link href={`/work/${work.work_id}`} key={work.work_id} className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500 hover:shadow-lg">
-                  {details ? (
-                    <img src={details.coverImage?.extraLarge || details.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
-                  ) : (
-                    <div className="flex h-full items-center justify-center p-2 text-xs text-gray-500 text-center">Lade...</div>
-                  )}
-                  {behindCount > 0 && (
-                    <div className="absolute top-1 right-1 flex items-center justify-center rounded-full bg-red-600 text-[10px] px-1.5 py-0.5 font-bold text-white shadow-md z-10 pointer-events-none">
-                      {behindCount}
-                    </div>
-                  )}
-                  {/* Status Badge */}
-                  <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/90 to-transparent p-2 text-center text-[10px] font-bold text-white opacity-0 transition group-hover:opacity-100">
-                    {work.status}
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        )}
-      </section>
+                return (
+                  <DraggableLibraryItem key={work.work_id} id={work.work_id}>
+                    <Link href={`/work/${work.work_id}`} className="block group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500 hover:shadow-lg">
+                      {details ? (
+                        <img src={details.coverImage?.extraLarge || details.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition duration-300 group-hover:scale-105 pointer-events-none" />
+                      ) : (
+                        <div className="flex h-full items-center justify-center p-2 text-xs text-gray-500 text-center">Lade...</div>
+                      )}
+                      {behindCount > 0 && (
+                        <div className="absolute top-1 right-1 flex items-center justify-center rounded-full bg-red-600 text-[10px] px-1.5 py-0.5 font-bold text-white shadow-md z-10 pointer-events-none">
+                          {behindCount}
+                        </div>
+                      )}
+                      {/* Status Badge */}
+                      <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/90 to-transparent p-2 text-center text-[10px] font-bold text-white opacity-0 transition group-hover:opacity-100">
+                        {work.status}
+                      </div>
+                    </Link>
+                  </DraggableLibraryItem>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      </DndContext>
     </div>
   );
 }
