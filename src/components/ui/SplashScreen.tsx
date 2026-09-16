@@ -77,7 +77,10 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
             ) : (
               <div className="flex flex-col items-center gap-4">
                 <button
-                  onClick={() => router.push("/login")}
+                  onClick={() => {
+                    handleStart();
+                    setTimeout(() => router.push("/login"), 300);
+                  }}
                   className="group relative flex items-center gap-2 overflow-hidden rounded-full bg-blue-600 px-12 py-4 text-lg font-bold text-white shadow-[0_0_40px_-10px_rgba(37,99,235,0.5)] transition-all hover:scale-105 hover:shadow-[0_0_60px_-15px_rgba(37,99,235,0.7)] active:scale-95"
                 >
                   <LogIn size={20} className="relative z-10" />
