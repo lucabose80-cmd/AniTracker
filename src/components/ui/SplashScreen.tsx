@@ -84,14 +84,8 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
                   className="group relative flex items-center gap-2 overflow-hidden rounded-full bg-blue-600 px-12 py-4 text-lg font-bold text-white shadow-[0_0_40px_-10px_rgba(37,99,235,0.5)] transition-all hover:scale-105 hover:shadow-[0_0_60px_-15px_rgba(37,99,235,0.7)] active:scale-95"
                 >
                   <LogIn size={20} className="relative z-10" />
-                  <span className="relative z-10">Einloggen</span>
+                  <span className="relative z-10">Einloggen / Registrieren</span>
                   <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-500 group-hover:translate-x-full" />
-                </button>
-                <button
-                  onClick={handleStart}
-                  className="text-sm font-semibold text-gray-500 hover:text-white transition"
-                >
-                  Ohne Account fortfahren (Gast)
                 </button>
               </div>
             )}
