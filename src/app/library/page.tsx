@@ -11,6 +11,7 @@ import { auth } from "@/lib/firebase";
 import { getUserProfile, updateTop9List } from "@/lib/db/users";
 import { fetchAniListBatch } from "@/lib/anilist";
 import { UserWork } from "@/types/database";
+import { getAllUserWorks } from "@/lib/db/works";
 import { getCalendarOverrides } from "@/lib/db/calendar";
 import Link from "next/link";
 import { ArrowUp, ArrowDown, Minus, Save, Share } from "lucide-react";
@@ -144,7 +145,7 @@ export default function LibraryPage() {
           const works = await getAllUserWorks(user.uid);
           setAllWorks(works);
 
-          const allIdsToFetch = works.map(w => parseInt(w.work_id, 10));
+          const allIdsToFetch = works.map((w: UserWork) => parseInt(w.work_id, 10));
           if (allIdsToFetch.length > 0) {
             const [mediaList, overrides] = await Promise.all([
               fetchAniListBatch(allIdsToFetch),
@@ -283,8 +284,9 @@ export default function LibraryPage() {
       const { saveWeeklyRankingSnapshot } = await import("@/lib/db/users");
       await saveWeeklyRankingSnapshot(auth.currentUser.uid, contentType as "ANIME" | "MANGA", items);
       
+      const validItems = items.filter(id => !id.startsWith("empty"));
       // Post to Social Feed
-      await createActivity(auth.currentUser.uid, "WEEKLY_RANKING", items[0], undefined, `Wochen-Ranking für ${contentType} veröffentlicht!`);
+      await createActivity(auth.currentUser.uid, "WEEKLY_RANKING", validItems[0], `Wochen-Ranking für ${contentType} veröffentlicht!`, validItems.join(","));
       
       // Update local profile state to reflect arrows resetting
       setUserProfile((prev: any) => ({
@@ -422,7 +424,14 @@ export default function LibraryPage() {
 
                 return (
                   <DraggableLibraryItem key={work.work_id} id={work.work_id}>
-                    <Link href={`/work/${work.work_id}`} className="block group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500 hover:shadow-lg">
+                    <div 
+                      className="block group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500 hover:shadow-lg"
+                      onClick={(e) => {
+                        // Very simple drag detection: If the user dragged, dnd-kit will preventDefault on the wrapper.
+                        // However, we just navigate manually.
+                        router.push(`/work/${work.work_id}`);
+                      }}
+                    >
                       {details ? (
                         <img src={details.coverImage?.extraLarge || details.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition duration-300 group-hover:scale-105 pointer-events-none" />
                       ) : (
@@ -434,10 +443,10 @@ export default function LibraryPage() {
                         </div>
                       )}
                       {/* Status Badge */}
-                      <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/90 to-transparent p-2 text-center text-[10px] font-bold text-white opacity-0 transition group-hover:opacity-100">
+                      <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/90 to-transparent p-2 text-center text-[10px] font-bold text-white opacity-0 transition group-hover:opacity-100 pointer-events-none">
                         {work.status}
                       </div>
-                    </Link>
+                    </div>
                   </DraggableLibraryItem>
                 );
               })}

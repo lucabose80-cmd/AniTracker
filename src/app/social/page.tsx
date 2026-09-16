@@ -24,12 +24,19 @@ export default function SocialPage() {
         setFeed(activities);
         
         // Extract unique work IDs and user IDs
-        const workIds = [...new Set(activities.map(a => a.work_id).filter(Boolean))] as string[];
+        const workIds = new Set<string>();
+        activities.forEach(a => {
+           if (a.work_id) workIds.add(a.work_id);
+           if (a.action_type === "WEEKLY_RANKING" && a.details) {
+              a.details.split(",").forEach(id => workIds.add(id));
+           }
+        });
+        const workIdsArr = Array.from(workIds);
         const userIds = [...new Set(activities.map(a => a.user_id).filter(Boolean))] as string[];
         
         // Fetch AniList details
-        if (workIds.length > 0) {
-          const idsToFetch = workIds.map(id => parseInt(id, 10));
+        if (workIdsArr.length > 0) {
+          const idsToFetch = workIdsArr.map(id => parseInt(id, 10));
           const mediaList = await fetchAniListBatch(idsToFetch);
           const map: Record<string, any> = {};
           mediaList.forEach((m: any) => {
@@ -114,6 +121,8 @@ export default function SocialPage() {
             }
 
             if (activity.action_type === "WEEKLY_RANKING") {
+              const rankedIds = activity.details ? activity.details.split(",") : (activity.work_id ? [activity.work_id] : []);
+              
               return (
                 <div key={activity.activity_id} className="rounded-xl border border-yellow-700/50 bg-[#1a1d24] p-4 shadow-lg">
                   <div className="flex items-center gap-3 mb-3">
@@ -129,21 +138,23 @@ export default function SocialPage() {
                   </div>
                   
                   <div className="bg-black/40 rounded-lg p-3 border border-gray-800">
-                    <p className="text-sm font-bold text-yellow-500 mb-2">🏆 Platz 1 diese Woche:</p>
-                    <div className="flex gap-3">
-                      {work && (
-                        <Link href={`/work/${work.id}`} className="shrink-0">
-                          <img 
-                            src={work.coverImage?.large} 
-                            alt="Cover" 
-                            className="w-12 h-16 object-cover rounded shadow border border-gray-700"
-                          />
-                        </Link>
-                      )}
-                      <div>
-                        <h4 className="font-bold text-gray-100">{work?.title?.english || work?.title?.romaji || "Unbekanntes Werk"}</h4>
-                        <p className="text-xs text-gray-400 mt-1">{activity.details}</p>
-                      </div>
+                    <p className="text-sm font-bold text-yellow-500 mb-2">🏆 Die Top Plätze diese Woche:</p>
+                    <div className="flex flex-col gap-3">
+                      {rankedIds.map((id, idx) => {
+                        const rankedWork = workDetails[id];
+                        if (!rankedWork) return null;
+                        return (
+                          <div key={id} className="flex gap-3 items-center">
+                             <div className="text-yellow-500 font-bold w-5 shrink-0 text-right">{idx + 1}.</div>
+                             <Link href={`/work/${id}`} className="shrink-0">
+                               <img src={rankedWork.coverImage?.large} alt="Cover" className="w-8 h-12 object-cover rounded shadow border border-gray-700 hover:border-blue-500 transition" />
+                             </Link>
+                             <div className="flex-1 min-w-0">
+                               <h4 className="font-bold text-gray-100 text-sm line-clamp-1">{rankedWork.title?.english || rankedWork.title?.romaji}</h4>
+                             </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 </div>
