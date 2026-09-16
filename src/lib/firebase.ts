@@ -1,18 +1,22 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+// import { getAnalytics } from "firebase/analytics";
 
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  apiKey: "AIzaSyD9J0wKxGWQGCx0jrjAiKa5rSM36iKu3gs",
+  authDomain: "anitracker-e6364.firebaseapp.com",
+  projectId: "anitracker-e6364",
+  storageBucket: "anitracker-e6364.firebasestorage.app",
+  messagingSenderId: "848563417624",
+  appId: "1:848563417624:web:d66d901b2348af7b9c496d",
+  measurementId: "G-FLJNZ6WY2G"
 };
 
-// Initialize Firebase only if config is provided and not already initialized
-const app = getApps().length > 0 ? getApp() : (firebaseConfig.apiKey ? initializeApp(firebaseConfig) : null);
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-export const auth = app ? getAuth(app) : null;
-export const db = app ? getFirestore(app) : null;
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+
+// Analytics can only be initialized on the client side
+// export const analytics = typeof window !== "undefined" ? getAnalytics(app) : null;

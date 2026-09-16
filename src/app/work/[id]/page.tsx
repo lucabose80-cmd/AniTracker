@@ -5,8 +5,11 @@ import { useParams } from "next/navigation";
 import { fetchAniList, GET_WORK_DETAILS } from "@/lib/anilist";
 import { calculateOverallScore } from "@/lib/scoring";
 import { UserWork, EmotionalImpact, WatchMode } from "@/types/database";
-import { Star, ChevronLeft } from "lucide-react";
+import { Star, ChevronLeft, Save } from "lucide-react";
 import Link from "next/link";
+import { auth } from "@/lib/firebase";
+import { saveUserWork, getUserWork } from "@/lib/db/works";
+import { addToHistory } from "@/lib/db/users";
 
 export default function WorkDetailPage() {
   const params = useParams();
@@ -34,24 +37,38 @@ export default function WorkDetailPage() {
   const [hasEnding, setHasEnding] = useState(false);
   const [isRomanceMainFocus, setIsRomanceMainFocus] = useState(false);
   const [watchMode, setWatchMode] = useState<WatchMode>("SUB");
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
 
   useEffect(() => {
-    async function loadWork() {
+    async function loadData() {
       if (!id) return;
       setIsLoading(true);
       try {
+        // 1. Load AniList Data
         const data = await fetchAniList(GET_WORK_DETAILS, { id: parseInt(id, 10) });
         setWork(data.Media);
-        // Auto-detect romance focus from tags if possible
         const isRomance = data.Media.genres?.includes("Romance") || false;
         setIsRomanceMainFocus(isRomance);
+
+        // 2. Load Firestore Data (if logged in)
+        const user = auth?.currentUser;
+        if (user) {
+          const userWork = await getUserWork(user.uid, id);
+          if (userWork) {
+            setEvaluation(userWork.evaluation);
+            setWatchMode(userWork.classification?.watchMode || "SUB");
+            // If they had an ending score > 0, check the box
+            if (userWork.evaluation.ending > 0) setHasEnding(true);
+          }
+        }
       } catch (err) {
         console.error(err);
       } finally {
         setIsLoading(false);
       }
     }
-    loadWork();
+    loadData();
   }, [id]);
 
   // Dynamically calculate score whenever inputs change
@@ -65,6 +82,48 @@ export default function WorkDetailPage() {
 
   const handleSlider = (field: keyof UserWork["evaluation"], value: string) => {
     setEvaluation(prev => ({ ...prev, [field]: parseFloat(value) }));
+  };
+
+  const handleSave = async () => {
+    const user = auth?.currentUser;
+    if (!user) {
+      setSaveMessage("Bitte erst einloggen!");
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveMessage("");
+
+    // Update overall score in state before saving
+    const finalEval = { ...evaluation, overallScore: currentScore };
+    setEvaluation(finalEval);
+
+    try {
+      await saveUserWork(user.uid, id, {
+        evaluation: finalEval,
+        classification: {
+          watchMode,
+          romanceLevel: 0,
+          confessionTiming: "",
+          intimacyLevel: 0,
+          relationshipDynamics: "",
+          wholesomeLewdScale: 0,
+          comedySeriousScale: 0,
+          actionDialogScale: 0,
+          pacingScale: 0,
+        },
+        status: "COMPLETED" // Simplification for now
+      });
+      
+      await addToHistory(user.uid, id);
+      setSaveMessage("Gespeichert!");
+      setTimeout(() => setSaveMessage(""), 3000);
+    } catch (err) {
+      console.error(err);
+      setSaveMessage("Fehler beim Speichern");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   if (isLoading) {
@@ -233,9 +292,19 @@ export default function WorkDetailPage() {
               </div>
             </div>
 
-            <button className="w-full mt-6 rounded-lg bg-blue-600 py-3 font-bold text-white shadow-lg transition hover:bg-blue-700 active:scale-95">
-              Bewertung Speichern
+            <button 
+              onClick={handleSave}
+              disabled={isSaving}
+              className="w-full mt-6 flex justify-center items-center gap-2 rounded-lg bg-blue-600 py-3 font-bold text-white shadow-lg transition hover:bg-blue-700 active:scale-95 disabled:opacity-50"
+            >
+              <Save size={20} />
+              {isSaving ? "Speichert..." : "Bewertung Speichern"}
             </button>
+            {saveMessage && (
+              <p className={`text-center text-sm font-semibold mt-2 ${saveMessage.includes("Fehler") || saveMessage.includes("einloggen") ? "text-red-400" : "text-green-400"}`}>
+                {saveMessage}
+              </p>
+            )}
           </div>
         </div>
       </div>

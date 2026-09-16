@@ -10,6 +10,7 @@ import {
 } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { LogIn, UserPlus } from "lucide-react";
+import { createUserProfile } from "@/lib/db/users";
 
 export default function LoginPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -27,11 +28,16 @@ export default function LoginPage() {
     }
 
     try {
+      let userCredential;
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        userCredential = await signInWithEmailAndPassword(auth, email, password);
       } else {
-        await createUserWithEmailAndPassword(auth, email, password);
+        userCredential = await createUserWithEmailAndPassword(auth, email, password);
       }
+      
+      const user = userCredential.user;
+      await createUserProfile(user.uid, user.email?.split("@")[0] || "User", user.email || "");
+      
       router.push("/");
     } catch (err: any) {
       setError(err.message || "Ein Fehler ist aufgetreten.");
@@ -47,7 +53,10 @@ export default function LoginPage() {
 
     const provider = new GoogleAuthProvider();
     try {
-      await signInWithPopup(auth, provider);
+      const userCredential = await signInWithPopup(auth, provider);
+      const user = userCredential.user;
+      await createUserProfile(user.uid, user.displayName || user.email?.split("@")[0] || "User", user.email || "");
+      
       router.push("/");
     } catch (err: any) {
       setError(err.message || "Google Login fehlgeschlagen.");
