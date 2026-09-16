@@ -80,7 +80,7 @@ export async function GET(req: Request) {
               tokens,
             };
 
-            await adminMessaging.sendMulticast(payload);
+            await adminMessaging.sendEachForMulticast(payload);
             notificationsSent++;
           }
         }

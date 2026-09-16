@@ -27,7 +27,7 @@ export async function POST(req: Request) {
         data: { link: link || "/", type },
         tokens,
       };
-      const response = await adminMessaging.sendMulticast(payload);
+      const response = await adminMessaging.sendEachForMulticast(payload);
       return NextResponse.json({ success: true, successCount: response.successCount });
     }
 
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
       tokens,
     };
 
-    const response = await adminMessaging.sendMulticast(payload);
+    const response = await adminMessaging.sendEachForMulticast(payload);
     return NextResponse.json({ success: true, successCount: response.successCount });
   } catch (error: any) {
     console.error("Error sending notification:", error);
