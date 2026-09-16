@@ -1,10 +1,23 @@
 "use client";
 
 import { useAppStore } from "@/lib/store";
-import { Moon, Sun } from "lucide-react";
+import { Moon, Sun, User as UserIcon, LogIn } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { auth } from "@/lib/firebase";
+import { onAuthStateChanged, User } from "firebase/auth";
 
 export function Header() {
   const { contentType, toggleContentType } = useAppStore();
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    if (!auth) return;
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-gray-800 bg-[#0f1115]/80 backdrop-blur-md">
@@ -37,6 +50,17 @@ export function Header() {
               Manga
             </div>
           </button>
+          
+          {user ? (
+            <Link href="/profile" className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white font-bold shadow-md hover:bg-blue-700 transition">
+              {user.email?.[0].toUpperCase() || "U"}
+            </Link>
+          ) : (
+            <Link href="/login" className="flex items-center gap-1 text-sm font-semibold text-blue-500 hover:text-blue-400 transition">
+              <LogIn size={18} />
+              <span className="hidden sm:inline">Login</span>
+            </Link>
+          )}
         </div>
       </div>
     </header>

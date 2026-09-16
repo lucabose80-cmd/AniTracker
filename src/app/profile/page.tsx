@@ -1,12 +1,24 @@
 "use client";
 
-import { User, Settings, LogOut } from "lucide-react";
+import { User as UserIcon, Settings, LogOut, LogIn } from "lucide-react";
 import { auth } from "@/lib/firebase";
-import { signOut } from "firebase/auth";
+import { signOut, onAuthStateChanged, User } from "firebase/auth";
 import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 
 export default function ProfilePage() {
   const router = useRouter();
+
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    if (!auth) return;
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handleLogout = async () => {
     if (auth) {
@@ -19,7 +31,7 @@ export default function ProfilePage() {
     <div className="flex flex-col gap-6 px-4 pt-6">
       <div className="flex items-center justify-between">
         <h2 className="flex items-center gap-2 text-xl font-bold">
-          <User className="text-blue-500" /> 
+          <UserIcon className="text-blue-500" /> 
           Profil
         </h2>
         <button className="text-gray-400 hover:text-white transition">
@@ -32,16 +44,25 @@ export default function ProfilePage() {
           {auth?.currentUser?.email?.[0].toUpperCase() || "U"}
         </div>
         <div className="text-center">
-          <h3 className="text-lg font-bold">{auth?.currentUser?.displayName || "AniTracker User"}</h3>
-          <p className="text-sm text-gray-400">{auth?.currentUser?.email || "Nicht angemeldet"}</p>
+          <h3 className="text-lg font-bold">{user?.displayName || "AniTracker User"}</h3>
+          <p className="text-sm text-gray-400">{user?.email || "Nicht angemeldet"}</p>
         </div>
 
-        <button 
-          onClick={handleLogout}
-          className="mt-4 flex items-center gap-2 rounded-lg border border-red-900/50 bg-red-900/20 px-4 py-2 text-sm font-semibold text-red-400 transition hover:bg-red-900/40"
-        >
-          <LogOut size={16} /> Abmelden
-        </button>
+        {user ? (
+          <button 
+            onClick={handleLogout}
+            className="mt-4 flex items-center gap-2 rounded-lg border border-red-900/50 bg-red-900/20 px-4 py-2 text-sm font-semibold text-red-400 transition hover:bg-red-900/40"
+          >
+            <LogOut size={16} /> Abmelden
+          </button>
+        ) : (
+          <Link 
+            href="/login"
+            className="mt-4 flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-2 text-sm font-bold text-white transition hover:bg-blue-700 shadow-lg"
+          >
+            <LogIn size={16} /> Jetzt Einloggen
+          </Link>
+        )}
       </div>
       
       <section>
