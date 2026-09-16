@@ -75,11 +75,6 @@ export function calculateOverallScore({
   
   let finalScore = baseScore + bonus;
   
-  // Strict Cap at 10.0
-  if (finalScore > 10.0) {
-    finalScore = 10.0;
-  }
-
   // Round to 2 decimal places for cleaner display
   return Math.round(finalScore * 100) / 100;
 }

@@ -10,49 +10,24 @@ import { getUserProfile, updateNotificationSettings, updateTop9List } from "@/li
 import { requestForToken } from "@/lib/fcm";
 import { getAllUserWorks } from "@/lib/db/works";
 import { fetchAniListBatch } from "@/lib/anilist";
-import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from "@dnd-kit/core";
-import { arrayMove, SortableContext, sortableKeyboardCoordinates, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import { useAppStore } from "@/lib/store";
 
-function SortableFavoriteItem({ id, index, workDetails, onRemove }: { id: string, index: number, workDetails?: any, onRemove: (id: string) => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    zIndex: isDragging ? 50 : 1,
-    opacity: isDragging ? 0.8 : 1,
-  };
-
+function FavoriteItem({ id, index, workDetails }: { id: string, index: number, workDetails?: any }) {
   return (
-    <div 
-      ref={setNodeRef} 
-      style={style} 
-      {...attributes} 
-      {...listeners}
-      className={`w-24 shrink-0 aspect-[3/4] relative cursor-grab active:cursor-grabbing rounded-xl bg-[#1a1d24] border ${isDragging ? 'border-blue-500 shadow-2xl scale-105' : 'border-gray-800'} flex items-center justify-center font-bold text-gray-500 overflow-hidden`}
-    >
-      <span className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white backdrop-blur-md z-10 pointer-events-none">
+    <div className={`w-24 shrink-0 aspect-[3/4] relative rounded-xl bg-[#1a1d24] border border-gray-800 flex items-center justify-center font-bold text-gray-500 overflow-hidden shadow-lg`}>
+      <span className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 font-bold text-white shadow-md z-10 border border-white/20">
         {index + 1}
       </span>
       
-      {id.startsWith("empty") ? (
-        <span className="text-gray-700 text-3xl font-light pointer-events-none">+</span>
-      ) : workDetails ? (
-        <Link href={`/work/${id}`} className="absolute inset-0 block h-full w-full">
-          <img src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" className="h-full w-full object-cover pointer-events-none" />
+      {workDetails ? (
+        <Link href={`/work/${id}`} className="absolute inset-0 block h-full w-full group">
+          <img src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+          <div className="absolute bottom-0 w-full bg-black/80 backdrop-blur-md text-[10px] text-center text-blue-400 py-1 font-bold">
+            ★ {workDetails.userScore?.toFixed(1) || "?"}
+          </div>
         </Link>
       ) : (
-        <span className="text-xs text-center p-2 text-white line-clamp-3 pointer-events-none">Lade...</span>
-      )}
-      {!id.startsWith("empty") && (
-        <button 
-          onPointerDown={(e) => { e.stopPropagation(); onRemove(id); }}
-          className="absolute top-1 right-1 bg-red-600/80 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] hover:bg-red-500 z-20 shadow-md"
-        >
-          X
-        </button>
+        <span className="text-xs text-center p-2 text-white line-clamp-3">Lade...</span>
       )}
     </div>
   );
@@ -76,12 +51,7 @@ export default function ProfilePage() {
   
   const [allWorks, setAllWorks] = useState<any[]>([]);
   const [aniListDetails, setAniListDetails] = useState<Record<string, any>>({});
-  const [favItems, setFavItems] = useState<string[]>(Array(9).fill("").map((_, i) => `empty-${i}`));
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
+  const [favItems, setFavItems] = useState<any[]>([]);
 
   useEffect(() => {
     if (!auth) return;
@@ -147,60 +117,21 @@ export default function ProfilePage() {
   useEffect(() => {
     if (!dbUser || Object.keys(aniListDetails).length === 0) return;
 
-    let currentFavs = contentType === "ANIME" ? [...(dbUser.top_9_anime || dbUser.top_9_list || [])] : [...(dbUser.top_9_manga || [])];
-    const worksOfType = allWorks.filter(w => aniListDetails[w.work_id]?.type === contentType);
-    const favWorks = currentFavs.filter(id => !id.startsWith("empty"));
-    const otherWorks = worksOfType.filter(w => !favWorks.includes(w.work_id)).sort((a, b) => (b.evaluation?.overallScore || 0) - (a.evaluation?.overallScore || 0));
-
-    while(currentFavs.length < 9) {
-      currentFavs.push(`empty-${currentFavs.length}`);
-    }
-
-    for (let i = 0; i < 9; i++) {
-      if (currentFavs[i].startsWith("empty") && otherWorks.length > 0) {
-        const nextWork = otherWorks.shift();
-        if (nextWork) currentFavs[i] = nextWork.work_id;
-      }
-    }
-
-    setFavItems(currentFavs.slice(0, 9));
-  }, [contentType, dbUser, aniListDetails, allWorks]);
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (over && active.id !== over.id) {
-      setFavItems((prev) => {
-        const oldIndex = prev.indexOf(active.id as string);
-        const newIndex = prev.indexOf(over.id as string);
-        const newItems = arrayMove(prev, oldIndex, newIndex);
-        if (user) {
-          updateTop9List(user.uid, newItems, contentType).catch(console.error);
+    // Filter valid works, sort by score descending, take top 10
+    const topWorks = allWorks
+      .filter(w => aniListDetails[w.work_id]?.type === contentType && w.status !== "PLANNING" && (w.evaluation?.overallScore || 0) > 0)
+      .sort((a, b) => (b.evaluation?.overallScore || 0) - (a.evaluation?.overallScore || 0))
+      .slice(0, 10)
+      .map(w => ({
+        id: w.work_id,
+        details: {
+          ...aniListDetails[w.work_id],
+          userScore: w.evaluation?.overallScore
         }
-        return newItems;
-      });
-    }
-  };
+      }));
 
-  const handleRemoveFavorite = (idToRemove: string) => {
-    setFavItems(prev => {
-      const newItems = [...prev];
-      const idx = newItems.indexOf(idToRemove);
-      if (idx !== -1) {
-        let maxEmpty = -1;
-        newItems.forEach(item => {
-          if (item.startsWith("empty-")) {
-            const num = parseInt(item.split("-")[1]);
-            if (num > maxEmpty) maxEmpty = num;
-          }
-        });
-        newItems[idx] = `empty-${maxEmpty + 1}`;
-      }
-      if (user) {
-        updateTop9List(user.uid, newItems, contentType).catch(console.error);
-      }
-      return newItems;
-    });
-  };
+    setFavItems(topWorks);
+  }, [contentType, dbUser, aniListDetails, allWorks]);
 
   return (
     <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-lg mx-auto">
@@ -326,19 +257,21 @@ export default function ProfilePage() {
             <Star className="text-blue-500" />
             Meine All-Time Favoriten ({contentType})
           </h3>
-          <p className="text-xs text-gray-400 mb-4">Deine absoluten Lieblingswerke (Top 9). Halte gedrückt und ziehe, um sie zu sortieren.</p>
+          <p className="text-xs text-gray-400 mb-4">Deine 10 bestbewerteten Werke. Wird automatisch berechnet.</p>
           
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={favItems} strategy={horizontalListSortingStrategy}>
-              <div className="flex gap-3 overflow-x-auto pb-4 snap-x snap-mandatory [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-                {favItems.map((id, index) => (
-                  <div key={id} className="snap-center">
-                    <SortableFavoriteItem id={id} index={index} workDetails={aniListDetails[id]} onRemove={handleRemoveFavorite} />
-                  </div>
-                ))}
-              </div>
-            </SortableContext>
-          </DndContext>
+          {favItems.length === 0 ? (
+            <div className="text-sm text-gray-500 border border-gray-800 bg-[#1a1d24] rounded-xl p-6 text-center">
+              Du hast noch keine Werke bewertet.
+            </div>
+          ) : (
+            <div className="flex gap-3 overflow-x-auto pb-4 snap-x snap-mandatory [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+              {favItems.map((item, index) => (
+                <div key={item.id} className="snap-center">
+                  <FavoriteItem id={item.id} index={index} workDetails={item.details} />
+                </div>
+              ))}
+            </div>
+          )}
         </section>
       )}
 

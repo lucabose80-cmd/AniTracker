@@ -1,5 +1,5 @@
 import { db } from "@/lib/firebase";
-import { doc, setDoc, getDoc, updateDoc, arrayUnion } from "firebase/firestore";
+import { doc, setDoc, getDoc, getDocs, collection, updateDoc, arrayUnion } from "firebase/firestore";
 import { UserProfile } from "@/types/database";
 
 export async function createUserProfile(uid: string, username: string, email: string) {
@@ -31,6 +31,16 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
     return docSnap.data() as UserProfile;
   }
   return null;
+}
+
+export async function getAllUserProfiles(): Promise<UserProfile[]> {
+  if (!db) return [];
+  const snapshot = await getDocs(collection(db, "users"));
+  const profiles: UserProfile[] = [];
+  snapshot.forEach((doc) => {
+    profiles.push(doc.data() as UserProfile);
+  });
+  return profiles;
 }
 
 export async function addToHistory(uid: string, workId: string) {

@@ -7,6 +7,7 @@ import { Star, Flame, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { auth } from "@/lib/firebase";
 import { getAllUserWorks } from "@/lib/db/works";
+import { getAllUserProfiles } from "@/lib/db/users";
 import { UserWork } from "@/types/database";
 
 const GENRES = ["Action", "Adventure", "Comedy", "Drama", "Fantasy", "Horror", "Mystery", "Psychological", "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller"];
@@ -28,6 +29,10 @@ export default function Home() {
   const [recommendedWorks, setRecommendedWorks] = useState<any[]>([]);
   const [isLoadingRecs, setIsLoadingRecs] = useState(false);
 
+  // Global Community Ranking State
+  const [communityRanking, setCommunityRanking] = useState<any[]>([]);
+  const [isLoadingCommunity, setIsLoadingCommunity] = useState(true);
+
   // 1. Load Trending (Always)
   useEffect(() => {
     async function loadTrending() {
@@ -42,7 +47,50 @@ export default function Home() {
         setIsLoadingTrending(false);
       }
     }
+
+    async function loadCommunityRanking() {
+      setIsLoadingCommunity(true);
+      try {
+        const profiles = await getAllUserProfiles();
+        const scoreMap: Record<string, number> = {};
+
+        profiles.forEach(profile => {
+          const ranking = contentType === "ANIME" ? profile.weekly_ranking_anime?.current : profile.weekly_ranking_manga?.current;
+          if (ranking && Array.isArray(ranking)) {
+            ranking.forEach((workId, index) => {
+              if (workId && !workId.startsWith("empty")) {
+                const points = 9 - index; // Rank 1 = 9 pts, Rank 9 = 1 pt
+                scoreMap[workId] = (scoreMap[workId] || 0) + points;
+              }
+            });
+          }
+        });
+
+        // Sort by points descending and take top 9
+        const topIds = Object.entries(scoreMap)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 9)
+          .map(([id]) => parseInt(id, 10));
+
+        if (topIds.length > 0) {
+          const mediaList = await fetchAniListBatch(topIds);
+          // Sort mediaList back to the order of topIds
+          const sortedMediaList = topIds.map(id => mediaList.find((m: any) => m.id === id)).filter(Boolean);
+          // Attach points for display
+          const finalRanking = sortedMediaList.map(m => ({ ...m, communityPoints: scoreMap[m.id.toString()] }));
+          setCommunityRanking(finalRanking);
+        } else {
+          setCommunityRanking([]);
+        }
+      } catch (err) {
+        console.error("Failed to load community ranking", err);
+      } finally {
+        setIsLoadingCommunity(false);
+      }
+    }
+
     loadTrending();
+    loadCommunityRanking();
   }, [contentType]);
 
   // 2. Load User Profile & Favorite Genres
@@ -203,6 +251,50 @@ export default function Home() {
           )}
         </section>
       )}
+
+      {/* COMMUNITY WEEKLY RANKING */}
+      <section>
+        <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
+          <Star className="text-blue-500" /> 
+          Community Weekly Ranking
+        </h2>
+        <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-4 scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+          {isLoadingCommunity ? (
+            [1, 2, 3, 4].map((i) => (
+              <div key={i} className="relative min-w-[180px] snap-center overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg">
+                <div className="aspect-[3/4] w-full bg-gray-800 animate-pulse" />
+              </div>
+            ))
+          ) : communityRanking.length === 0 ? (
+            <div className="text-gray-500 text-sm border border-gray-800 bg-[#1a1d24] rounded-xl p-6 text-center w-full">
+              Noch keine Rankings für diese Woche.
+            </div>
+          ) : (
+            communityRanking.map((work, index) => (
+              <Link href={`/work/${work.id}`} key={work.id} className="relative min-w-[180px] snap-center overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-[1.02]">
+                <img 
+                  src={work.coverImage?.extraLarge || work.coverImage?.large} 
+                  alt={work.title.romaji}
+                  className="aspect-[3/4] w-full object-cover"
+                  loading="lazy"
+                />
+                <div className="absolute top-2 left-2 flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 font-bold text-white shadow-lg border-2 border-white/20">
+                  {index + 1}
+                </div>
+                <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/95 via-black/70 to-transparent p-3">
+                  <h3 className="font-bold text-white line-clamp-1 text-sm">{work.title.english || work.title.romaji}</h3>
+                  <div className="flex justify-between items-center mt-1">
+                    <span className="text-[10px] font-bold text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded">
+                      {work.communityPoints} Pkt
+                    </span>
+                  </div>
+                </div>
+              </Link>
+            ))
+          )}
+        </div>
+      </section>
+
       {/* TRENDING SECTION */}
       <section>
         <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
