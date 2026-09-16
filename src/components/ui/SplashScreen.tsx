@@ -1,10 +1,29 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { auth } from "@/lib/firebase";
+import { onAuthStateChanged, User } from "firebase/auth";
+import { useRouter } from "next/navigation";
+import { LogIn } from "lucide-react";
 
 export function SplashScreen({ children }: { children: React.ReactNode }) {
   const [showSplash, setShowSplash] = useState(true);
   const [animateOut, setAnimateOut] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoaded, setAuthLoaded] = useState(false);
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!auth) {
+      setAuthLoaded(true);
+      return;
+    }
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoaded(true);
+    });
+    return () => unsubscribe();
+  }, []);
 
   // We can just use a simple timeout or a "START" button as requested.
   // The user requested: 'Splash Screen with zoom-in pull animation on "START".'
@@ -41,13 +60,39 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
             Dein Tracker für Anime, Manga und Manhwa mit tiefgehenden Bewertungen.
           </p>
           
-          <button
-            onClick={handleStart}
-            className="group relative mt-12 overflow-hidden rounded-full bg-blue-600 px-12 py-4 text-lg font-bold text-white shadow-[0_0_40px_-10px_rgba(37,99,235,0.5)] transition-all hover:scale-105 hover:shadow-[0_0_60px_-15px_rgba(37,99,235,0.7)] active:scale-95"
-          >
-            <span className="relative z-10">START</span>
-            <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-500 group-hover:translate-x-full" />
-          </button>
+          <div className="mt-12 flex flex-col items-center gap-4 min-h-[120px]">
+            {!authLoaded ? (
+              <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+            ) : user ? (
+              <div className="flex flex-col items-center gap-4">
+                <p className="text-sm font-semibold text-blue-400">Willkommen zurück, {user.displayName || user.email?.split("@")[0]}!</p>
+                <button
+                  onClick={handleStart}
+                  className="group relative overflow-hidden rounded-full bg-blue-600 px-12 py-4 text-lg font-bold text-white shadow-[0_0_40px_-10px_rgba(37,99,235,0.5)] transition-all hover:scale-105 hover:shadow-[0_0_60px_-15px_rgba(37,99,235,0.7)] active:scale-95"
+                >
+                  <span className="relative z-10">START</span>
+                  <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-500 group-hover:translate-x-full" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-4">
+                <button
+                  onClick={() => router.push("/login")}
+                  className="group relative flex items-center gap-2 overflow-hidden rounded-full bg-blue-600 px-12 py-4 text-lg font-bold text-white shadow-[0_0_40px_-10px_rgba(37,99,235,0.5)] transition-all hover:scale-105 hover:shadow-[0_0_60px_-15px_rgba(37,99,235,0.7)] active:scale-95"
+                >
+                  <LogIn size={20} className="relative z-10" />
+                  <span className="relative z-10">Einloggen</span>
+                  <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-500 group-hover:translate-x-full" />
+                </button>
+                <button
+                  onClick={handleStart}
+                  className="text-sm font-semibold text-gray-500 hover:text-white transition"
+                >
+                  Ohne Account fortfahren (Gast)
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </>
