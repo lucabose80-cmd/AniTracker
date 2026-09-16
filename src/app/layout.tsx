@@ -4,6 +4,7 @@ import "./globals.css";
 import { Header } from "@/components/layout/Header";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { SplashScreen } from "@/components/ui/SplashScreen";
+import { ServiceWorkerManager } from "@/components/ServiceWorkerManager";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -43,6 +44,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             {children}
           </main>
           <BottomNav />
+          <ServiceWorkerManager />
         </SplashScreen>
       </body>
     </html>
