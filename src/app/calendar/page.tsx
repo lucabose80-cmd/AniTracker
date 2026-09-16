@@ -46,10 +46,11 @@ export default function CalendarPage() {
     setIsLoading(true);
     try {
       const works = await getAllUserWorks(user.uid);
-      const ids = works.map(w => parseInt(w.work_id, 10));
+      const activeWorks = works.filter(w => w.status === "CURRENT");
+      const ids = activeWorks.map(w => parseInt(w.work_id, 10));
       
       const map: Record<string, any> = {};
-      works.forEach(w => map[w.work_id] = w);
+      activeWorks.forEach(w => map[w.work_id] = w);
       setUserWorkMap(map);
       
       if (ids.length > 0) {
@@ -150,7 +151,7 @@ export default function CalendarPage() {
         <CalendarIcon className="text-blue-500" /> 
         Release Kalender
       </h2>
-      <p className="text-xs text-gray-400 -mt-4 mb-2">Zeigt nur Serien an, die sich in deiner Bibliothek befinden.</p>
+      <p className="text-xs text-gray-400 -mt-4 mb-2">Zeigt nur Serien an, die in deiner Bibliothek als "Aktiv" markiert sind.</p>
 
       {!isLoggedIn ? (
         <div className="bg-[#1a1d24] border border-gray-800 rounded-xl p-6 text-center text-gray-400">

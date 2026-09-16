@@ -5,11 +5,11 @@ import { useParams } from "next/navigation";
 import { fetchAniList, GET_WORK_DETAILS } from "@/lib/anilist";
 import { calculateOverallScore } from "@/lib/scoring";
 import { UserWork, EmotionalImpact, WatchMode } from "@/types/database";
-import { Star, ChevronLeft, Save, Library as LibraryIcon, Check, Calendar as CalendarIcon } from "lucide-react";
+import { Star, ChevronLeft, Save, Library as LibraryIcon, Check, Calendar as CalendarIcon, PlayCircle, CheckCircle, Bookmark } from "lucide-react";
 import Link from "next/link";
 import { setCalendarOverride, getCalendarOverrides, CalendarOverride } from "@/lib/db/calendar";
 import { auth } from "@/lib/firebase";
-import { saveUserWork, getUserWork, updateEpisodeProgress, removeUserWork } from "@/lib/db/works";
+import { saveUserWork, getUserWork, updateEpisodeProgress, removeUserWork, updateUserWorkStatus } from "@/lib/db/works";
 import { addToHistory } from "@/lib/db/users";
 import { CommentsSection } from "./CommentsSection";
 import { createActivity } from "@/lib/db/feed";
@@ -21,6 +21,7 @@ export default function WorkDetailPage() {
   const [work, setWork] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [inLibrary, setInLibrary] = useState(false);
+  const [userWorkStatus, setUserWorkStatus] = useState<UserWork["status"]>("NONE");
   const [showEvaluation, setShowEvaluation] = useState(false);
   const [currentEpisode, setCurrentEpisode] = useState(0);
   const [manualMaxEpisode, setManualMaxEpisode] = useState<number | "">("");
@@ -76,6 +77,7 @@ export default function WorkDetailPage() {
 
         if (userWork) {
           setInLibrary(true);
+          setUserWorkStatus(userWork.status || "PLANNING");
           setCurrentEpisode(userWork.current_episode || 0);
           setManualMaxEpisode(userWork.manual_max_episode || "");
           setEvaluation(userWork.evaluation);
@@ -103,7 +105,7 @@ export default function WorkDetailPage() {
     setEvaluation(prev => ({ ...prev, [field]: parseFloat(value) }));
   };
 
-  const handleQuickAdd = async () => {
+  const handleQuickAdd = async (status: "CURRENT" | "COMPLETED" | "PLANNING") => {
     const user = auth?.currentUser;
     if (!user) {
       alert("Bitte erst einloggen!");
@@ -111,15 +113,20 @@ export default function WorkDetailPage() {
     }
     setIsSaving(true);
     try {
-      await saveUserWork(user.uid, id, {
-        status: "PLANNING",
-        evaluation: evaluation,
-        current_episode: currentEpisode
-      });
-      await addToHistory(user.uid, id);
+      if (inLibrary) {
+        await updateUserWorkStatus(user.uid, id, status);
+      } else {
+        await saveUserWork(user.uid, id, {
+          status: status,
+          evaluation: evaluation,
+          current_episode: currentEpisode
+        });
+        await addToHistory(user.uid, id);
+        // Create feed activity
+        await createActivity(user.uid, "TOP9_UPDATE", id, `Hat ${work?.title?.romaji || 'ein Werk'} zur Bibliothek hinzugefügt.`);
+      }
       setInLibrary(true);
-      // Create feed activity
-      await createActivity(user.uid, "TOP9_UPDATE", id, `Hat ${work?.title?.romaji || 'ein Werk'} zur Bibliothek hinzugefügt.`);
+      setUserWorkStatus(status);
     } catch (err: any) {
       console.error(err);
       alert("Fehler beim Hinzufügen: " + err.message);
@@ -136,6 +143,7 @@ export default function WorkDetailPage() {
     try {
       await removeUserWork(user.uid, id);
       setInLibrary(false);
+      setUserWorkStatus("NONE");
       setSaveMessage("Aus Bibliothek entfernt");
       setTimeout(() => setSaveMessage(""), 3000);
     } catch (err: any) {
@@ -173,7 +181,7 @@ export default function WorkDetailPage() {
           actionDialogScale: 0,
           pacingScale: 0,
         },
-        status: "COMPLETED"
+        status: userWorkStatus !== "NONE" ? userWorkStatus : "COMPLETED"
       });
       
       await addToHistory(user.uid, id);
@@ -354,26 +362,38 @@ export default function WorkDetailPage() {
 
         {/* ACTION BUTTONS */}
         <div className="mt-6 flex flex-col gap-3">
-          {!inLibrary ? (
+          <div className="grid grid-cols-3 gap-2">
             <button 
-              onClick={handleQuickAdd}
+              onClick={() => handleQuickAdd("CURRENT")}
               disabled={isSaving}
-              className="w-full rounded-xl bg-blue-600 py-3.5 font-bold text-white shadow-lg transition hover:bg-blue-700 active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+              className={`flex flex-col items-center justify-center gap-1 rounded-xl py-3 font-bold transition shadow-lg ${userWorkStatus === "CURRENT" ? "bg-blue-600 text-white" : "bg-blue-600/20 text-blue-400 border border-blue-600/50 hover:bg-blue-600/40"}`}
             >
-              <LibraryIcon size={20} /> {isSaving ? "Füge hinzu..." : "Zur Bibliothek hinzufügen"}
+              <PlayCircle size={20} /> <span className="text-xs">Aktiv</span>
             </button>
-          ) : (
+            <button 
+              onClick={() => handleQuickAdd("COMPLETED")}
+              disabled={isSaving}
+              className={`flex flex-col items-center justify-center gap-1 rounded-xl py-3 font-bold transition shadow-lg ${userWorkStatus === "COMPLETED" ? "bg-green-600 text-white" : "bg-green-600/20 text-green-400 border border-green-600/50 hover:bg-green-600/40"}`}
+            >
+              <CheckCircle size={20} /> <span className="text-xs">Fertig</span>
+            </button>
+            <button 
+              onClick={() => handleQuickAdd("PLANNING")}
+              disabled={isSaving}
+              className={`flex flex-col items-center justify-center gap-1 rounded-xl py-3 font-bold transition shadow-lg ${userWorkStatus === "PLANNING" ? "bg-purple-600 text-white" : "bg-purple-600/20 text-purple-400 border border-purple-600/50 hover:bg-purple-600/40"}`}
+            >
+              <Bookmark size={20} /> <span className="text-xs">Wunsch</span>
+            </button>
+          </div>
+          
+          {inLibrary && (
             <div className="flex gap-2">
-              <div className="flex-1 rounded-xl bg-green-900/40 border border-green-800/50 py-3.5 font-bold text-green-400 text-center flex items-center justify-center gap-2">
-                <Check size={20} /> In Bibliothek
-              </div>
               <button 
                 onClick={handleRemove}
                 disabled={isSaving}
-                className="w-12 flex-shrink-0 flex items-center justify-center rounded-xl bg-red-600 hover:bg-red-500 transition text-white active:scale-95 disabled:opacity-50"
-                title="Aus Bibliothek entfernen"
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-red-900/30 border border-red-900 hover:bg-red-900/60 transition text-red-500 py-3 text-sm font-bold active:scale-95 disabled:opacity-50"
               >
-                X
+                X Aus Bibliothek entfernen
               </button>
             </div>
           )}

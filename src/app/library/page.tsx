@@ -125,6 +125,7 @@ export default function LibraryPage() {
   const [aniListDetails, setAniListDetails] = useState<Record<string, any>>({});
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"CURRENT" | "COMPLETED" | "PLANNING">("CURRENT");
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -352,19 +353,42 @@ export default function LibraryPage() {
         </section>
         
         <section className="mt-4">
-          <h3 className="mb-3 text-lg font-bold">Alle Werke</h3>
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-bold">Alle Werke</h3>
+          </div>
+          
+          <div className="flex bg-[#1a1d24] border border-gray-800 rounded-lg p-1 mb-4">
+            <button
+              onClick={() => setActiveTab("CURRENT")}
+              className={`flex-1 py-1.5 text-sm font-bold rounded-md transition ${activeTab === "CURRENT" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}
+            >
+              Aktiv
+            </button>
+            <button
+              onClick={() => setActiveTab("COMPLETED")}
+              className={`flex-1 py-1.5 text-sm font-bold rounded-md transition ${activeTab === "COMPLETED" ? "bg-green-600 text-white" : "text-gray-400 hover:text-white"}`}
+            >
+              Fertig
+            </button>
+            <button
+              onClick={() => setActiveTab("PLANNING")}
+              className={`flex-1 py-1.5 text-sm font-bold rounded-md transition ${activeTab === "PLANNING" ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"}`}
+            >
+              Wunschliste
+            </button>
+          </div>
           
           {isLoading ? (
             <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-8 text-center text-gray-500 animate-pulse">
               Lade Bibliothek...
             </div>
-          ) : allWorks.length === 0 ? (
+          ) : filteredWorks.filter(w => w.status === activeTab).length === 0 ? (
             <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-8 text-center text-gray-500">
-              Noch keine Werke hinzugefügt. Suche oben, um anzufangen!
+              Keine Werke in dieser Kategorie gefunden.
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-              {filteredWorks.map(work => {
+              {filteredWorks.filter(w => w.status === activeTab).map(work => {
                 const details = aniListDetails[work.work_id];
                 let behindCount = 0;
                 if (details) {
