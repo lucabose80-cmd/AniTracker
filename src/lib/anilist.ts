@@ -163,3 +163,25 @@ export const GET_RECOMMENDATIONS_BY_GENRE = `
     }
   }
 `;
+
+export const GET_USER_AIRING_SCHEDULE = `
+  query($ids: [Int]!) {
+    Page(page: 1, perPage: 50) {
+      media(id_in: $ids, status: RELEASING, type: ANIME) {
+        id
+        title {
+          romaji
+          english
+        }
+        coverImage {
+          large
+        }
+        nextAiringEpisode {
+          airingAt
+          timeUntilAiring
+          episode
+        }
+      }
+    }
+  }
+`;
