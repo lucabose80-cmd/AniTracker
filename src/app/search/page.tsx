@@ -66,12 +66,12 @@ function SearchContent() {
             <Link href={`/work/${work.id}`} key={work.id} className="relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-[1.02]">
               <img 
                 src={work.coverImage.extraLarge || work.coverImage.large} 
-                alt={work.title.romaji}
+                alt={work.title.english || work.title.romaji}
                 className="aspect-[3/4] w-full object-cover"
                 loading="lazy"
               />
               <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/95 via-black/70 to-transparent p-3">
-                <h3 className="font-bold text-white text-sm line-clamp-1">{work.title.romaji || work.title.english}</h3>
+                <h3 className="font-bold text-white text-sm line-clamp-1">{work.title.english || work.title.romaji}</h3>
                 <div className="flex items-center gap-1 text-xs text-gray-300 mt-1">
                   <Star size={10} className="text-yellow-500" />
                   <span>{(work.averageScore / 10).toFixed(1)}</span>

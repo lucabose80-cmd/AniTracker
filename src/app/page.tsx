@@ -152,7 +152,7 @@ export default function Home() {
                   loading="lazy"
                 />
                 <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/95 via-black/70 to-transparent p-4">
-                  <h3 className="font-bold text-white line-clamp-1">{work.title.romaji || work.title.english}</h3>
+                  <h3 className="font-bold text-white line-clamp-1">{work.title.english || work.title.romaji}</h3>
                   <div className="flex items-center gap-2 text-xs text-gray-300 mt-1">
                     <Star size={12} className="text-yellow-500" />
                     <span>{(work.averageScore / 10).toFixed(1)}</span>
@@ -217,7 +217,7 @@ export default function Home() {
                  <Link href={`/work/${work.id}`} key={work.id} className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500">
                    <img src={work.coverImage?.extraLarge || work.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
                    <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/90 to-transparent p-2 text-center opacity-0 transition group-hover:opacity-100">
-                     <p className="text-[10px] font-bold text-white line-clamp-2">{work.title.romaji || work.title.english}</p>
+                     <p className="text-[10px] font-bold text-white line-clamp-2">{work.title.english || work.title.romaji}</p>
                    </div>
                  </Link>
                ))

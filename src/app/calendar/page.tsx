@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { auth } from "@/lib/firebase";
 import { getAllUserWorks } from "@/lib/db/works";
-import { fetchAniList, GET_USER_AIRING_SCHEDULE } from "@/lib/anilist";
+import { fetchAniList, GET_WORKS_BATCH } from "@/lib/anilist";
 import { getCalendarOverrides, setCalendarOverride } from "@/lib/db/calendar";
+import { useAppStore } from "@/lib/store";
 import { Calendar as CalendarIcon, Clock, Tv, Edit2, Check, X } from "lucide-react";
 import Link from "next/link";
 import { format, formatDistanceToNow } from "date-fns";
@@ -22,6 +23,7 @@ const DAYS = [
 ];
 
 export default function CalendarPage() {
+  const { contentType } = useAppStore();
   const [airingAnime, setAiringAnime] = useState<any[]>([]);
   const [userWorkMap, setUserWorkMap] = useState<Record<string, any>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -52,17 +54,48 @@ export default function CalendarPage() {
       
       if (ids.length > 0) {
         const [data, overrides] = await Promise.all([
-          fetchAniList(GET_USER_AIRING_SCHEDULE, { ids }),
+          fetchAniList(GET_WORKS_BATCH, { ids }),
           getCalendarOverrides()
         ]);
         
-        const scheduled = data.Page.media.filter((m: any) => m.nextAiringEpisode);
-        
-        // Apply Global Overrides
-        scheduled.forEach((m: any) => {
+        let scheduled: any[] = [];
+        const mediaList = data.Page.media.filter((m: any) => m.type === contentType);
+
+        mediaList.forEach((m: any) => {
           const strId = m.id.toString();
-          if (overrides[strId]) {
-            m.nextAiringEpisode.airingAt = overrides[strId];
+          const over = overrides[strId];
+          
+          let hasSchedule = false;
+          let computedAiringAt = m.nextAiringEpisode?.airingAt;
+          
+          if (over) {
+            if (over.airingAt) {
+              computedAiringAt = over.airingAt;
+              hasSchedule = true;
+            } else if (over.weeklyDay !== undefined && over.weeklyTime !== undefined) {
+              // Compute next occurrence in the current week
+              const [hours, minutes] = over.weeklyTime.split(':').map(Number);
+              const date = new Date();
+              date.setHours(hours, minutes, 0, 0);
+              const currentDay = date.getDay();
+              const diff = over.weeklyDay - currentDay;
+              date.setDate(date.getDate() + diff);
+              computedAiringAt = Math.floor(date.getTime() / 1000);
+              hasSchedule = true;
+            }
+          } else if (m.nextAiringEpisode) {
+            hasSchedule = true;
+          }
+
+          if (hasSchedule && computedAiringAt) {
+            // Shallow clone to inject the computed time safely
+            const cloned = { ...m };
+            cloned.nextAiringEpisode = {
+              ...m.nextAiringEpisode, // keep episode num if exists
+              airingAt: computedAiringAt,
+              episode: m.nextAiringEpisode?.episode || ((userWorkMap[strId]?.current_episode || 0) + 1)
+            };
+            scheduled.push(cloned);
           }
         });
 
@@ -80,7 +113,7 @@ export default function CalendarPage() {
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(() => loadData());
     return () => unsubscribe();
-  }, []);
+  }, [contentType]);
 
   const handleEditClick = (anime: any, e: React.MouseEvent) => {
     e.preventDefault();
@@ -198,7 +231,7 @@ export default function CalendarPage() {
                       <div>
                         <div className="flex justify-between items-start gap-2">
                           <h3 className="font-bold text-sm text-gray-200 line-clamp-2 group-hover:text-blue-400 transition-colors">
-                            {anime.title.romaji}
+                            {anime.title.english || anime.title.romaji}
                           </h3>
                         </div>
                         <p className="text-xs text-blue-400 font-semibold mt-1">

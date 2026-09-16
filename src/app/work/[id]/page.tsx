@@ -5,8 +5,9 @@ import { useParams } from "next/navigation";
 import { fetchAniList, GET_WORK_DETAILS } from "@/lib/anilist";
 import { calculateOverallScore } from "@/lib/scoring";
 import { UserWork, EmotionalImpact, WatchMode } from "@/types/database";
-import { Star, ChevronLeft, Save, Library as LibraryIcon, Check } from "lucide-react";
+import { Star, ChevronLeft, Save, Library as LibraryIcon, Check, Calendar as CalendarIcon } from "lucide-react";
 import Link from "next/link";
+import { setCalendarOverride, getCalendarOverrides, CalendarOverride } from "@/lib/db/calendar";
 import { auth } from "@/lib/firebase";
 import { saveUserWork, getUserWork, updateEpisodeProgress } from "@/lib/db/works";
 import { addToHistory } from "@/lib/db/users";
@@ -45,6 +46,10 @@ export default function WorkDetailPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
 
+  const [customDay, setCustomDay] = useState<number>(1);
+  const [customTime, setCustomTime] = useState<string>("12:00");
+  const [hasCustomOverride, setHasCustomOverride] = useState(false);
+
   useEffect(() => {
     async function loadData() {
       if (!id) return;
@@ -52,12 +57,19 @@ export default function WorkDetailPage() {
       try {
         const user = auth?.currentUser;
         
-        const [data, userWork] = await Promise.all([
+        const [data, userWork, overrides] = await Promise.all([
           fetchAniList(GET_WORK_DETAILS, { id: parseInt(id, 10) }),
-          user ? getUserWork(user.uid, id) : Promise.resolve(null)
+          user ? getUserWork(user.uid, id) : Promise.resolve(null),
+          getCalendarOverrides()
         ]);
 
         setWork(data.Media);
+        
+        if (overrides[id] && overrides[id].weeklyTime) {
+          setHasCustomOverride(true);
+          if (overrides[id].weeklyDay !== undefined) setCustomDay(overrides[id].weeklyDay!);
+          if (overrides[id].weeklyTime !== undefined) setCustomTime(overrides[id].weeklyTime!);
+        }
         const isRomance = data.Media.genres?.includes("Romance") || false;
         setIsRomanceMainFocus(isRomance);
 
@@ -178,6 +190,13 @@ export default function WorkDetailPage() {
     }
   };
 
+  const handleSaveCustomRelease = async () => {
+    if (!id) return;
+    await setCalendarOverride(id, undefined, customDay, customTime);
+    setHasCustomOverride(true);
+    alert("Wöchentlicher Release-Zeitpunkt gespeichert!");
+  };
+
   if (isLoading) {
     return <div className="p-8 text-center text-gray-400 animate-pulse">Lade Werk Details...</div>;
   }
@@ -207,7 +226,7 @@ export default function WorkDetailPage() {
             className="h-40 w-28 rounded-lg shadow-xl border border-gray-800 object-cover" 
           />
           <div className="flex flex-col justify-end pt-16">
-            <h1 className="text-xl font-bold leading-tight line-clamp-3">{work.title?.romaji || work.title?.english}</h1>
+            <h1 className="text-xl font-bold leading-tight line-clamp-3">{work.title?.english || work.title?.romaji}</h1>
             <div className="mt-2 flex items-center gap-2 text-sm text-gray-300">
               <Star size={14} className="text-yellow-500" />
               <span>{work.averageScore ? (work.averageScore / 10).toFixed(1) : "?"} AniList</span>
@@ -247,6 +266,43 @@ export default function WorkDetailPage() {
             >+</button>
           </div>
         </div>
+
+        {/* MANUAL RELEASE TIMES */}
+        {(!work.nextAiringEpisode || work.type === "MANGA") && inLibrary && (
+          <div className="mt-4 flex flex-col gap-3 bg-[#1a1d24] border border-gray-800 rounded-xl p-4">
+            <span className="font-bold text-gray-300 flex items-center gap-2 text-sm">
+              <CalendarIcon size={16} className="text-blue-500" /> Wöchentlicher Release
+            </span>
+            <div className="flex gap-2 text-sm">
+              <select 
+                value={customDay} 
+                onChange={e => setCustomDay(parseInt(e.target.value))} 
+                className="flex-1 bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-blue-500"
+              >
+                <option value={1}>Montag</option>
+                <option value={2}>Dienstag</option>
+                <option value={3}>Mittwoch</option>
+                <option value={4}>Donnerstag</option>
+                <option value={5}>Freitag</option>
+                <option value={6}>Samstag</option>
+                <option value={0}>Sonntag</option>
+              </select>
+              <input 
+                type="time" 
+                value={customTime} 
+                onChange={e => setCustomTime(e.target.value)} 
+                className="w-24 bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-blue-500" 
+              />
+              <button 
+                onClick={handleSaveCustomRelease} 
+                className="bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-lg font-bold text-white transition"
+              >
+                {hasCustomOverride ? <Check size={18} /> : "Speichern"}
+              </button>
+            </div>
+            {hasCustomOverride && <p className="text-xs text-green-400 mt-1">Im Kalender aktiviert!</p>}
+          </div>
+        )}
 
         {/* ACTION BUTTONS */}
         <div className="mt-6 flex flex-col gap-3">

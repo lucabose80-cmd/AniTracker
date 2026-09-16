@@ -15,7 +15,7 @@ import { UserWork } from "@/types/database";
 import Link from "next/link";
 
 // Simple Sortable Item Component
-function SortableItem({ id, index, workDetails, userWork }: { id: string, index: number, workDetails?: any, userWork?: any }) {
+function SortableItem({ id, index, workDetails, userWork, onRemove }: { id: string, index: number, workDetails?: any, userWork?: any, onRemove: (id: string) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   
   const style = {
@@ -66,6 +66,14 @@ function SortableItem({ id, index, workDetails, userWork }: { id: string, index:
       ) : (
         <span className="text-xs text-center p-2 text-white line-clamp-3 pointer-events-none">Lade...</span>
       )}
+      {!id.startsWith("empty") && (
+        <button 
+          onPointerDown={(e) => { e.stopPropagation(); onRemove(id); }}
+          className="absolute top-1 right-1 bg-red-600/80 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] hover:bg-red-500 z-20 shadow-md"
+        >
+          X
+        </button>
+      )}
     </div>
   );
 }
@@ -77,6 +85,7 @@ export default function LibraryPage() {
   const [items, setItems] = useState<string[]>(Array(9).fill("").map((_, i) => `empty-${i}`));
   const [allWorks, setAllWorks] = useState<UserWork[]>([]);
   const [aniListDetails, setAniListDetails] = useState<Record<string, any>>({});
+  const [userProfile, setUserProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const sensors = useSensors(
@@ -88,27 +97,9 @@ export default function LibraryPage() {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       if (user) {
         try {
-          const [profile, works] = await Promise.all([
-            getUserProfile(user.uid),
-            getAllUserWorks(user.uid)
-          ]);
-
-          let currentTop9 = profile?.top_9_list || [];
-          while(currentTop9.length < 9) {
-            currentTop9.push(`empty-${currentTop9.length}`);
-          }
-
-          const worksInTop9 = currentTop9.filter(id => !id.startsWith("empty"));
-          const worksNotInTop9 = works.filter(w => !worksInTop9.includes(w.work_id));
-
-          for (let i = 0; i < currentTop9.length; i++) {
-            if (currentTop9[i].startsWith("empty") && worksNotInTop9.length > 0) {
-              const nextWork = worksNotInTop9.shift();
-              if (nextWork) currentTop9[i] = nextWork.work_id;
-            }
-          }
-
-          setItems(currentTop9);
+          const profile = await getUserProfile(user.uid);
+          setUserProfile(profile);
+          const works = await getAllUserWorks(user.uid);
           setAllWorks(works);
 
           const allIdsToFetch = works.map(w => parseInt(w.work_id, 10));
@@ -133,6 +124,31 @@ export default function LibraryPage() {
     return () => unsubscribe();
   }, []);
 
+  // Sync Top 9 list when contentType or aniListDetails changes
+  useEffect(() => {
+    if (!userProfile || Object.keys(aniListDetails).length === 0) return;
+
+    let currentTop9 = contentType === "ANIME" ? [...(userProfile.top_9_anime || userProfile.top_9_list || [])] : [...(userProfile.top_9_manga || [])];
+    
+    // Filter works of current content type
+    const worksOfType = allWorks.filter(w => aniListDetails[w.work_id]?.type === contentType);
+    const worksInTop9 = currentTop9.filter(id => !id.startsWith("empty"));
+    const worksNotInTop9 = worksOfType.filter(w => !worksInTop9.includes(w.work_id));
+
+    while(currentTop9.length < 9) {
+      currentTop9.push(`empty-${currentTop9.length}`);
+    }
+
+    for (let i = 0; i < 9; i++) {
+      if (currentTop9[i].startsWith("empty") && worksNotInTop9.length > 0) {
+        const nextWork = worksNotInTop9.shift();
+        if (nextWork) currentTop9[i] = nextWork.work_id;
+      }
+    }
+
+    setItems(currentTop9.slice(0, 9));
+  }, [contentType, userProfile, aniListDetails, allWorks]);
+
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (over && active.id !== over.id) {
@@ -142,13 +158,39 @@ export default function LibraryPage() {
         const newItems = arrayMove(prevItems, oldIndex, newIndex);
         
         if (auth.currentUser) {
-          updateTop9List(auth.currentUser.uid, newItems).catch(console.error);
+          updateTop9List(auth.currentUser.uid, newItems, contentType).catch(console.error);
         }
         
         return newItems;
       });
     }
   };
+
+  const handleRemoveFromTop9 = (idToRemove: string) => {
+    setItems(prevItems => {
+      const newItems = [...prevItems];
+      const idx = newItems.indexOf(idToRemove);
+      if (idx !== -1) {
+        // Find highest empty index to use
+        let maxEmpty = -1;
+        newItems.forEach(item => {
+          if (item.startsWith("empty-")) {
+            const num = parseInt(item.split("-")[1]);
+            if (num > maxEmpty) maxEmpty = num;
+          }
+        });
+        newItems[idx] = `empty-${maxEmpty + 1}`;
+      }
+      
+      if (auth.currentUser) {
+        updateTop9List(auth.currentUser.uid, newItems, contentType).catch(console.error);
+      }
+      
+      return newItems;
+    });
+  };
+
+  const filteredWorks = allWorks.filter(w => aniListDetails[w.work_id]?.type === contentType);
 
   return (
     <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-5xl mx-auto">
@@ -186,7 +228,7 @@ export default function LibraryPage() {
                 const uWork = allWorks.find(w => w.work_id === id);
                 return (
                   <div key={id} className="snap-center">
-                    <SortableItem id={id} index={index} workDetails={aniListDetails[id]} userWork={uWork} />
+                    <SortableItem id={id} index={index} workDetails={aniListDetails[id]} userWork={uWork} onRemove={handleRemoveFromTop9} />
                   </div>
                 );
               })}
@@ -208,7 +250,7 @@ export default function LibraryPage() {
           </div>
         ) : (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-            {allWorks.map(work => {
+            {filteredWorks.map(work => {
               const details = aniListDetails[work.work_id];
               let behindCount = 0;
               if (details) {

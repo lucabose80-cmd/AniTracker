@@ -8,7 +8,9 @@ export interface UserProfile {
   username: string;
   avatar_url: string;
   following_array: string[]; // array of uids
-  top_9_list: string[]; // array of work_ids
+  top_9_list?: string[]; // Legacy
+  top_9_anime: string[];
+  top_9_manga: string[];
   read_watch_history: string[]; // array of work_ids
   notification_settings?: {
     releases: boolean;

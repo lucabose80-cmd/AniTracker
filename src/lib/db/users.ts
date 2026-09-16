@@ -15,7 +15,8 @@ export async function createUserProfile(uid: string, username: string, email: st
       username,
       avatar_url: "",
       following_array: [],
-      top_9_list: [],
+      top_9_anime: [],
+      top_9_manga: [],
       read_watch_history: [],
       email // Saving email securely on backend is fine
     });
@@ -40,11 +41,12 @@ export async function addToHistory(uid: string, workId: string) {
   }, { merge: true });
 }
 
-export async function updateTop9List(uid: string, list: string[]) {
+export async function updateTop9List(uid: string, list: string[], type: "ANIME" | "MANGA") {
   if (!db) return;
   const docRef = doc(db, "users", uid);
+  const fieldName = type === "ANIME" ? "top_9_anime" : "top_9_manga";
   await setDoc(docRef, {
-    top_9_list: list
+    [fieldName]: list
   }, { merge: true });
 }
 
