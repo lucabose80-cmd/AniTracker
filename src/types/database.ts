@@ -40,6 +40,7 @@ export interface UserWork {
   priority_tier: 1 | 2 | 3;
   sync_offset_days: number;
   selected_platform: string;
+  manual_max_episode?: number;
   
   adaptationScores: {
     story: number;
@@ -92,8 +93,9 @@ export interface Comment {
 export interface ActivityFeed {
   activity_id: string;
   user_id: string;
-  action_type: "MANUAL_POST" | "RATING" | "COMMENT" | "TOP9_UPDATE" | "RECOMMENDATION";
+  action_type: "MANUAL_POST" | "RATING" | "COMMENT" | "TOP9_UPDATE" | "RECOMMENDATION" | "EPISODE_THREAD";
   work_id?: string;
+  episode_num?: number;
   text?: string;
   timestamp: string; // ISO string
   details?: string;

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAppStore } from "@/lib/store";
-import { fetchAniList, GET_TRENDING_WORKS, GET_WORKS_BATCH, GET_RECOMMENDATIONS_BY_GENRE } from "@/lib/anilist";
+import { fetchAniList, GET_TRENDING_WORKS, GET_RECOMMENDATIONS_BY_GENRE, fetchAniListBatch } from "@/lib/anilist";
 import { Star, Flame, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { auth } from "@/lib/firebase";
@@ -53,17 +53,16 @@ export default function Home() {
         const works = await getAllUserWorks(user.uid);
         setUserWorks(works);
 
-        // Fetch AniList Details for User's Top 50 Works to extract genres
-        const sortedWorks = [...works].sort((a, b) => (b.evaluation?.overallScore || 0) - (a.evaluation?.overallScore || 0)).slice(0, 50);
-        const idsToFetch = sortedWorks.map(w => parseInt(w.work_id, 10));
+        // Fetch AniList Details for ALL User Works to support Up Next & Top Genres
+        const idsToFetch = works.map(w => parseInt(w.work_id, 10));
         
         if (idsToFetch.length > 0) {
           try {
-            const data = await fetchAniList(GET_WORKS_BATCH, { ids: idsToFetch });
+            const mediaList = await fetchAniListBatch(idsToFetch);
             const map: Record<string, any> = {};
             const genreCounts: Record<string, number> = {};
             
-            data.Page.media.forEach((m: any) => {
+            mediaList.forEach((m: any) => {
               map[m.id.toString()] = m;
               if (m.genres) {
                 m.genres.forEach((g: string) => {
@@ -127,8 +126,82 @@ export default function Home() {
     .sort((a, b) => (b.evaluation?.overallScore || 0) - (a.evaluation?.overallScore || 0))
     .slice(0, 5);
 
+  // Calculate Up Next (Rückstand)
+  const upNextWorks = userWorks
+    .map(w => {
+      const details = userAniListDetails[w.work_id];
+      if (!details || details.type !== contentType) return null;
+      let maxAiredEp = 0;
+      if (w.manual_max_episode !== undefined && w.manual_max_episode !== null) {
+        maxAiredEp = Number(w.manual_max_episode);
+      } else if (details.type === "MANGA") {
+        maxAiredEp = details.chapters || 0;
+      } else {
+        if (details.status === "RELEASING" && details.nextAiringEpisode) {
+          maxAiredEp = details.nextAiringEpisode.episode - 1;
+        } else if (details.status === "FINISHED") {
+          maxAiredEp = details.episodes || 0;
+        }
+      }
+      
+      const current = Number(w.current_episode) || 0;
+      const behindCount = Math.max(0, maxAiredEp - current);
+      return behindCount > 0 ? { ...w, details, behindCount, nextEpToWatch: current + 1 } : null;
+    })
+    .filter(w => w !== null)
+    .sort((a, b) => b!.behindCount - a!.behindCount);
+
+  // We need to know if we are still loading details
+  const isLoadingDetails = userWorks.length > 0 && Object.keys(userAniListDetails).length === 0;
+
   return (
     <div className="flex flex-col gap-8 px-4 pt-6 pb-24">
+      {/* UP NEXT SECTION */}
+      {isLoggedIn && (
+        <section>
+          <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
+            <Star className="text-blue-500" /> 
+            Up Next (Dein Rückstand)
+          </h2>
+          
+          {isLoadingDetails ? (
+            <div className="text-gray-500 text-sm animate-pulse border border-gray-800 bg-[#1a1d24] rounded-xl p-6 text-center">Lade Werke...</div>
+          ) : upNextWorks.length === 0 ? (
+            <div className="text-gray-500 text-sm border border-gray-800 bg-[#1a1d24] rounded-xl p-6 text-center">
+              Du bist auf dem neuesten Stand! Keine fehlenden {contentType === "ANIME" ? "Folgen" : "Kapitel"}.
+            </div>
+          ) : (
+            <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-4 scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+              {upNextWorks.map((work) => (
+              <div key={work.work_id} className="relative min-w-[260px] snap-center overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg flex flex-col">
+                <div className="relative aspect-video w-full overflow-hidden">
+                  <img 
+                    src={work.details?.bannerImage || work.details?.coverImage?.extraLarge} 
+                    alt={work.details?.title?.romaji}
+                    className="w-full h-full object-cover opacity-60"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#1a1d24] to-transparent" />
+                  <div className="absolute top-2 right-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full shadow-md">
+                    {work.behindCount} {work.details?.type === "MANGA" ? "Kapitel" : "Folgen"} zurück
+                  </div>
+                </div>
+                <div className="p-4 flex flex-col flex-1 justify-between -mt-8 relative z-10">
+                  <div>
+                    <h3 className="font-bold text-white line-clamp-1">{work.details?.title?.english || work.details?.title?.romaji}</h3>
+                    <p className="text-xs text-gray-400 mt-1">Als nächstes: {work.details?.type === "MANGA" ? "Kapitel" : "Folge"} {work.nextEpToWatch}</p>
+                  </div>
+                  <Link 
+                    href={`/work/${work.work_id}?episode=${work.nextEpToWatch}`}
+                    className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded-lg text-center transition shadow-lg"
+                  >
+                    Folge {work.nextEpToWatch} kommentieren & abhaken
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
       {/* TRENDING SECTION */}
       <section>
         <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">

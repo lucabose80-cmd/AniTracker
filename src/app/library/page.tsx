@@ -10,7 +10,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { auth } from "@/lib/firebase";
 import { getUserProfile, updateTop9List } from "@/lib/db/users";
 import { getAllUserWorks } from "@/lib/db/works";
-import { fetchAniList, GET_WORKS_BATCH } from "@/lib/anilist";
+import { fetchAniListBatch } from "@/lib/anilist";
 import { UserWork } from "@/types/database";
 import Link from "next/link";
 
@@ -29,7 +29,9 @@ function SortableItem({ id, index, workDetails, userWork, onRemove }: { id: stri
   if (workDetails && userWork) {
     const currentEp = userWork.current_episode || 0;
     let maxAiredEp = 0;
-    if (workDetails.type === "MANGA") {
+    if (userWork.manual_max_episode !== undefined && userWork.manual_max_episode !== null) {
+      maxAiredEp = userWork.manual_max_episode;
+    } else if (workDetails.type === "MANGA") {
       maxAiredEp = workDetails.chapters || 0;
     } else {
       if (workDetails.status === "RELEASING" && workDetails.nextAiringEpisode) {
@@ -38,7 +40,7 @@ function SortableItem({ id, index, workDetails, userWork, onRemove }: { id: stri
         maxAiredEp = workDetails.episodes || 0;
       }
     }
-    behindCount = maxAiredEp - currentEp;
+    behindCount = Math.max(0, maxAiredEp - currentEp);
   }
 
   return (
@@ -104,9 +106,9 @@ export default function LibraryPage() {
 
           const allIdsToFetch = works.map(w => parseInt(w.work_id, 10));
           if (allIdsToFetch.length > 0) {
-            const data = await fetchAniList(GET_WORKS_BATCH, { ids: allIdsToFetch });
+            const mediaList = await fetchAniListBatch(allIdsToFetch);
             const map: Record<string, any> = {};
-            data.Page.media.forEach((m: any) => {
+            mediaList.forEach((m: any) => {
               map[m.id.toString()] = m;
             });
             setAniListDetails(map);
@@ -256,7 +258,9 @@ export default function LibraryPage() {
               if (details) {
                 const currentEp = work.current_episode || 0;
                 let maxAiredEp = 0;
-                if (details.type === "MANGA") {
+                if (work.manual_max_episode !== undefined && work.manual_max_episode !== null) {
+                  maxAiredEp = work.manual_max_episode;
+                } else if (details.type === "MANGA") {
                   maxAiredEp = details.chapters || 0;
                 } else {
                   if (details.status === "RELEASING" && details.nextAiringEpisode) {
@@ -265,7 +269,7 @@ export default function LibraryPage() {
                     maxAiredEp = details.episodes || 0;
                   }
                 }
-                behindCount = maxAiredEp - currentEp;
+                behindCount = Math.max(0, maxAiredEp - currentEp);
               }
 
               return (

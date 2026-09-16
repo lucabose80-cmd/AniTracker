@@ -53,9 +53,51 @@ export async function addComment(
             title: "Neue Antwort",
             body: `${author_name} hat auf deinen Kommentar geantwortet.`,
             type: "replies",
-            link: `/work/${work_id}`
+            link: `/work/${work_id}?episode=${episode_num || ''}`
           })
         }).catch(console.error);
+      }
+    }
+  } else if (episode_num && !parent_comment_id) {
+    // Top-level comment for an episode - check if thread exists
+    const feedRef = collection(db, "activity_feed");
+    const qThread = query(
+      feedRef, 
+      where("work_id", "==", work_id), 
+      where("action_type", "==", "EPISODE_THREAD"),
+      where("episode_num", "==", episode_num)
+    );
+    const threadDocs = await getDocs(qThread);
+    
+    if (threadDocs.empty) {
+      // Create thread activity
+      const { createActivity } = await import("./feed");
+      await createActivity(author_uid, "EPISODE_THREAD", work_id, `Die Diskussion zu Folge/Kapitel ${episode_num} ist eröffnet!`, undefined, episode_num);
+      
+      // Notify all users who have this work in their library
+      const worksRef = collection(db, "user_works");
+      const qWorks = query(worksRef, where("work_id", "==", work_id));
+      const worksSnap = await getDocs(qWorks);
+      const userIds = worksSnap.docs
+        .map(d => d.data().user_id)
+        .filter(id => id !== author_uid);
+        
+      if (userIds.length > 0) {
+        // We'll send individual fetch requests or a bulk endpoint. Since /api/notify takes targetUserId, we just loop.
+        // It's async so it won't block the UI much, but we shouldn't await them all.
+        userIds.forEach(uid => {
+          fetch("/api/notify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              targetUserId: uid,
+              title: "Neuer Raum eröffnet!",
+              body: `${author_name} hat eine Diskussion zu Folge/Kapitel ${episode_num} gestartet.`,
+              type: "social",
+              link: `/work/${work_id}?episode=${episode_num}`
+            })
+          }).catch(console.error);
+        });
       }
     }
   }

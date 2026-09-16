@@ -27,6 +27,22 @@ export async function fetchAniList(query: string, variables: any = {}) {
   return json.data;
 }
 
+export async function fetchAniListBatch(ids: number[]) {
+  const validIds = ids.filter(id => !isNaN(id) && id > 0);
+  const results: any[] = [];
+  
+  for (let i = 0; i < validIds.length; i += 50) {
+    const chunk = validIds.slice(i, i + 50);
+    if (chunk.length === 0) continue;
+    const data = await fetchAniList(GET_WORKS_BATCH, { ids: chunk });
+    if (data?.Page?.media) {
+      results.push(...data.Page.media);
+    }
+  }
+  
+  return results;
+}
+
 // -- Queries --
 
 export const GET_TRENDING_WORKS = `

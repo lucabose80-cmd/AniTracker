@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { auth } from "@/lib/firebase";
 import { Comment } from "@/types/database";
 import { getCommentsForWork, addComment, voteComment } from "@/lib/db/comments";
@@ -21,8 +22,11 @@ export function CommentsSection({ workId }: CommentsSectionProps) {
   const [isSpoiler, setIsSpoiler] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
-  const [selectedEpisodeFilter, setSelectedEpisodeFilter] = useState<string>("ALL");
-  const [newCommentEpisode, setNewCommentEpisode] = useState<string>("");
+  const searchParams = useSearchParams();
+  const initialEpisode = searchParams.get("episode") || "";
+
+  const [selectedEpisodeFilter, setSelectedEpisodeFilter] = useState<string>(initialEpisode ? initialEpisode : "ALL");
+  const [newCommentEpisode, setNewCommentEpisode] = useState<string>(initialEpisode);
 
   const currentUser = auth.currentUser;
 

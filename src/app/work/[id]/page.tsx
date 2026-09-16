@@ -23,6 +23,7 @@ export default function WorkDetailPage() {
   const [inLibrary, setInLibrary] = useState(false);
   const [showEvaluation, setShowEvaluation] = useState(false);
   const [currentEpisode, setCurrentEpisode] = useState(0);
+  const [manualMaxEpisode, setManualMaxEpisode] = useState<number | "">("");
 
   // Form State for Deep Evaluation
   const [evaluation, setEvaluation] = useState<UserWork["evaluation"]>({
@@ -76,6 +77,7 @@ export default function WorkDetailPage() {
         if (userWork) {
           setInLibrary(true);
           setCurrentEpisode(userWork.current_episode || 0);
+          setManualMaxEpisode(userWork.manual_max_episode || "");
           setEvaluation(userWork.evaluation);
           setWatchMode(userWork.classification?.watchMode || "SUB");
           if (userWork.evaluation.ending > 0) setHasEnding(true);
@@ -266,17 +268,45 @@ export default function WorkDetailPage() {
         <p className="mt-4 text-sm text-gray-300 line-clamp-4" dangerouslySetInnerHTML={{ __html: work.description || "" }} />
 
         {/* EPISODE TRACKING */}
-        <div className="mt-6 flex items-center justify-between bg-gray-900 border border-gray-800 rounded-xl p-4">
-          <span className="font-bold text-gray-300">
-            {work.type === "MANGA" ? "Kapitel gelesen" : "Folgen geschaut"}
-          </span>
-          <div className="flex items-center gap-4">
+        <div className="mt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <div className="flex flex-col">
+            <span className="font-bold text-gray-300">
+              {work.type === "MANGA" ? "Kapitel gelesen" : "Folgen geschaut"}
+            </span>
+            {inLibrary && (
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-xs text-gray-500">Aktuell verfügbar:</span>
+                <input 
+                  type="number" 
+                  placeholder={work.episodes || work.chapters || "?"} 
+                  value={manualMaxEpisode}
+                  onChange={(e) => setManualMaxEpisode(e.target.value === "" ? "" : parseInt(e.target.value))}
+                  onBlur={async () => {
+                    const user = auth?.currentUser;
+                    if (!user || !inLibrary) return;
+                    // Firebase doesn't like undefined, so we remove it by doing nothing if empty, or we pass null 
+                    // To be safe, we just update the specific field if valid, or remove it.
+                    // Let's just use updateDoc directly for safety.
+                    const { updateDoc, doc, deleteField } = await import("firebase/firestore");
+                    const { db } = await import("@/lib/firebase");
+                    if (!db) return;
+                    await updateDoc(doc(db, "user_works", `${user.uid}_${id}`), {
+                      manual_max_episode: manualMaxEpisode === "" ? deleteField() : manualMaxEpisode
+                    });
+                  }}
+                  title="Hier eintragen, wenn die API keine oder falsche Werte liefert"
+                  className="w-16 bg-[#1a1d24] border border-gray-700 rounded px-2 py-1 text-xs text-white outline-none focus:border-blue-500"
+                />
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-4 self-end sm:self-auto">
             <button 
               onClick={() => handleUpdateEpisode(-1)}
               className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-800 text-white font-bold hover:bg-gray-700 active:scale-95"
             >-</button>
             <span className="font-mono font-bold text-lg text-blue-400">
-              {currentEpisode} <span className="text-sm text-gray-500">/ {work.episodes || work.chapters || "?"}</span>
+              {currentEpisode} <span className="text-sm text-gray-500">/ {manualMaxEpisode !== "" ? manualMaxEpisode : (work.episodes || work.chapters || "?")}</span>
             </span>
             <button 
               onClick={() => handleUpdateEpisode(1)}

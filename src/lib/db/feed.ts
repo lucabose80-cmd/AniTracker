@@ -7,7 +7,8 @@ export async function createActivity(
   action_type: ActivityFeed["action_type"],
   work_id?: string,
   text?: string,
-  details?: string
+  details?: string,
+  episode_num?: number
 ): Promise<ActivityFeed | null> {
   if (!db) return null;
 
@@ -25,6 +26,7 @@ export async function createActivity(
   if (work_id !== undefined) newActivity.work_id = work_id;
   if (text !== undefined) newActivity.text = text;
   if (details !== undefined) newActivity.details = details;
+  if (episode_num !== undefined) newActivity.episode_num = episode_num;
 
   await setDoc(newDocRef, newActivity as ActivityFeed);
 

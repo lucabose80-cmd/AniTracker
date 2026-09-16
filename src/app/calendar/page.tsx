@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { auth } from "@/lib/firebase";
 import { getAllUserWorks } from "@/lib/db/works";
-import { fetchAniList, GET_WORKS_BATCH } from "@/lib/anilist";
+import { fetchAniListBatch } from "@/lib/anilist";
 import { getCalendarOverrides, setCalendarOverride } from "@/lib/db/calendar";
 import { useAppStore } from "@/lib/store";
 import { Calendar as CalendarIcon, Clock, Tv, Edit2, Check, X } from "lucide-react";
@@ -53,15 +53,15 @@ export default function CalendarPage() {
       setUserWorkMap(map);
       
       if (ids.length > 0) {
-        const [data, overrides] = await Promise.all([
-          fetchAniList(GET_WORKS_BATCH, { ids }),
+        const [mediaList, overrides] = await Promise.all([
+          fetchAniListBatch(ids),
           getCalendarOverrides()
         ]);
         
         let scheduled: any[] = [];
-        const mediaList = data.Page.media.filter((m: any) => m.type === contentType);
+        const filteredMediaList = mediaList.filter((m: any) => m.type === contentType);
 
-        mediaList.forEach((m: any) => {
+        filteredMediaList.forEach((m: any) => {
           const strId = m.id.toString();
           const over = overrides[strId];
           
@@ -203,8 +203,13 @@ export default function CalendarPage() {
                 // Calculate Behind Status
                 const uWork = userWorkMap[strId];
                 const currentEp = uWork?.current_episode || 0;
-                const episodesOut = anime.nextAiringEpisode.episode - 1;
-                const behindCount = episodesOut - currentEp;
+                
+                let episodesOut = anime.nextAiringEpisode.episode - 1;
+                if (uWork?.manual_max_episode !== undefined && uWork?.manual_max_episode !== null) {
+                  episodesOut = uWork.manual_max_episode;
+                }
+                
+                const behindCount = Math.max(0, episodesOut - currentEp);
 
                 const isEditing = editingId === strId;
                 
