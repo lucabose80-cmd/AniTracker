@@ -73,3 +73,11 @@ export async function getAllUserWorks(userId: string): Promise<UserWork[]> {
     return [];
   }
 }
+
+export async function updateEpisodeProgress(userId: string, workId: string, current_episode: number): Promise<void> {
+  if (!db) return;
+  const docId = `${userId}_${workId}`;
+  const docRef = doc(db, "user_works", docId);
+  
+  await updateDoc(docRef, { current_episode });
+}

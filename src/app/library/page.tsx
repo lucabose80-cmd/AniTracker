@@ -15,7 +15,7 @@ import { UserWork } from "@/types/database";
 import Link from "next/link";
 
 // Simple Sortable Item Component
-function SortableItem({ id, index, workDetails }: { id: string, index: number, workDetails?: any }) {
+function SortableItem({ id, index, workDetails, userWork }: { id: string, index: number, workDetails?: any, userWork?: any }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   
   const style = {
@@ -24,6 +24,18 @@ function SortableItem({ id, index, workDetails }: { id: string, index: number, w
     zIndex: isDragging ? 50 : 1,
     opacity: isDragging ? 0.8 : 1,
   };
+
+  let behindCount = 0;
+  if (workDetails && userWork) {
+    const currentEp = userWork.current_episode || 0;
+    let maxAiredEp = 0;
+    if (workDetails.status === "RELEASING" && workDetails.nextAiringEpisode) {
+      maxAiredEp = workDetails.nextAiringEpisode.episode - 1;
+    } else if (workDetails.status === "FINISHED") {
+      maxAiredEp = workDetails.episodes || 0;
+    }
+    behindCount = maxAiredEp - currentEp;
+  }
 
   return (
     <div 
@@ -36,7 +48,11 @@ function SortableItem({ id, index, workDetails }: { id: string, index: number, w
       <span className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white backdrop-blur-md z-10 pointer-events-none">
         {index + 1}
       </span>
-      {/* We will load real covers later, for now we show IDs or Empty */}
+      {behindCount > 0 && (
+        <span className="absolute -top-1 -right-1 flex items-center justify-center rounded-full bg-red-600 text-[10px] px-1.5 py-0.5 font-bold text-white shadow-md z-10 pointer-events-none">
+          {behindCount}
+        </span>
+      )}
       {id.startsWith("empty") ? (
         <span className="text-gray-700 text-3xl font-light pointer-events-none">+</span>
       ) : workDetails ? (
@@ -74,12 +90,10 @@ export default function LibraryPage() {
           ]);
 
           let currentTop9 = profile?.top_9_list || [];
-          // Fill up to 9
           while(currentTop9.length < 9) {
             currentTop9.push(`empty-${currentTop9.length}`);
           }
 
-          // Auto-fill empty slots if there are works not in Top 9
           const worksInTop9 = currentTop9.filter(id => !id.startsWith("empty"));
           const worksNotInTop9 = works.filter(w => !worksInTop9.includes(w.work_id));
 
@@ -93,7 +107,6 @@ export default function LibraryPage() {
           setItems(currentTop9);
           setAllWorks(works);
 
-          // Fetch AniList Data for all unique works
           const allIdsToFetch = works.map(w => parseInt(w.work_id, 10));
           if (allIdsToFetch.length > 0) {
             const data = await fetchAniList(GET_WORKS_BATCH, { ids: allIdsToFetch });
@@ -124,7 +137,6 @@ export default function LibraryPage() {
         const newIndex = prevItems.indexOf(over.id as string);
         const newItems = arrayMove(prevItems, oldIndex, newIndex);
         
-        // Sync to Firestore
         if (auth.currentUser) {
           updateTop9List(auth.currentUser.uid, newItems).catch(console.error);
         }
@@ -135,7 +147,7 @@ export default function LibraryPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6 px-4 pt-6 pb-24">
+    <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-5xl mx-auto">
       <h2 className="flex items-center gap-2 text-xl font-bold">
         <LibraryIcon className="text-blue-500" /> 
         Meine Bibliothek
@@ -166,11 +178,14 @@ export default function LibraryPage() {
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={items} strategy={horizontalListSortingStrategy}>
             <div className="flex gap-3 overflow-x-auto pb-4 snap-x snap-mandatory [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-              {items.map((id, index) => (
-                <div key={id} className="snap-center">
-                  <SortableItem id={id} index={index} workDetails={aniListDetails[id]} />
-                </div>
-              ))}
+              {items.map((id, index) => {
+                const uWork = allWorks.find(w => w.work_id === id);
+                return (
+                  <div key={id} className="snap-center">
+                    <SortableItem id={id} index={index} workDetails={aniListDetails[id]} userWork={uWork} />
+                  </div>
+                );
+              })}
             </div>
           </SortableContext>
         </DndContext>
@@ -191,12 +206,29 @@ export default function LibraryPage() {
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
             {allWorks.map(work => {
               const details = aniListDetails[work.work_id];
+              let behindCount = 0;
+              if (details) {
+                const currentEp = work.current_episode || 0;
+                let maxAiredEp = 0;
+                if (details.status === "RELEASING" && details.nextAiringEpisode) {
+                  maxAiredEp = details.nextAiringEpisode.episode - 1;
+                } else if (details.status === "FINISHED") {
+                  maxAiredEp = details.episodes || 0;
+                }
+                behindCount = maxAiredEp - currentEp;
+              }
+
               return (
                 <Link href={`/work/${work.work_id}`} key={work.work_id} className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500 hover:shadow-lg">
                   {details ? (
                     <img src={details.coverImage?.extraLarge || details.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
                   ) : (
                     <div className="flex h-full items-center justify-center p-2 text-xs text-gray-500 text-center">Lade...</div>
+                  )}
+                  {behindCount > 0 && (
+                    <div className="absolute -top-1 -right-1 flex items-center justify-center rounded-full bg-red-600 text-[10px] px-1.5 py-0.5 font-bold text-white shadow-md z-10 pointer-events-none">
+                      {behindCount}
+                    </div>
                   )}
                   {/* Status Badge */}
                   <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/90 to-transparent p-2 text-center text-[10px] font-bold text-white opacity-0 transition group-hover:opacity-100">

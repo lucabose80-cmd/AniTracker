@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { auth } from "@/lib/firebase";
 import { getAllUserWorks } from "@/lib/db/works";
 import { fetchAniList, GET_USER_AIRING_SCHEDULE } from "@/lib/anilist";
-import { Calendar as CalendarIcon, Clock, Tv } from "lucide-react";
+import { getCalendarOverrides, setCalendarOverride } from "@/lib/db/calendar";
+import { Calendar as CalendarIcon, Clock, Tv, Edit2, Check, X } from "lucide-react";
 import Link from "next/link";
 import { format, formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
@@ -22,40 +23,88 @@ const DAYS = [
 
 export default function CalendarPage() {
   const [airingAnime, setAiringAnime] = useState<any[]>([]);
+  const [userWorkMap, setUserWorkMap] = useState<Record<string, any>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [selectedDay, setSelectedDay] = useState<number>(new Date().getDay());
 
-  useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (user) => {
-      if (user) {
-        setIsLoggedIn(true);
-        setIsLoading(true);
-        try {
-          const works = await getAllUserWorks(user.uid);
-          const ids = works.map(w => parseInt(w.work_id, 10));
-          
-          if (ids.length > 0) {
-            const data = await fetchAniList(GET_USER_AIRING_SCHEDULE, { ids });
-            const scheduled = data.Page.media.filter((m: any) => m.nextAiringEpisode);
-            
-            // Sort by airing time so they appear in chronological order for the day
-            scheduled.sort((a: any, b: any) => a.nextAiringEpisode.airingAt - b.nextAiringEpisode.airingAt);
-            setAiringAnime(scheduled);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDateString, setEditDateString] = useState("");
+
+  const loadData = async () => {
+    const user = auth.currentUser;
+    if (!user) {
+      setIsLoggedIn(false);
+      setAiringAnime([]);
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoggedIn(true);
+    setIsLoading(true);
+    try {
+      const works = await getAllUserWorks(user.uid);
+      const ids = works.map(w => parseInt(w.work_id, 10));
+      
+      const map: Record<string, any> = {};
+      works.forEach(w => map[w.work_id] = w);
+      setUserWorkMap(map);
+      
+      if (ids.length > 0) {
+        const [data, overrides] = await Promise.all([
+          fetchAniList(GET_USER_AIRING_SCHEDULE, { ids }),
+          getCalendarOverrides()
+        ]);
+        
+        const scheduled = data.Page.media.filter((m: any) => m.nextAiringEpisode);
+        
+        // Apply Global Overrides
+        scheduled.forEach((m: any) => {
+          const strId = m.id.toString();
+          if (overrides[strId]) {
+            m.nextAiringEpisode.airingAt = overrides[strId];
           }
-        } catch (err) {
-          console.error(err);
-        } finally {
-          setIsLoading(false);
-        }
-      } else {
-        setIsLoggedIn(false);
-        setAiringAnime([]);
-        setIsLoading(false);
+        });
+
+        // Sort by airing time so they appear in chronological order for the day
+        scheduled.sort((a: any, b: any) => a.nextAiringEpisode.airingAt - b.nextAiringEpisode.airingAt);
+        setAiringAnime(scheduled);
       }
-    });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged(() => loadData());
     return () => unsubscribe();
   }, []);
+
+  const handleEditClick = (anime: any, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setEditingId(anime.id.toString());
+    // Convert unix timestamp to datetime-local string format YYYY-MM-DDTHH:mm
+    const date = new Date(anime.nextAiringEpisode.airingAt * 1000);
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    setEditDateString(local);
+  };
+
+  const handleSaveOverride = async (animeId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const newDate = new Date(editDateString);
+    const newUnix = Math.floor(newDate.getTime() / 1000);
+    
+    await setCalendarOverride(animeId, newUnix);
+    setEditingId(null);
+    
+    // Refresh
+    loadData();
+  };
 
   const dayAnime = airingAnime.filter(anime => {
     const date = new Date(anime.nextAiringEpisode.airingAt * 1000);
@@ -116,18 +165,35 @@ export default function CalendarPage() {
                 const date = new Date(anime.nextAiringEpisode.airingAt * 1000);
                 const timeString = format(date, "HH:mm");
                 const countdown = formatDistanceToNow(date, { addSuffix: true, locale: de });
+                const strId = anime.id.toString();
+                
+                // Calculate Behind Status
+                const uWork = userWorkMap[strId];
+                const currentEp = uWork?.current_episode || 0;
+                const episodesOut = anime.nextAiringEpisode.episode - 1;
+                const behindCount = episodesOut - currentEp;
+
+                const isEditing = editingId === strId;
                 
                 return (
                   <Link 
-                    href={`/work/${anime.id}`} 
-                    key={anime.id}
-                    className="flex gap-4 p-3 bg-[#1a1d24] border border-gray-800 rounded-xl shadow-md hover:border-blue-500 transition-colors group"
+                    href={`/work/${strId}`} 
+                    key={strId}
+                    className="relative flex gap-4 p-3 bg-[#1a1d24] border border-gray-800 rounded-xl shadow-md hover:border-blue-500 transition-colors group overflow-hidden"
                   >
-                    <img 
-                      src={anime.coverImage.large} 
-                      alt="Cover" 
-                      className="w-16 h-24 object-cover rounded-lg shadow-sm"
-                    />
+                    <div className="relative shrink-0">
+                      <img 
+                        src={anime.coverImage.large} 
+                        alt="Cover" 
+                        className="w-16 h-24 object-cover rounded-lg shadow-sm"
+                      />
+                      {behindCount > 0 && (
+                        <div className="absolute -top-2 -right-2 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full border-2 border-[#1a1d24]">
+                          {behindCount}
+                        </div>
+                      )}
+                    </div>
+
                     <div className="flex flex-col justify-between flex-1 py-1">
                       <div>
                         <div className="flex justify-between items-start gap-2">
@@ -140,15 +206,42 @@ export default function CalendarPage() {
                         </p>
                       </div>
                       
-                      <div className="flex items-center gap-3 mt-3">
-                        <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-gray-900 border border-gray-800">
-                          <Clock size={12} className="text-gray-400" />
-                          <span className="text-xs font-bold text-gray-300">{timeString} Uhr</span>
+                      {isEditing ? (
+                        <div className="flex items-center gap-2 mt-2" onClick={e => e.preventDefault()}>
+                          <input 
+                            type="datetime-local" 
+                            value={editDateString}
+                            onChange={(e) => setEditDateString(e.target.value)}
+                            className="bg-gray-900 border border-gray-700 rounded text-xs text-white p-1"
+                          />
+                          <button onClick={(e) => handleSaveOverride(strId, e)} className="bg-green-600 p-1 rounded text-white">
+                            <Check size={14} />
+                          </button>
+                          <button onClick={(e) => { e.preventDefault(); setEditingId(null); }} className="bg-red-600 p-1 rounded text-white">
+                            <X size={14} />
+                          </button>
                         </div>
-                        <span className="text-[10px] font-medium text-gray-500 bg-gray-900/50 px-2 py-1 rounded">
-                          {countdown}
-                        </span>
-                      </div>
+                      ) : (
+                        <div className="flex justify-between items-end mt-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-gray-900 border border-gray-800">
+                              <Clock size={12} className="text-gray-400" />
+                              <span className="text-xs font-bold text-gray-300">{timeString} Uhr</span>
+                            </div>
+                            <span className="text-[10px] font-medium text-gray-500 bg-gray-900/50 px-2 py-1 rounded">
+                              {countdown}
+                            </span>
+                          </div>
+                          
+                          <button 
+                            onClick={(e) => handleEditClick(anime, e)}
+                            className="text-gray-500 hover:text-white transition p-1"
+                            title="Zeit korrigieren"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </Link>
                 );

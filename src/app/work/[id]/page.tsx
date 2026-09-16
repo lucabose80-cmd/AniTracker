@@ -8,7 +8,7 @@ import { UserWork, EmotionalImpact, WatchMode } from "@/types/database";
 import { Star, ChevronLeft, Save, Library as LibraryIcon, Check } from "lucide-react";
 import Link from "next/link";
 import { auth } from "@/lib/firebase";
-import { saveUserWork, getUserWork } from "@/lib/db/works";
+import { saveUserWork, getUserWork, updateEpisodeProgress } from "@/lib/db/works";
 import { addToHistory } from "@/lib/db/users";
 import { CommentsSection } from "./CommentsSection";
 import { createActivity } from "@/lib/db/feed";
@@ -21,6 +21,7 @@ export default function WorkDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [inLibrary, setInLibrary] = useState(false);
   const [showEvaluation, setShowEvaluation] = useState(false);
+  const [currentEpisode, setCurrentEpisode] = useState(0);
 
   // Form State for Deep Evaluation
   const [evaluation, setEvaluation] = useState<UserWork["evaluation"]>({
@@ -62,6 +63,7 @@ export default function WorkDetailPage() {
 
         if (userWork) {
           setInLibrary(true);
+          setCurrentEpisode(userWork.current_episode || 0);
           setEvaluation(userWork.evaluation);
           setWatchMode(userWork.classification?.watchMode || "SUB");
           if (userWork.evaluation.ending > 0) setHasEnding(true);
@@ -97,7 +99,8 @@ export default function WorkDetailPage() {
     try {
       await saveUserWork(user.uid, id, {
         status: "PLANNING",
-        evaluation: evaluation
+        evaluation: evaluation,
+        current_episode: currentEpisode
       });
       await addToHistory(user.uid, id);
       setInLibrary(true);
@@ -159,6 +162,22 @@ export default function WorkDetailPage() {
     }
   };
 
+  const handleUpdateEpisode = async (increment: number) => {
+    const user = auth?.currentUser;
+    if (!user) return alert("Bitte einloggen");
+    
+    const maxEps = work?.episodes || 9999;
+    let newEp = currentEpisode + increment;
+    if (newEp < 0) newEp = 0;
+    if (newEp > maxEps) newEp = maxEps;
+    
+    setCurrentEpisode(newEp);
+    
+    if (inLibrary) {
+      await updateEpisodeProgress(user.uid, id, newEp);
+    }
+  };
+
   if (isLoading) {
     return <div className="p-8 text-center text-gray-400 animate-pulse">Lade Werk Details...</div>;
   }
@@ -208,6 +227,24 @@ export default function WorkDetailPage() {
         </div>
 
         <p className="mt-4 text-sm text-gray-300 line-clamp-4" dangerouslySetInnerHTML={{ __html: work.description || "" }} />
+
+        {/* EPISODE TRACKING */}
+        <div className="mt-6 flex items-center justify-between bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <span className="font-bold text-gray-300">Folgen geschaut</span>
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => handleUpdateEpisode(-1)}
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-800 text-white font-bold hover:bg-gray-700 active:scale-95"
+            >-</button>
+            <span className="font-mono font-bold text-lg text-blue-400">
+              {currentEpisode} <span className="text-sm text-gray-500">/ {work.episodes || "?"}</span>
+            </span>
+            <button 
+              onClick={() => handleUpdateEpisode(1)}
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-500 active:scale-95"
+            >+</button>
+          </div>
+        </div>
 
         {/* ACTION BUTTONS */}
         <div className="mt-6 flex flex-col gap-3">

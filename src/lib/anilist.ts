@@ -135,6 +135,11 @@ export const GET_WORKS_BATCH = `
         type
         format
         averageScore
+        status
+        episodes
+        nextAiringEpisode {
+          episode
+        }
       }
     }
   }
