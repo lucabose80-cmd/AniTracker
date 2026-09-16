@@ -5,7 +5,7 @@ import { useAppStore } from "@/lib/store";
 import { useRouter } from "next/navigation";
 import { Library as LibraryIcon, Search, LayoutGrid } from "lucide-react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from "@dnd-kit/core";
-import { arrayMove, SortableContext, sortableKeyboardCoordinates, rectSortingStrategy, useSortable } from "@dnd-kit/sortable";
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { auth } from "@/lib/firebase";
 import { getUserProfile, updateTop9List } from "@/lib/db/users";
@@ -31,7 +31,7 @@ function SortableItem({ id, index, workDetails }: { id: string, index: number, w
       style={style} 
       {...attributes} 
       {...listeners}
-      className={`aspect-[3/4] relative cursor-grab active:cursor-grabbing rounded-xl bg-[#1a1d24] border ${isDragging ? 'border-blue-500 shadow-2xl scale-105' : 'border-gray-800'} flex items-center justify-center font-bold text-gray-500 overflow-hidden`}
+      className={`w-24 shrink-0 aspect-[3/4] relative cursor-grab active:cursor-grabbing rounded-xl bg-[#1a1d24] border ${isDragging ? 'border-blue-500 shadow-2xl scale-105' : 'border-gray-800'} flex items-center justify-center font-bold text-gray-500 overflow-hidden`}
     >
       <span className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white backdrop-blur-md z-10 pointer-events-none">
         {index + 1}
@@ -164,10 +164,12 @@ export default function LibraryPage() {
         <p className="text-xs text-gray-400 mb-4">Halte gedrückt und ziehe, um deine Favoriten anzuordnen.</p>
         
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={items} strategy={rectSortingStrategy}>
-            <div className="grid grid-cols-3 gap-3">
+          <SortableContext items={items} strategy={horizontalListSortingStrategy}>
+            <div className="flex gap-3 overflow-x-auto pb-4 snap-x snap-mandatory [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
               {items.map((id, index) => (
-                <SortableItem key={id} id={id} index={index} workDetails={aniListDetails[id]} />
+                <div key={id} className="snap-center">
+                  <SortableItem id={id} index={index} workDetails={aniListDetails[id]} />
+                </div>
               ))}
             </div>
           </SortableContext>
