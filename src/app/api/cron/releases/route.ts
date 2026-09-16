@@ -63,7 +63,7 @@ export async function GET(req: Request) {
         const userWorksRef = adminDb.collection("user_works");
         const querySnap = await userWorksRef.where("user_id", "==", userDoc.id).get();
         
-        const userLibraryIds = querySnap.docs.map(d => d.data().work_id);
+        const userLibraryIds = querySnap.docs.map((d: any) => d.data().work_id);
         
         for (const schedule of schedules) {
           if (userLibraryIds.includes(schedule.mediaId.toString())) {

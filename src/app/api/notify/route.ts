@@ -12,7 +12,7 @@ export async function POST(req: Request) {
     if (targetUserId === "ALL") {
       const usersSnap = await adminDb.collection("users").get();
       let tokens: string[] = [];
-      usersSnap.forEach(doc => {
+      usersSnap.forEach((doc: any) => {
         const userData = doc.data();
         const settings = userData?.notification_settings || { releases: true, likes: true, replies: true, social: true };
         if (settings[type] !== false && userData.fcm_tokens) {

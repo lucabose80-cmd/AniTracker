@@ -1,9 +1,11 @@
-import * as admin from 'firebase-admin';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import { getMessaging } from 'firebase-admin/messaging';
 
-if (!admin.apps.length) {
+if (!getApps().length) {
   try {
-    admin.initializeApp({
-      credential: admin.credential.cert({
+    initializeApp({
+      credential: cert({
         projectId: "anitracker-e6364",
         clientEmail: "firebase-adminsdk-fbsvc@anitracker-e6364.iam.gserviceaccount.com",
         // Format the key properly to preserve newlines
@@ -15,7 +17,7 @@ if (!admin.apps.length) {
   }
 }
 
-const adminDb = admin.firestore();
-const adminMessaging = admin.messaging();
+const adminDb = getFirestore();
+const adminMessaging = getMessaging();
 
 export { adminDb, adminMessaging };
