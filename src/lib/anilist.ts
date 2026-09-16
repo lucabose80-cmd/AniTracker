@@ -139,3 +139,27 @@ export const GET_WORKS_BATCH = `
     }
   }
 `;
+
+export const GET_RECOMMENDATIONS_BY_GENRE = `
+  query($genre: String, $type: MediaType, $excludeIds: [Int]) {
+    Page(page: 1, perPage: 10) {
+      media(type: $type, genre: $genre, id_not_in: $excludeIds, sort: SCORE_DESC) {
+        id
+        title {
+          romaji
+          english
+        }
+        coverImage {
+          extraLarge
+          large
+        }
+        type
+        format
+        episodes
+        chapters
+        averageScore
+        genres
+      }
+    }
+  }
+`;
