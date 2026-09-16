@@ -27,7 +27,7 @@ export async function POST(req: Request) {
         data: { link: link || "/", type },
         webpush: {
           headers: { Urgency: "high" },
-          notification: { icon: "/icon-192x192.png" },
+          notification: { icon: "https://anitracker-delta.vercel.app/icon-192x192.png" },
           fcmOptions: { link: link || "/" }
         },
         tokens,
@@ -59,7 +59,7 @@ export async function POST(req: Request) {
       data: { link: link || "/", type },
       webpush: {
         headers: { Urgency: "high" },
-        notification: { icon: "/icon-192x192.png" },
+        notification: { icon: "https://anitracker-delta.vercel.app/icon-192x192.png" },
         fcmOptions: { link: link || "/" }
       },
       tokens,
