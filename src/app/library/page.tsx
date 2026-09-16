@@ -75,7 +75,7 @@ export default function LibraryPage() {
       <form className="relative" onSubmit={(e) => {
         e.preventDefault();
         const val = (e.target as any).elements.q.value;
-        if(val) window.location.href = `/search?q=${encodeURIComponent(val)}`;
+        if(val) router.push(`/search?q=${encodeURIComponent(val)}`);
       }}>
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
         <input 
