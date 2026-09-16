@@ -122,7 +122,14 @@ export default function SocialPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [workDetails, setWorkDetails] = useState<Record<string, any>>({});
   const [userProfiles, setUserProfiles] = useState<Record<string, any>>({});
-  const currentUserUid = auth.currentUser?.uid;
+  const [currentUserUid, setCurrentUserUid] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      setCurrentUserUid(user?.uid);
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     async function loadFeed() {
@@ -144,13 +151,15 @@ export default function SocialPage() {
         
         // Fetch AniList details
         if (workIdsArr.length > 0) {
-          const idsToFetch = workIdsArr.map(id => parseInt(id, 10));
-          const mediaList = await fetchAniListBatch(idsToFetch);
-          const map: Record<string, any> = {};
-          mediaList.forEach((m: any) => {
-            map[m.id.toString()] = m;
-          });
-          setWorkDetails(map);
+          const idsToFetch = workIdsArr.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+          if (idsToFetch.length > 0) {
+            const mediaList = await fetchAniListBatch(idsToFetch);
+            const map: Record<string, any> = {};
+            mediaList.forEach((m: any) => {
+              map[m.id.toString()] = m;
+            });
+            setWorkDetails(map);
+          }
         }
         
         // Fetch User profiles

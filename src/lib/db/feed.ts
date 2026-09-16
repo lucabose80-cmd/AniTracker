@@ -37,6 +37,7 @@ export async function createActivity(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         targetUserId: "ALL",
+        excludeUserId: user_id,
         title: "Neuer Social Beitrag",
         body: text || "Jemand hat etwas im Social Feed gepostet.",
         type: "social",
@@ -49,6 +50,7 @@ export async function createActivity(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         targetUserId: "ALL", // Or followers if we had follower logic easily accessible
+        excludeUserId: user_id,
         title: "Neues Wochen-Ranking!",
         body: text || "Jemand hat sein neues Wochen-Ranking veröffentlicht.",
         type: "social",

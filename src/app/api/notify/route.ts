@@ -3,7 +3,7 @@ import { adminDb, adminMessaging } from "@/lib/firebase-admin";
 
 export async function POST(req: Request) {
   try {
-    const { targetUserId, title, body, type, link } = await req.json();
+    const { targetUserId, title, body, type, link, excludeUserId } = await req.json();
 
     if (!targetUserId || !title || !body || !type) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -13,6 +13,7 @@ export async function POST(req: Request) {
       const usersSnap = await adminDb.collection("users").get();
       let tokens: string[] = [];
       usersSnap.forEach((doc: any) => {
+        if (excludeUserId && doc.id === excludeUserId) return;
         const userData = doc.data();
         const settings = userData?.notification_settings || { releases: true, likes: true, replies: true, social: true };
         if (settings[type] !== false && userData.fcm_tokens) {
