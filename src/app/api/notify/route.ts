@@ -25,6 +25,11 @@ export async function POST(req: Request) {
       const payload = {
         notification: { title, body },
         data: { link: link || "/", type },
+        webpush: {
+          headers: { Urgency: "high" },
+          notification: { icon: "/icon-192x192.png" },
+          fcmOptions: { link: link || "/" }
+        },
         tokens,
       };
       const response = await adminMessaging.sendEachForMulticast(payload);
@@ -52,6 +57,11 @@ export async function POST(req: Request) {
     const payload = {
       notification: { title, body },
       data: { link: link || "/", type },
+      webpush: {
+        headers: { Urgency: "high" },
+        notification: { icon: "/icon-192x192.png" },
+        fcmOptions: { link: link || "/" }
+      },
       tokens,
     };
 

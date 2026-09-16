@@ -75,7 +75,12 @@ export async function GET(req: Request) {
               },
               data: {
                 link: `/work/${schedule.mediaId}`,
-                type: "releases",
+                type: "releases"
+              },
+              webpush: {
+                headers: { Urgency: "high" },
+                notification: { icon: "/icon-192x192.png" },
+                fcmOptions: { link: `/work/${schedule.mediaId}` }
               },
               tokens,
             };

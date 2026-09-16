@@ -38,14 +38,5 @@ firebase.initializeApp(firebaseConfig);
 // @ts-ignore
 const messaging = firebase.messaging();
 
-// @ts-ignore
-messaging.onBackgroundMessage((payload) => {
-  console.log('[sw.ts] Received background message ', payload);
-  const notificationTitle = payload.notification.title;
-  const notificationOptions = {
-    body: payload.notification.body,
-    icon: '/icon-512x512.png',
-    data: payload.data
-  };
-  self.registration.showNotification(notificationTitle, notificationOptions);
-});
+// FCM handles background messages automatically when a "notification" payload is present.
+// We configure icon and urgency directly in the backend (webpush config) to avoid duplicate notifications.
