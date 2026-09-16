@@ -68,19 +68,24 @@ export interface UserWork {
 export interface Comment {
   comment_id: string;
   work_id: string;
-  episode_num: number;
+  episode_num?: number;
   author_uid: string;
+  author_name: string;
+  author_avatar?: string;
   text: string;
-  timestamp: Date;
+  timestamp: string;
   is_spoiler: boolean;
   parent_comment_id: string | null;
+  upvotes: string[];
+  downvotes: string[];
 }
 
 export interface ActivityFeed {
   activity_id: string;
   user_id: string;
-  action_type: "RATING" | "COMMENT" | "TOP9_UPDATE" | "RECOMMENDATION";
-  work_id: string;
-  timestamp: Date;
-  details: string;
+  action_type: "MANUAL_POST" | "RATING" | "COMMENT" | "TOP9_UPDATE" | "RECOMMENDATION";
+  work_id?: string;
+  text?: string;
+  timestamp: string; // ISO string
+  details?: string;
 }

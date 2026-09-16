@@ -5,9 +5,9 @@ import { usePathname } from "next/navigation";
 import { Home, Calendar, Users, Library, User } from "lucide-react";
 
 const navItems = [
-  { name: "Feed", href: "/", icon: Home },
+  { name: "Home", href: "/", icon: Home },
+  { name: "Social", href: "/feed", icon: Users },
   { name: "Kalender", href: "/calendar", icon: Calendar },
-  { name: "Social", href: "/social", icon: Users },
   { name: "Bibliothek", href: "/library", icon: Library },
   { name: "Profil", href: "/profile", icon: User },
 ];

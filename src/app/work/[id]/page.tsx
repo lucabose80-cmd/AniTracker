@@ -10,6 +10,8 @@ import Link from "next/link";
 import { auth } from "@/lib/firebase";
 import { saveUserWork, getUserWork } from "@/lib/db/works";
 import { addToHistory } from "@/lib/db/users";
+import { CommentsSection } from "./CommentsSection";
+import { createActivity } from "@/lib/db/feed";
 
 export default function WorkDetailPage() {
   const params = useParams();
@@ -47,7 +49,6 @@ export default function WorkDetailPage() {
       if (!id) return;
       setIsLoading(true);
       try {
-        // Parallelize AniList and Firestore fetches
         const user = auth?.currentUser;
         
         const [data, userWork] = await Promise.all([
@@ -55,12 +56,10 @@ export default function WorkDetailPage() {
           user ? getUserWork(user.uid, id) : Promise.resolve(null)
         ]);
 
-        // Process AniList Data
         setWork(data.Media);
         const isRomance = data.Media.genres?.includes("Romance") || false;
         setIsRomanceMainFocus(isRomance);
 
-        // Process Firestore Data
         if (userWork) {
           setInLibrary(true);
           setEvaluation(userWork.evaluation);
@@ -76,7 +75,6 @@ export default function WorkDetailPage() {
     loadData();
   }, [id]);
 
-  // Dynamically calculate score whenever inputs change
   const currentScore = calculateOverallScore({
     evaluation,
     hasEnding,
@@ -103,6 +101,8 @@ export default function WorkDetailPage() {
       });
       await addToHistory(user.uid, id);
       setInLibrary(true);
+      // Create feed activity
+      await createActivity(user.uid, "TOP9_UPDATE", id, `Hat ${work?.title?.romaji || 'ein Werk'} zur Bibliothek hinzugefügt.`);
     } catch (err: any) {
       console.error(err);
       alert("Fehler beim Hinzufügen: " + err.message);
@@ -121,7 +121,6 @@ export default function WorkDetailPage() {
     setIsSaving(true);
     setSaveMessage("");
 
-    // Update overall score in state before saving
     const finalEval = { ...evaluation, overallScore: currentScore };
     setEvaluation(finalEval);
 
@@ -139,10 +138,16 @@ export default function WorkDetailPage() {
           actionDialogScale: 0,
           pacingScale: 0,
         },
-        status: "COMPLETED" // Simplification for now
+        status: "COMPLETED"
       });
       
       await addToHistory(user.uid, id);
+      
+      // Create Feed Activity for High Ratings
+      if (currentScore >= 7) {
+        await createActivity(user.uid, "RATING", id, `Hat ${work?.title?.romaji} mit ${currentScore.toFixed(1)}/10 bewertet!`);
+      }
+
       setInLibrary(true);
       setSaveMessage("Gespeichert!");
       setTimeout(() => setSaveMessage(""), 3000);
@@ -362,6 +367,9 @@ export default function WorkDetailPage() {
           </div>
         </div>
         )}
+        
+        {/* --- COMMENTS SECTION --- */}
+        <CommentsSection workId={id} />
       </div>
     </div>
   );
