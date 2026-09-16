@@ -26,6 +26,7 @@ export default function CalendarPage() {
   const { contentType } = useAppStore();
   const [airingAnime, setAiringAnime] = useState<any[]>([]);
   const [userWorkMap, setUserWorkMap] = useState<Record<string, any>>({});
+  const [globalOverrides, setGlobalOverrides] = useState<Record<string, any>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [selectedDay, setSelectedDay] = useState<number>(new Date().getDay());
@@ -58,6 +59,7 @@ export default function CalendarPage() {
           fetchAniListBatch(ids),
           getCalendarOverrides()
         ]);
+        setGlobalOverrides(overrides);
         
         let scheduled: any[] = [];
         const filteredMediaList = mediaList.filter((m: any) => m.type === contentType);
@@ -94,7 +96,7 @@ export default function CalendarPage() {
             cloned.nextAiringEpisode = {
               ...m.nextAiringEpisode, // keep episode num if exists
               airingAt: computedAiringAt,
-              episode: m.nextAiringEpisode?.episode || ((userWorkMap[strId]?.current_episode || 0) + 1)
+              episode: m.nextAiringEpisode?.episode || ((over?.manualMaxEpisode || userWorkMap[strId]?.current_episode || 0) + 1)
             };
             scheduled.push(cloned);
           }
@@ -206,8 +208,9 @@ export default function CalendarPage() {
                 const currentEp = uWork?.current_episode || 0;
                 
                 let episodesOut = anime.nextAiringEpisode.episode - 1;
-                if (uWork?.manual_max_episode !== undefined && uWork?.manual_max_episode !== null) {
-                  episodesOut = uWork.manual_max_episode;
+                const override = globalOverrides[strId];
+                if (override?.manualMaxEpisode !== undefined && override?.manualMaxEpisode !== null) {
+                  episodesOut = override.manualMaxEpisode;
                 }
                 
                 const behindCount = Math.max(0, episodesOut - currentEp);

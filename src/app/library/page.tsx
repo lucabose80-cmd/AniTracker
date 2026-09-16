@@ -9,15 +9,15 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, horizontalList
 import { CSS } from "@dnd-kit/utilities";
 import { auth } from "@/lib/firebase";
 import { getUserProfile, updateTop9List } from "@/lib/db/users";
-import { getAllUserWorks } from "@/lib/db/works";
 import { fetchAniListBatch } from "@/lib/anilist";
 import { UserWork } from "@/types/database";
+import { getCalendarOverrides } from "@/lib/db/calendar";
 import Link from "next/link";
 import { ArrowUp, ArrowDown, Minus, Save, Share } from "lucide-react";
 import { createActivity } from "@/lib/db/feed";
 
 // Simple Sortable Item Component
-function SortableItem({ id, index, workDetails, userWork, previousRank, onRemove }: { id: string, index: number, workDetails?: any, userWork?: any, previousRank?: number, onRemove: (id: string) => void }) {
+function SortableItem({ id, index, workDetails, userWork, previousRank, globalOverride, onRemove }: { id: string, index: number, workDetails?: any, userWork?: any, previousRank?: number, globalOverride?: any, onRemove: (id: string) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   
   const style = {
@@ -31,7 +31,9 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, onRemove
   if (workDetails && userWork) {
     const currentEp = userWork.current_episode || 0;
     let maxAiredEp = 0;
-    if (userWork.manual_max_episode !== undefined && userWork.manual_max_episode !== null) {
+    if (globalOverride?.manualMaxEpisode !== undefined && globalOverride?.manualMaxEpisode !== null) {
+      maxAiredEp = globalOverride.manualMaxEpisode;
+    } else if (userWork.manual_max_episode !== undefined && userWork.manual_max_episode !== null) {
       maxAiredEp = userWork.manual_max_episode;
     } else if (workDetails.type === "MANGA") {
       maxAiredEp = workDetails.chapters || 0;
@@ -123,6 +125,7 @@ export default function LibraryPage() {
   const [items, setItems] = useState<string[]>(Array(9).fill("").map((_, i) => `empty-${i}`));
   const [allWorks, setAllWorks] = useState<UserWork[]>([]);
   const [aniListDetails, setAniListDetails] = useState<Record<string, any>>({});
+  const [globalOverrides, setGlobalOverrides] = useState<Record<string, any>>({});
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"CURRENT" | "COMPLETED" | "PLANNING">("CURRENT");
@@ -143,7 +146,13 @@ export default function LibraryPage() {
 
           const allIdsToFetch = works.map(w => parseInt(w.work_id, 10));
           if (allIdsToFetch.length > 0) {
-            const mediaList = await fetchAniListBatch(allIdsToFetch);
+            const [mediaList, overrides] = await Promise.all([
+              fetchAniListBatch(allIdsToFetch),
+              getCalendarOverrides()
+            ]);
+            
+            setGlobalOverrides(overrides);
+            
             const map: Record<string, any> = {};
             mediaList.forEach((m: any) => {
               map[m.id.toString()] = m;
@@ -344,7 +353,7 @@ export default function LibraryPage() {
                 const prevRank = prevRanking ? prevRanking.indexOf(id) : undefined;
                 return (
                   <div key={id} className="snap-center">
-                    <SortableItem id={id} index={index} workDetails={aniListDetails[id]} userWork={uWork} previousRank={prevRank} onRemove={handleRemoveFromRanking} />
+                    <SortableItem id={id} index={index} workDetails={aniListDetails[id]} userWork={uWork} previousRank={prevRank} globalOverride={globalOverrides[id]} onRemove={handleRemoveFromRanking} />
                   </div>
                 );
               })}
@@ -390,11 +399,14 @@ export default function LibraryPage() {
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
               {filteredWorks.filter(w => w.status === activeTab).map(work => {
                 const details = aniListDetails[work.work_id];
+                const globalOverride = globalOverrides[work.work_id];
                 let behindCount = 0;
                 if (details) {
                   const currentEp = work.current_episode || 0;
                   let maxAiredEp = 0;
-                  if (work.manual_max_episode !== undefined && work.manual_max_episode !== null) {
+                  if (globalOverride?.manualMaxEpisode !== undefined && globalOverride?.manualMaxEpisode !== null) {
+                    maxAiredEp = globalOverride.manualMaxEpisode;
+                  } else if (work.manual_max_episode !== undefined && work.manual_max_episode !== null) {
                     maxAiredEp = work.manual_max_episode;
                   } else if (details.type === "MANGA") {
                     maxAiredEp = details.chapters || 0;

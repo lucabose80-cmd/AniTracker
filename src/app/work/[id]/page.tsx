@@ -7,7 +7,7 @@ import { calculateOverallScore } from "@/lib/scoring";
 import { UserWork, EmotionalImpact, WatchMode } from "@/types/database";
 import { Star, ChevronLeft, Save, Library as LibraryIcon, Check, Calendar as CalendarIcon, PlayCircle, CheckCircle, Bookmark } from "lucide-react";
 import Link from "next/link";
-import { setCalendarOverride, getCalendarOverrides, CalendarOverride } from "@/lib/db/calendar";
+import { setCalendarOverride, getCalendarOverrides, clearManualMaxEpisode, CalendarOverride } from "@/lib/db/calendar";
 import { auth } from "@/lib/firebase";
 import { saveUserWork, getUserWork, updateEpisodeProgress, removeUserWork, updateUserWorkStatus } from "@/lib/db/works";
 import { addToHistory } from "@/lib/db/users";
@@ -67,10 +67,15 @@ export default function WorkDetailPage() {
 
         setWork(data.Media);
         
-        if (overrides[id] && overrides[id].weeklyTime) {
-          setHasCustomOverride(true);
-          if (overrides[id].weeklyDay !== undefined) setCustomDay(overrides[id].weeklyDay!);
-          if (overrides[id].weeklyTime !== undefined) setCustomTime(overrides[id].weeklyTime!);
+        if (overrides[id]) {
+          if (overrides[id].weeklyTime) {
+            setHasCustomOverride(true);
+            if (overrides[id].weeklyDay !== undefined) setCustomDay(overrides[id].weeklyDay!);
+            if (overrides[id].weeklyTime !== undefined) setCustomTime(overrides[id].weeklyTime!);
+          }
+          if (overrides[id].manualMaxEpisode !== undefined) {
+            setManualMaxEpisode(overrides[id].manualMaxEpisode!);
+          }
         }
         const isRomance = data.Media.genres?.includes("Romance") || false;
         setIsRomanceMainFocus(isRomance);
@@ -79,7 +84,7 @@ export default function WorkDetailPage() {
           setInLibrary(true);
           setUserWorkStatus(userWork.status || "PLANNING");
           setCurrentEpisode(userWork.current_episode || 0);
-          setManualMaxEpisode(userWork.manual_max_episode || "");
+          // Legacy support: if local override exists but no global override, use local (or we just ignore local entirely, ignoring local is cleaner)
           setEvaluation(userWork.evaluation);
           setWatchMode(userWork.classification?.watchMode || "SUB");
           if (userWork.evaluation.ending > 0) setHasEnding(true);
@@ -292,15 +297,11 @@ export default function WorkDetailPage() {
                   onBlur={async () => {
                     const user = auth?.currentUser;
                     if (!user || !inLibrary) return;
-                    // Firebase doesn't like undefined, so we remove it by doing nothing if empty, or we pass null 
-                    // To be safe, we just update the specific field if valid, or remove it.
-                    // Let's just use updateDoc directly for safety.
-                    const { updateDoc, doc, deleteField } = await import("firebase/firestore");
-                    const { db } = await import("@/lib/firebase");
-                    if (!db) return;
-                    await updateDoc(doc(db, "user_works", `${user.uid}_${id}`), {
-                      manual_max_episode: manualMaxEpisode === "" ? deleteField() : manualMaxEpisode
-                    });
+                    if (manualMaxEpisode === "") {
+                      await clearManualMaxEpisode(id);
+                    } else {
+                      await setCalendarOverride(id, undefined, undefined, undefined, manualMaxEpisode as number);
+                    }
                   }}
                   title="Hier eintragen, wenn die API keine oder falsche Werte liefert"
                   className="w-16 bg-[#1a1d24] border border-gray-700 rounded px-2 py-1 text-xs text-white outline-none focus:border-blue-500"
@@ -343,12 +344,14 @@ export default function WorkDetailPage() {
                 <option value={6}>Samstag</option>
                 <option value={0}>Sonntag</option>
               </select>
-              <input 
-                type="time" 
-                value={customTime} 
-                onChange={e => setCustomTime(e.target.value)} 
-                className="w-24 bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-blue-500" 
-              />
+              {work.type !== "MANGA" && (
+                <input 
+                  type="time" 
+                  value={customTime} 
+                  onChange={e => setCustomTime(e.target.value)} 
+                  className="w-24 bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-blue-500" 
+                />
+              )}
               <button 
                 onClick={handleSaveCustomRelease} 
                 className="bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-lg font-bold text-white transition"
