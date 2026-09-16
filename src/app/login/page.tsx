@@ -36,9 +36,14 @@ export default function LoginPage() {
       }
       
       const user = userCredential.user;
-      await createUserProfile(user.uid, user.email?.split("@")[0] || "User", user.email || "");
       
-      router.push("/");
+      try {
+        await createUserProfile(user.uid, user.email?.split("@")[0] || "User", user.email || "");
+      } catch (dbError) {
+        console.error("Konnte User Profil nicht in Firestore anlegen:", dbError);
+      }
+      
+      window.location.href = "/";
     } catch (err: any) {
       setError(err.message || "Ein Fehler ist aufgetreten.");
     }
@@ -55,9 +60,14 @@ export default function LoginPage() {
     try {
       const userCredential = await signInWithPopup(auth, provider);
       const user = userCredential.user;
-      await createUserProfile(user.uid, user.displayName || user.email?.split("@")[0] || "User", user.email || "");
       
-      router.push("/");
+      try {
+        await createUserProfile(user.uid, user.displayName || user.email?.split("@")[0] || "User", user.email || "");
+      } catch (dbError) {
+        console.error("Konnte User Profil nicht in Firestore anlegen:", dbError);
+      }
+      
+      window.location.href = "/";
     } catch (err: any) {
       setError(err.message || "Google Login fehlgeschlagen.");
     }
