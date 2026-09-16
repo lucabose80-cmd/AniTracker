@@ -74,6 +74,15 @@ export async function getAllUserWorks(userId: string): Promise<UserWork[]> {
   }
 }
 
+// Löscht ein Werk aus der Bibliothek
+export async function removeUserWork(userId: string, workId: string) {
+  if (!db) return;
+  const { deleteDoc } = await import("firebase/firestore");
+  const docId = `${userId}_${workId}`;
+  const docRef = doc(db, "user_works", docId);
+  await deleteDoc(docRef);
+}
+
 export async function updateEpisodeProgress(userId: string, workId: string, current_episode: number): Promise<void> {
   if (!db) return;
   const docId = `${userId}_${workId}`;

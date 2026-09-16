@@ -9,7 +9,7 @@ import { Star, ChevronLeft, Save, Library as LibraryIcon, Check, Calendar as Cal
 import Link from "next/link";
 import { setCalendarOverride, getCalendarOverrides, CalendarOverride } from "@/lib/db/calendar";
 import { auth } from "@/lib/firebase";
-import { saveUserWork, getUserWork, updateEpisodeProgress } from "@/lib/db/works";
+import { saveUserWork, getUserWork, updateEpisodeProgress, removeUserWork } from "@/lib/db/works";
 import { addToHistory } from "@/lib/db/users";
 import { CommentsSection } from "./CommentsSection";
 import { createActivity } from "@/lib/db/feed";
@@ -121,6 +121,24 @@ export default function WorkDetailPage() {
     } catch (err: any) {
       console.error(err);
       alert("Fehler beim Hinzufügen: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    const user = auth?.currentUser;
+    if (!user) return;
+    if (!window.confirm("Wirklich aus der Bibliothek entfernen?")) return;
+    setIsSaving(true);
+    try {
+      await removeUserWork(user.uid, id);
+      setInLibrary(false);
+      setSaveMessage("Aus Bibliothek entfernt");
+      setTimeout(() => setSaveMessage(""), 3000);
+    } catch (err: any) {
+      console.error(err);
+      alert("Fehler beim Entfernen: " + err.message);
     } finally {
       setIsSaving(false);
     }
@@ -315,8 +333,18 @@ export default function WorkDetailPage() {
               <LibraryIcon size={20} /> {isSaving ? "Füge hinzu..." : "Zur Bibliothek hinzufügen"}
             </button>
           ) : (
-            <div className="w-full rounded-xl bg-green-900/40 border border-green-800/50 py-3.5 font-bold text-green-400 text-center flex items-center justify-center gap-2">
-              <Check size={20} /> In Bibliothek gespeichert
+            <div className="flex gap-2">
+              <div className="flex-1 rounded-xl bg-green-900/40 border border-green-800/50 py-3.5 font-bold text-green-400 text-center flex items-center justify-center gap-2">
+                <Check size={20} /> In Bibliothek
+              </div>
+              <button 
+                onClick={handleRemove}
+                disabled={isSaving}
+                className="w-12 flex-shrink-0 flex items-center justify-center rounded-xl bg-red-600 hover:bg-red-500 transition text-white active:scale-95 disabled:opacity-50"
+                title="Aus Bibliothek entfernen"
+              >
+                X
+              </button>
             </div>
           )}
           

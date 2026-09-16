@@ -276,7 +276,7 @@ export default function LibraryPage() {
                     <div className="flex h-full items-center justify-center p-2 text-xs text-gray-500 text-center">Lade...</div>
                   )}
                   {behindCount > 0 && (
-                    <div className="absolute -top-1 -right-1 flex items-center justify-center rounded-full bg-red-600 text-[10px] px-1.5 py-0.5 font-bold text-white shadow-md z-10 pointer-events-none">
+                    <div className="absolute top-1 right-1 flex items-center justify-center rounded-full bg-red-600 text-[10px] px-1.5 py-0.5 font-bold text-white shadow-md z-10 pointer-events-none">
                       {behindCount}
                     </div>
                   )}

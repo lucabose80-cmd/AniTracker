@@ -221,7 +221,7 @@ export default function CalendarPage() {
                         className="w-16 h-24 object-cover rounded-lg shadow-sm"
                       />
                       {behindCount > 0 && (
-                        <div className="absolute -top-2 -right-2 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full border-2 border-[#1a1d24]">
+                        <div className="absolute top-0 right-0 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-bl-lg border-b border-l border-gray-800">
                           {behindCount}
                         </div>
                       )}

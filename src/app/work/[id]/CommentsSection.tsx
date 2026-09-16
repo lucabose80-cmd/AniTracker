@@ -21,6 +21,8 @@ export function CommentsSection({ workId }: CommentsSectionProps) {
   const [isSpoiler, setIsSpoiler] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [selectedEpisodeFilter, setSelectedEpisodeFilter] = useState<string>("ALL");
+  const [newCommentEpisode, setNewCommentEpisode] = useState<string>("");
 
   const currentUser = auth.currentUser;
 
@@ -50,12 +52,19 @@ export function CommentsSection({ workId }: CommentsSectionProps) {
       const username = profile?.username || currentUser.displayName || "Anonym";
       const avatar = profile?.avatar_url || currentUser.photoURL || `https://api.dicebear.com/9.x/notionists/svg?seed=${username}`;
 
-      const newC = await addComment(workId, currentUser.uid, username, avatar, newCommentText, isSpoiler, parentId);
+      let epNum: number | undefined = undefined;
+      if (!parentId && newCommentEpisode.trim() !== "") {
+        epNum = parseInt(newCommentEpisode, 10);
+        if (isNaN(epNum)) epNum = undefined;
+      }
+
+      const newC = await addComment(workId, currentUser.uid, username, avatar, newCommentText, isSpoiler, parentId, epNum);
       if (newC) {
         setComments(prev => [newC, ...prev]);
         setNewCommentText("");
         setIsSpoiler(false);
         setReplyingTo(null);
+        setNewCommentEpisode("");
       }
     } catch (e) {
       console.error(e);
@@ -84,7 +93,11 @@ export function CommentsSection({ workId }: CommentsSectionProps) {
   };
 
   // Build Tree
-  const rootComments = comments.filter(c => !c.parent_comment_id);
+  const rootComments = comments.filter(c => !c.parent_comment_id).filter(c => {
+    if (selectedEpisodeFilter === "ALL") return true;
+    if (selectedEpisodeFilter === "GENERAL") return c.episode_num === undefined;
+    return c.episode_num?.toString() === selectedEpisodeFilter;
+  });
   const replies = comments.filter(c => c.parent_comment_id);
 
   const renderComment = (comment: Comment, isReply = false) => {
@@ -100,6 +113,9 @@ export function CommentsSection({ workId }: CommentsSectionProps) {
           <div className="flex items-center gap-2 mb-1">
             <span className="font-bold text-sm text-gray-200">{comment.author_name}</span>
             <span className="text-xs text-gray-500">• {formatDistanceToNow(new Date(comment.timestamp), { addSuffix: true, locale: de })}</span>
+            {comment.episode_num !== undefined && (
+              <span className="text-[10px] bg-blue-900/40 text-blue-400 px-1.5 py-0.5 rounded font-bold border border-blue-800">Folge {comment.episode_num}</span>
+            )}
             {comment.is_spoiler && <span className="text-[10px] bg-red-900/40 text-red-400 px-1.5 py-0.5 rounded font-bold border border-red-800">SPOILER</span>}
           </div>
           
@@ -162,10 +178,23 @@ export function CommentsSection({ workId }: CommentsSectionProps) {
 
   return (
     <div className="mt-12 rounded-2xl border border-gray-800 bg-[#1a1d24] p-5 shadow-lg">
-      <h2 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-        <MessageSquare className="text-blue-500" />
-        Diskussion ({comments.length})
-      </h2>
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-lg font-bold text-white flex items-center gap-2">
+          <MessageSquare className="text-blue-500" />
+          Diskussion ({comments.length})
+        </h2>
+        <select 
+          value={selectedEpisodeFilter} 
+          onChange={e => setSelectedEpisodeFilter(e.target.value)}
+          className="bg-gray-900 border border-gray-700 rounded-lg p-1.5 text-xs text-gray-300 focus:outline-none focus:border-blue-500"
+        >
+          <option value="ALL">Alle Kommentare</option>
+          <option value="GENERAL">Allgemein</option>
+          {Array.from(new Set(comments.map(c => c.episode_num).filter(n => n !== undefined))).sort((a, b) => (a || 0) - (b || 0)).map(num => (
+            <option key={`ep-${num}`} value={num?.toString()}>Zu Folge {num}</option>
+          ))}
+        </select>
+      </div>
 
       {/* Main Input */}
       {currentUser ? (
@@ -181,10 +210,23 @@ export function CommentsSection({ workId }: CommentsSectionProps) {
                 rows={3}
               />
               <div className="flex justify-between items-center mt-2 border-t border-gray-800 pt-2">
-                <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
-                  <input type="checkbox" checked={isSpoiler} onChange={e => setIsSpoiler(e.target.checked)} className="rounded border-gray-700 bg-gray-800 text-blue-600 focus:ring-blue-600" />
-                  <ShieldAlert size={14} /> Enthält Spoiler
-                </label>
+                <div className="flex gap-4 items-center">
+                  <label className="flex items-center gap-2 text-xs text-gray-400 cursor-pointer">
+                    <input type="checkbox" checked={isSpoiler} onChange={e => setIsSpoiler(e.target.checked)} className="rounded border-gray-700 bg-gray-800 text-blue-600 focus:ring-blue-600" />
+                    <ShieldAlert size={14} /> Enthält Spoiler
+                  </label>
+                  <div className="flex items-center gap-2 text-xs text-gray-400">
+                    <label htmlFor="epInput">Zu Folge:</label>
+                    <input 
+                      id="epInput"
+                      type="number" 
+                      placeholder="Optional" 
+                      value={newCommentEpisode} 
+                      onChange={e => setNewCommentEpisode(e.target.value)}
+                      className="w-16 bg-gray-900 border border-gray-700 rounded p-1 text-white focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
                 <button onClick={(e) => handleSubmit(e)} disabled={isSubmitting || !newCommentText.trim()} className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm font-bold text-white transition disabled:opacity-50">Posten</button>
               </div>
             </div>

@@ -9,7 +9,8 @@ export async function addComment(
   author_avatar: string,
   text: string,
   is_spoiler: boolean,
-  parent_comment_id: string | null = null
+  parent_comment_id: string | null = null,
+  episode_num?: number
 ): Promise<Comment | null> {
   if (!db) return null;
 
@@ -28,9 +29,13 @@ export async function addComment(
     timestamp,
     is_spoiler,
     parent_comment_id,
+    episode_num,
     upvotes: [],
     downvotes: []
   };
+
+  // Remove undefined fields
+  if (episode_num === undefined) delete newComment.episode_num;
 
   await setDoc(newDocRef, newComment);
 
