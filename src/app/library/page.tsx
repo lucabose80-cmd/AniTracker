@@ -72,14 +72,20 @@ export default function LibraryPage() {
         Meine Bibliothek
       </h2>
 
-      <div className="relative">
+      <form className="relative" onSubmit={(e) => {
+        e.preventDefault();
+        const val = (e.target as any).elements.q.value;
+        if(val) window.location.href = `/search?q=${encodeURIComponent(val)}`;
+      }}>
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
         <input 
+          name="q"
           type="text" 
-          placeholder={`${contentType} suchen...`}
+          placeholder={`In ${contentType} suchen oder neues hinzufügen...`}
           className="w-full rounded-lg border border-gray-800 bg-[#1a1d24] p-3 pl-10 text-white focus:border-blue-500 focus:outline-none"
         />
-      </div>
+        <button type="submit" className="hidden" />
+      </form>
 
       <section>
         <h3 className="mb-3 text-lg font-bold flex items-center gap-2">

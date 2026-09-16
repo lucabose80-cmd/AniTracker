@@ -150,17 +150,17 @@ export default function WorkDetailPage() {
       <div className="relative -mt-16 px-4">
         <div className="flex gap-4">
           <img 
-            src={work.coverImage.extraLarge} 
+            src={work.coverImage?.extraLarge || work.coverImage?.large} 
             alt="Cover" 
             className="h-40 w-28 rounded-lg shadow-xl border border-gray-800 object-cover" 
           />
           <div className="flex flex-col justify-end pt-16">
-            <h1 className="text-xl font-bold leading-tight line-clamp-3">{work.title.romaji}</h1>
+            <h1 className="text-xl font-bold leading-tight line-clamp-3">{work.title?.romaji || work.title?.english}</h1>
             <div className="mt-2 flex items-center gap-2 text-sm text-gray-300">
               <Star size={14} className="text-yellow-500" />
-              <span>{(work.averageScore / 10).toFixed(1)} AniList</span>
+              <span>{work.averageScore ? (work.averageScore / 10).toFixed(1) : "?"} AniList</span>
               <span className="text-gray-500">•</span>
-              <span>{work.format}</span>
+              <span>{work.format || work.type}</span>
             </div>
           </div>
         </div>

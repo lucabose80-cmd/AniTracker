@@ -1,7 +1,7 @@
 "use client";
 
 import { useAppStore } from "@/lib/store";
-import { Moon, Sun, User as UserIcon, LogIn } from "lucide-react";
+import { Moon, Sun, User as UserIcon, LogIn, Search } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { auth } from "@/lib/firebase";
@@ -51,6 +51,10 @@ export function Header() {
             </div>
           </button>
           
+          <Link href="/search" className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1a1d24] text-gray-400 border border-gray-800 hover:text-white transition">
+            <Search size={16} />
+          </Link>
+
           {user ? (
             <Link href="/profile" className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white font-bold shadow-md hover:bg-blue-700 transition">
               {user.email?.[0].toUpperCase() || "U"}
