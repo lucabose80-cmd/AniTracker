@@ -1,7 +1,7 @@
 const ANILIST_API_URL = "https://graphql.anilist.co";
 
 export async function fetchAniList(query: string, variables: any = {}) {
-  const response = await fetch(ANILIST_API_URL, {
+  const fetchPromise = fetch(ANILIST_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -12,6 +12,11 @@ export async function fetchAniList(query: string, variables: any = {}) {
       variables,
     }),
   });
+
+  const response = await Promise.race([
+    fetchPromise,
+    new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("AniList API Timeout")), 8000))
+  ]);
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));

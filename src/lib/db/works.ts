@@ -36,10 +36,19 @@ export async function getUserWork(userId: string, workId: string): Promise<UserW
 
   const docId = `${userId}_${workId}`;
   const docRef = doc(db, "user_works", docId);
-  const docSnap = await getDoc(docRef);
+  
+  try {
+    const docSnap = await Promise.race([
+      getDoc(docRef),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore Timeout")), 3000))
+    ]) as any;
 
-  if (docSnap.exists()) {
-    return docSnap.data() as UserWork;
+    if (docSnap.exists()) {
+      return docSnap.data() as UserWork;
+    }
+  } catch (error) {
+    console.error("Fehler beim Laden der UserWork (möglicherweise blockiert/Timeout):", error);
   }
+  
   return null;
 }
