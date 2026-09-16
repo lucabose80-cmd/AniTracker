@@ -35,15 +35,15 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
 export async function addToHistory(uid: string, workId: string) {
   if (!db) return;
   const docRef = doc(db, "users", uid);
-  await updateDoc(docRef, {
+  await setDoc(docRef, {
     read_watch_history: arrayUnion(workId)
-  });
+  }, { merge: true });
 }
 
 export async function updateTop9List(uid: string, list: string[]) {
   if (!db) return;
   const docRef = doc(db, "users", uid);
-  await updateDoc(docRef, {
+  await setDoc(docRef, {
     top_9_list: list
-  });
+  }, { merge: true });
 }
