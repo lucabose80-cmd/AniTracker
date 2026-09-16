@@ -57,3 +57,29 @@ export async function updateNotificationSettings(uid: string, settings: any) {
     notification_settings: settings
   }, { merge: true });
 }
+
+export async function updateWeeklyRanking(uid: string, type: "ANIME" | "MANGA", currentList: string[]) {
+  if (!db) return;
+  const docRef = doc(db, "users", uid);
+  const fieldName = type === "ANIME" ? "weekly_ranking_anime" : "weekly_ranking_manga";
+  
+  await setDoc(docRef, {
+    [fieldName]: {
+      current: currentList
+    }
+  }, { merge: true });
+}
+
+export async function saveWeeklyRankingSnapshot(uid: string, type: "ANIME" | "MANGA", currentList: string[]) {
+  if (!db) return;
+  const docRef = doc(db, "users", uid);
+  const fieldName = type === "ANIME" ? "weekly_ranking_anime" : "weekly_ranking_manga";
+  
+  await setDoc(docRef, {
+    [fieldName]: {
+      current: currentList,
+      previous: currentList, // snapshot sets previous to current
+      last_updated: new Date().toISOString()
+    }
+  }, { merge: true });
+}

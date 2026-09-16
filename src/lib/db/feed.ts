@@ -40,7 +40,19 @@ export async function createActivity(
         title: "Neuer Social Beitrag",
         body: text || "Jemand hat etwas im Social Feed gepostet.",
         type: "social",
-        link: "/feed"
+        link: "/social"
+      })
+    }).catch(console.error);
+  } else if (action_type === "WEEKLY_RANKING") {
+    fetch("/api/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        targetUserId: "ALL", // Or followers if we had follower logic easily accessible
+        title: "Neues Wochen-Ranking!",
+        body: text || "Jemand hat sein neues Wochen-Ranking veröffentlicht.",
+        type: "social",
+        link: "/social"
       })
     }).catch(console.error);
   }

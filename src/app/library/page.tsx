@@ -13,9 +13,11 @@ import { getAllUserWorks } from "@/lib/db/works";
 import { fetchAniListBatch } from "@/lib/anilist";
 import { UserWork } from "@/types/database";
 import Link from "next/link";
+import { ArrowUp, ArrowDown, Minus, Save, Share } from "lucide-react";
+import { createActivity } from "@/lib/db/feed";
 
 // Simple Sortable Item Component
-function SortableItem({ id, index, workDetails, userWork, onRemove }: { id: string, index: number, workDetails?: any, userWork?: any, onRemove: (id: string) => void }) {
+function SortableItem({ id, index, workDetails, userWork, previousRank, onRemove }: { id: string, index: number, workDetails?: any, userWork?: any, previousRank?: number, onRemove: (id: string) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   
   const style = {
@@ -58,6 +60,23 @@ function SortableItem({ id, index, workDetails, userWork, onRemove }: { id: stri
         <span className="absolute -top-1 -right-1 flex items-center justify-center rounded-full bg-red-600 text-[10px] px-1.5 py-0.5 font-bold text-white shadow-md z-10 pointer-events-none">
           {behindCount}
         </span>
+      )}
+      {!id.startsWith("empty") && previousRank !== undefined && (
+        <div className="absolute bottom-1 right-1 flex items-center justify-center rounded bg-black/80 px-1 py-0.5 z-10">
+          {previousRank === -1 ? (
+            <span className="text-[10px] font-bold text-blue-400">NEU</span>
+          ) : previousRank === index ? (
+            <Minus size={12} className="text-gray-400" />
+          ) : previousRank > index ? (
+            <div className="flex items-center text-[10px] font-bold text-green-500">
+              <ArrowUp size={10} /> {previousRank - index}
+            </div>
+          ) : (
+            <div className="flex items-center text-[10px] font-bold text-red-500">
+              <ArrowDown size={10} /> {index - previousRank}
+            </div>
+          )}
+        </div>
       )}
       {id.startsWith("empty") ? (
         <span className="text-gray-700 text-3xl font-light pointer-events-none">+</span>
@@ -126,70 +145,106 @@ export default function LibraryPage() {
     return () => unsubscribe();
   }, []);
 
-  // Sync Top 9 list when contentType or aniListDetails changes
+  // Sync Weekly Ranking list when contentType or aniListDetails changes
   useEffect(() => {
     if (!userProfile || Object.keys(aniListDetails).length === 0) return;
 
-    let currentTop9 = contentType === "ANIME" ? [...(userProfile.top_9_anime || userProfile.top_9_list || [])] : [...(userProfile.top_9_manga || [])];
+    const rankingData = contentType === "ANIME" ? userProfile.weekly_ranking_anime : userProfile.weekly_ranking_manga;
+    let currentRanking = rankingData?.current ? [...rankingData.current] : [];
     
     // Filter works of current content type
     const worksOfType = allWorks.filter(w => aniListDetails[w.work_id]?.type === contentType);
-    const worksInTop9 = currentTop9.filter(id => !id.startsWith("empty"));
-    const worksNotInTop9 = worksOfType.filter(w => !worksInTop9.includes(w.work_id));
+    
+    // Auto-populate with "CURRENT" works if the ranking has empty slots
+    const currentWorks = worksOfType.filter(w => w.status === "CURRENT");
+    const worksInRanking = currentRanking.filter(id => !id.startsWith("empty"));
+    const worksNotYetRanked = currentWorks.filter(w => !worksInRanking.includes(w.work_id));
 
-    while(currentTop9.length < 9) {
-      currentTop9.push(`empty-${currentTop9.length}`);
+    // Remove duplicates or old deleted works
+    let validRanking = currentRanking.filter(id => id.startsWith("empty") || allWorks.some(w => w.work_id === id));
+    
+    while(validRanking.length < 9) {
+      validRanking.push(`empty-${validRanking.length}`);
     }
 
     for (let i = 0; i < 9; i++) {
-      if (currentTop9[i].startsWith("empty") && worksNotInTop9.length > 0) {
-        const nextWork = worksNotInTop9.shift();
-        if (nextWork) currentTop9[i] = nextWork.work_id;
+      if (validRanking[i].startsWith("empty") && worksNotYetRanked.length > 0) {
+        const nextWork = worksNotYetRanked.shift();
+        if (nextWork) validRanking[i] = nextWork.work_id;
       }
     }
 
-    setItems(currentTop9.slice(0, 9));
+    setItems(validRanking.slice(0, 9));
   }, [contentType, userProfile, aniListDetails, allWorks]);
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     if (over && active.id !== over.id) {
-      setItems((prevItems) => {
-        const oldIndex = prevItems.indexOf(active.id as string);
-        const newIndex = prevItems.indexOf(over.id as string);
-        const newItems = arrayMove(prevItems, oldIndex, newIndex);
-        
-        if (auth.currentUser) {
-          updateTop9List(auth.currentUser.uid, newItems, contentType).catch(console.error);
+      const oldIndex = items.indexOf(active.id as string);
+      const newIndex = items.indexOf(over.id as string);
+      const newItems = arrayMove(items, oldIndex, newIndex);
+      setItems(newItems);
+      
+      if (auth.currentUser) {
+        try {
+          const { updateWeeklyRanking } = await import("@/lib/db/users");
+          await updateWeeklyRanking(auth.currentUser.uid, contentType as "ANIME" | "MANGA", newItems);
+        } catch(e) {
+          console.error(e);
         }
-        
-        return newItems;
-      });
+      }
     }
   };
 
-  const handleRemoveFromTop9 = (idToRemove: string) => {
-    setItems(prevItems => {
-      const newItems = [...prevItems];
-      const idx = newItems.indexOf(idToRemove);
-      if (idx !== -1) {
-        // Find highest empty index to use
-        let maxEmpty = -1;
-        newItems.forEach(item => {
-          if (item.startsWith("empty-")) {
-            const num = parseInt(item.split("-")[1]);
-            if (num > maxEmpty) maxEmpty = num;
-          }
-        });
-        newItems[idx] = `empty-${maxEmpty + 1}`;
+  const handleRemoveFromRanking = async (idToRemove: string) => {
+    const newItems = [...items];
+    const idx = newItems.indexOf(idToRemove);
+    if (idx !== -1) {
+      let maxEmpty = -1;
+      newItems.forEach(item => {
+        if (item.startsWith("empty-")) {
+          const num = parseInt(item.split("-")[1]);
+          if (num > maxEmpty) maxEmpty = num;
+        }
+      });
+      newItems[idx] = `empty-${maxEmpty + 1}`;
+    }
+    
+    setItems(newItems);
+    if (auth.currentUser) {
+      try {
+        const { updateWeeklyRanking } = await import("@/lib/db/users");
+        await updateWeeklyRanking(auth.currentUser.uid, contentType as "ANIME" | "MANGA", newItems);
+      } catch(e) {
+        console.error(e);
       }
+    }
+  };
+
+  const handleSaveSnapshot = async () => {
+    if (!auth.currentUser) return;
+    try {
+      const { saveWeeklyRankingSnapshot } = await import("@/lib/db/users");
+      await saveWeeklyRankingSnapshot(auth.currentUser.uid, contentType as "ANIME" | "MANGA", items);
       
-      if (auth.currentUser) {
-        updateTop9List(auth.currentUser.uid, newItems, contentType).catch(console.error);
-      }
+      // Post to Social Feed
+      await createActivity(auth.currentUser.uid, "WEEKLY_RANKING", items[0], undefined, `Wochen-Ranking für ${contentType} veröffentlicht!`);
       
-      return newItems;
-    });
+      // Update local profile state to reflect arrows resetting
+      setUserProfile((prev: any) => ({
+        ...prev,
+        [contentType === "ANIME" ? "weekly_ranking_anime" : "weekly_ranking_manga"]: {
+          current: items,
+          previous: items,
+          last_updated: new Date().toISOString()
+        }
+      }));
+      
+      alert("Wochen-Ranking erfolgreich gespeichert und geteilt!");
+    } catch (e) {
+      console.error(e);
+      alert("Fehler beim Speichern des Wochen-Rankings.");
+    }
   };
 
   const filteredWorks = allWorks.filter(w => aniListDetails[w.work_id]?.type === contentType);
@@ -217,20 +272,32 @@ export default function LibraryPage() {
       </form>
 
       <section>
-        <h3 className="mb-3 text-lg font-bold flex items-center gap-2">
-          <LayoutGrid size={18} className="text-blue-500" />
-          Meine Top 9
-        </h3>
-        <p className="text-xs text-gray-400 mb-4">Halte gedrückt und ziehe, um deine Favoriten anzuordnen.</p>
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-lg font-bold flex items-center gap-2">
+              <LayoutGrid size={18} className="text-blue-500" />
+              Wochen-Ranking ({contentType})
+            </h3>
+            <p className="text-xs text-gray-400">Sortiere deine aktuellen Favoriten dieser Woche.</p>
+          </div>
+          <button 
+            onClick={handleSaveSnapshot}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-lg"
+          >
+            <Share size={14} /> Speichern & Teilen
+          </button>
+        </div>
         
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={items} strategy={horizontalListSortingStrategy}>
             <div className="flex gap-3 overflow-x-auto pb-4 snap-x snap-mandatory [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
               {items.map((id, index) => {
                 const uWork = allWorks.find(w => w.work_id === id);
+                const prevRanking = contentType === "ANIME" ? userProfile?.weekly_ranking_anime?.previous : userProfile?.weekly_ranking_manga?.previous;
+                const prevRank = prevRanking ? prevRanking.indexOf(id) : undefined;
                 return (
                   <div key={id} className="snap-center">
-                    <SortableItem id={id} index={index} workDetails={aniListDetails[id]} userWork={uWork} onRemove={handleRemoveFromTop9} />
+                    <SortableItem id={id} index={index} workDetails={aniListDetails[id]} userWork={uWork} previousRank={prevRank} onRemove={handleRemoveFromRanking} />
                   </div>
                 );
               })}

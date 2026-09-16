@@ -19,6 +19,16 @@ export interface UserProfile {
     social: boolean;
   };
   fcm_tokens?: string[];
+  weekly_ranking_anime?: {
+    current: string[];
+    previous: string[];
+    last_updated: string;
+  };
+  weekly_ranking_manga?: {
+    current: string[];
+    previous: string[];
+    last_updated: string;
+  };
 }
 
 export interface Work {
@@ -93,7 +103,7 @@ export interface Comment {
 export interface ActivityFeed {
   activity_id: string;
   user_id: string;
-  action_type: "MANUAL_POST" | "RATING" | "COMMENT" | "TOP9_UPDATE" | "RECOMMENDATION" | "EPISODE_THREAD";
+  action_type: "MANUAL_POST" | "RATING" | "COMMENT" | "TOP9_UPDATE" | "RECOMMENDATION" | "EPISODE_THREAD" | "WEEKLY_RANKING";
   work_id?: string;
   episode_num?: number;
   text?: string;

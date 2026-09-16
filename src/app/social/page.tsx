@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users, MessageSquare, PlayCircle } from "lucide-react";
+import { Users, MessageSquare, PlayCircle, Trophy } from "lucide-react";
 import { getGlobalFeed } from "@/lib/db/feed";
 import { ActivityFeed } from "@/types/database";
 import { fetchAniListBatch } from "@/lib/anilist";
@@ -107,6 +107,43 @@ export default function SocialPage() {
                       >
                         <MessageSquare size={14} /> Mitdiskutieren
                       </Link>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            if (activity.action_type === "WEEKLY_RANKING") {
+              return (
+                <div key={activity.activity_id} className="rounded-xl border border-yellow-700/50 bg-[#1a1d24] p-4 shadow-lg">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="h-10 w-10 rounded-full bg-yellow-600/20 flex items-center justify-center font-bold overflow-hidden border border-yellow-600/50 text-yellow-500">
+                      <Trophy size={20} />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-gray-200">
+                        {user.username} <span className="text-gray-400 font-normal">hat sein Wochen-Ranking aktualisiert</span>
+                      </p>
+                      <p className="text-xs text-gray-500">{timeAgo}</p>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-black/40 rounded-lg p-3 border border-gray-800">
+                    <p className="text-sm font-bold text-yellow-500 mb-2">🏆 Platz 1 diese Woche:</p>
+                    <div className="flex gap-3">
+                      {work && (
+                        <Link href={`/work/${work.id}`} className="shrink-0">
+                          <img 
+                            src={work.coverImage?.large} 
+                            alt="Cover" 
+                            className="w-12 h-16 object-cover rounded shadow border border-gray-700"
+                          />
+                        </Link>
+                      )}
+                      <div>
+                        <h4 className="font-bold text-gray-100">{work?.title?.english || work?.title?.romaji || "Unbekanntes Werk"}</h4>
+                        <p className="text-xs text-gray-400 mt-1">{activity.details}</p>
+                      </div>
                     </div>
                   </div>
                 </div>
