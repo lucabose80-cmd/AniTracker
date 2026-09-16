@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import { fetchAniList, GET_TRENDING_WORKS } from "@/lib/anilist";
 import { Star, Flame, Clock } from "lucide-react";
+import Link from "next/link";
 
 export default function Home() {
   const { contentType } = useAppStore();
@@ -44,7 +45,7 @@ export default function Home() {
             ))
           ) : (
             trendingWorks.map((work) => (
-              <div key={work.id} className="relative min-w-[240px] snap-center overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-[1.02]">
+              <Link href={`/work/${work.id}`} key={work.id} className="relative min-w-[240px] snap-center overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-[1.02]">
                 <img 
                   src={work.coverImage.extraLarge || work.coverImage.large} 
                   alt={work.title.romaji}
@@ -59,7 +60,7 @@ export default function Home() {
                     <span className="text-blue-400 font-semibold">{work.format || contentType}</span>
                   </div>
                 </div>
-              </div>
+              </Link>
             ))
           )}
         </div>
@@ -77,7 +78,7 @@ export default function Home() {
             ))
           ) : (
             trendingWorks.slice(0, 5).map((work) => (
-              <div key={`list-${work.id}`} className="flex items-center gap-4 rounded-xl border border-gray-800 bg-[#1a1d24] p-3 shadow-md">
+              <Link href={`/work/${work.id}`} key={`list-${work.id}`} className="flex items-center gap-4 rounded-xl border border-gray-800 bg-[#1a1d24] p-3 shadow-md hover:bg-gray-800 transition-colors">
                 <img 
                   src={work.coverImage.large} 
                   alt={work.title.romaji}
@@ -100,7 +101,7 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
-              </div>
+              </Link>
             ))
           )}
         </div>
