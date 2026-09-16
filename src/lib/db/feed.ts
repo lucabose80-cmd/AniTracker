@@ -16,17 +16,17 @@ export async function createActivity(
   const activity_id = newDocRef.id;
   const timestamp = new Date().toISOString();
 
-  const newActivity: ActivityFeed = {
+  const newActivity: any = {
     activity_id,
     user_id,
     action_type,
-    work_id,
-    text,
     timestamp,
-    details
   };
+  if (work_id !== undefined) newActivity.work_id = work_id;
+  if (text !== undefined) newActivity.text = text;
+  if (details !== undefined) newActivity.details = details;
 
-  await setDoc(newDocRef, newActivity);
+  await setDoc(newDocRef, newActivity as ActivityFeed);
 
   if (action_type === "MANUAL_POST") {
     // Send broadcast notification to all users who have 'social' notifications enabled

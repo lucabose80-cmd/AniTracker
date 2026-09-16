@@ -140,6 +140,8 @@ export const GET_WORKS_BATCH = `
         chapters
         nextAiringEpisode {
           episode
+          airingAt
+          timeUntilAiring
         }
       }
     }
