@@ -422,32 +422,43 @@ export default function LibraryPage() {
                   behindCount = Math.max(0, maxAiredEp - currentEp);
                 }
 
-                return (
-                  <DraggableLibraryItem key={work.work_id} id={work.work_id}>
-                    <div 
-                      className="block group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500 hover:shadow-lg"
-                      onClick={(e) => {
-                        // Very simple drag detection: If the user dragged, dnd-kit will preventDefault on the wrapper.
-                        // However, we just navigate manually.
-                        router.push(`/work/${work.work_id}`);
-                      }}
-                    >
-                      {details ? (
-                        <img src={details.coverImage?.extraLarge || details.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition duration-300 group-hover:scale-105 pointer-events-none" />
-                      ) : (
-                        <div className="flex h-full items-center justify-center p-2 text-xs text-gray-500 text-center">Lade...</div>
-                      )}
-                      {behindCount > 0 && (
-                        <div className="absolute top-1 right-1 flex items-center justify-center rounded-full bg-red-600 text-[10px] px-1.5 py-0.5 font-bold text-white shadow-md z-10 pointer-events-none">
-                          {behindCount}
-                        </div>
-                      )}
-                      {/* Status Badge */}
-                      <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/90 to-transparent p-2 text-center text-[10px] font-bold text-white opacity-0 transition group-hover:opacity-100 pointer-events-none">
-                        {work.status}
+                const content = (
+                  <div 
+                    className={`block group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500 hover:shadow-lg ${work.status === "CURRENT" ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${work.auto_added ? "opacity-50 grayscale hover:grayscale-0 hover:opacity-100" : ""}`}
+                    onClick={(e) => {
+                      router.push(`/work/${work.work_id}`);
+                    }}
+                  >
+                    {details ? (
+                      <img src={details.coverImage?.extraLarge || details.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition duration-300 group-hover:scale-105 pointer-events-none" />
+                    ) : (
+                      <div className="flex h-full items-center justify-center p-2 text-xs text-gray-500 text-center">Lade...</div>
+                    )}
+                    {behindCount > 0 && (
+                      <div className="absolute top-1 right-1 flex items-center justify-center rounded-full bg-red-600 text-[10px] px-1.5 py-0.5 font-bold text-white shadow-md z-10 pointer-events-none">
+                        {behindCount}
                       </div>
+                    )}
+                    {work.auto_added && (
+                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/80 text-white text-[10px] px-2 py-1 rounded font-bold pointer-events-none z-10">
+                        Prequel (Unbestätigt)
+                      </div>
+                    )}
+                    {/* Status Badge */}
+                    <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/90 to-transparent p-2 text-center text-[10px] font-bold text-white opacity-0 transition group-hover:opacity-100 pointer-events-none">
+                      {work.status}
                     </div>
+                  </div>
+                );
+
+                return work.status === "CURRENT" ? (
+                  <DraggableLibraryItem key={work.work_id} id={work.work_id}>
+                    {content}
                   </DraggableLibraryItem>
+                ) : (
+                  <div key={work.work_id} className="opacity-75 hover:opacity-100 transition">
+                    {content}
+                  </div>
                 );
               })}
             </div>

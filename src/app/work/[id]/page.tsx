@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { fetchAniList, GET_WORK_DETAILS } from "@/lib/anilist";
 import { calculateOverallScore } from "@/lib/scoring";
 import { UserWork, EmotionalImpact, WatchMode } from "@/types/database";
-import { Star, ChevronLeft, Save, Library as LibraryIcon, Check, Calendar as CalendarIcon, PlayCircle, CheckCircle, Bookmark } from "lucide-react";
+import { Star, ChevronLeft, Save, Library as LibraryIcon, Check, Calendar as CalendarIcon, PlayCircle, CheckCircle, Bookmark, Settings, X } from "lucide-react";
 import Link from "next/link";
 import { setCalendarOverride, getCalendarOverrides, clearManualMaxEpisode, CalendarOverride } from "@/lib/db/calendar";
 import { auth } from "@/lib/firebase";
@@ -25,6 +25,8 @@ export default function WorkDetailPage() {
   const [showEvaluation, setShowEvaluation] = useState(false);
   const [currentEpisode, setCurrentEpisode] = useState(0);
   const [manualMaxEpisode, setManualMaxEpisode] = useState<number | "">("");
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [synchroOffset, setSynchroOffset] = useState<number>(0);
 
   // Form State for Deep Evaluation
   const [evaluation, setEvaluation] = useState<UserWork["evaluation"]>({
@@ -89,6 +91,7 @@ export default function WorkDetailPage() {
           setEvaluation(userWork.evaluation);
           setWatchMode(userWork.classification?.watchMode || "SUB");
           setMalRated(userWork.mal_rated || false);
+          setSynchroOffset(userWork.synchro_offset_episodes || 0);
           if (userWork.evaluation.romanceAndChemistry > 0) setHasRomance(true);
         } else {
           setHasRomance(isRomance);
@@ -114,7 +117,16 @@ export default function WorkDetailPage() {
     setEvaluation(prev => ({ ...prev, [field]: parseFloat(value) }));
   };
 
-  const calculatedMaxEps = manualMaxEpisode !== "" ? manualMaxEpisode : (work?.episodes || work?.chapters || 9999);
+  const aniListMax = work?.episodes || work?.chapters || 9999;
+  const aniListAvailable = work?.nextAiringEpisode ? work.nextAiringEpisode.episode - 1 : aniListMax;
+  
+  const calculatedMaxEps = manualMaxEpisode !== "" ? manualMaxEpisode : aniListMax;
+  const baseAvailable = manualMaxEpisode !== "" ? manualMaxEpisode : aniListAvailable;
+  
+  let calculatedAvailableEps = typeof baseAvailable === "number" && baseAvailable !== 9999 ? baseAvailable : 9999;
+  if (synchroOffset > 0 && calculatedAvailableEps !== 9999) {
+    calculatedAvailableEps = Math.max(0, calculatedAvailableEps - synchroOffset);
+  }
 
   const handleQuickAdd = async (status: "CURRENT" | "COMPLETED" | "PLANNING") => {
     const user = auth?.currentUser;
@@ -145,6 +157,52 @@ export default function WorkDetailPage() {
         await addToHistory(user.uid, id);
         // Create feed activity
         await createActivity(user.uid, "TOP9_UPDATE", id, `Hat ${work?.title?.romaji || 'ein Werk'} zur Bibliothek hinzugefügt.`);
+
+        // --- Prequel Auto-Erkennung ---
+        const prequels = work?.relations?.edges?.filter((edge: any) => edge.relationType === "PREQUEL") || [];
+        for (const prequelEdge of prequels) {
+          const prequel = prequelEdge.node;
+          if (!prequel || !prequel.id) continue;
+          try {
+            const existingPrequel = await getUserWork(user.uid, prequel.id.toString());
+            if (!existingPrequel) {
+              const maxPrequelEps = prequel.episodes || prequel.chapters || 0;
+              await saveUserWork(user.uid, prequel.id.toString(), {
+                status: "COMPLETED",
+                evaluation: {
+                  plotAndStory: 0,
+                  castAndCharacters: 0,
+                  sideCharacters: 0,
+                  ending: 0,
+                  artstyleAndAnimation: 0,
+                  introOutro: 0,
+                  voiceActing: 0,
+                  romanceAndChemistry: 0,
+                  bingeFactor: 0,
+                  emotionalImpact: "None",
+                  comments: "",
+                  overallScore: 0
+                },
+                classification: {
+                  watchMode: "SUB",
+                  romanceLevel: 0,
+                  confessionTiming: "",
+                  intimacyLevel: 0,
+                  relationshipDynamics: "",
+                  wholesomeLewdScale: 0,
+                  comedySeriousScale: 0,
+                  actionDialogScale: 0,
+                  pacingScale: 0,
+                },
+                current_episode: maxPrequelEps,
+                auto_added: true
+              });
+              await addToHistory(user.uid, prequel.id.toString());
+            }
+          } catch (err) {
+            console.error("Failed to auto-add prequel:", err);
+          }
+        }
       }
       setInLibrary(true);
       setUserWorkStatus(status);
@@ -203,6 +261,8 @@ export default function WorkDetailPage() {
           pacingScale: 0,
         },
         mal_rated: malRated,
+        synchro_offset_episodes: synchroOffset,
+        auto_added: false,
         status: userWorkStatus !== "NONE" ? userWorkStatus : "COMPLETED"
       });
       
@@ -230,7 +290,7 @@ export default function WorkDetailPage() {
     
     let newEp = currentEpisode + increment;
     if (newEp < 0) newEp = 0;
-    if (newEp > calculatedMaxEps) newEp = calculatedMaxEps as number;
+    if (newEp > calculatedAvailableEps) newEp = calculatedAvailableEps as number;
     
     setCurrentEpisode(newEp);
     
@@ -302,28 +362,6 @@ export default function WorkDetailPage() {
             <span className="font-bold text-gray-300">
               {work.type === "MANGA" ? "Kapitel gelesen" : "Folgen geschaut"}
             </span>
-            {inLibrary && (
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-xs text-gray-500">Aktuell verfügbar:</span>
-                <input 
-                  type="number" 
-                  placeholder={work.episodes || work.chapters || "?"} 
-                  value={manualMaxEpisode}
-                  onChange={(e) => setManualMaxEpisode(e.target.value === "" ? "" : parseInt(e.target.value))}
-                  onBlur={async () => {
-                    const user = auth?.currentUser;
-                    if (!user || !inLibrary) return;
-                    if (manualMaxEpisode === "") {
-                      await clearManualMaxEpisode(id);
-                    } else {
-                      await setCalendarOverride(id, undefined, undefined, undefined, manualMaxEpisode as number);
-                    }
-                  }}
-                  title="Hier eintragen, wenn die API keine oder falsche Werte liefert"
-                  className="w-16 bg-[#1a1d24] border border-gray-700 rounded px-2 py-1 text-xs text-white outline-none focus:border-blue-500"
-                />
-              </div>
-            )}
           </div>
           <div className="flex items-center gap-4 self-end sm:self-auto">
             <button 
@@ -331,55 +369,111 @@ export default function WorkDetailPage() {
               disabled={currentEpisode <= 0}
               className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-800 text-white font-bold hover:bg-gray-700 active:scale-95 disabled:opacity-30"
             >-</button>
-            <span className="font-mono font-bold text-lg text-blue-400">
-              {currentEpisode} <span className="text-sm text-gray-500">/ {manualMaxEpisode !== "" ? manualMaxEpisode : (work.episodes || work.chapters || "?")}</span>
+            <span className="font-mono font-bold text-lg text-blue-400 flex items-center">
+              {currentEpisode} <span className="text-sm text-gray-500 ml-1">/ {calculatedMaxEps !== 9999 ? calculatedMaxEps : "?"}</span>
+              {inLibrary && (
+                <button onClick={() => setShowSettingsModal(true)} className="ml-3 text-gray-500 hover:text-white transition bg-gray-800 rounded p-1">
+                  <Settings size={14} />
+                </button>
+              )}
             </span>
             <button 
               onClick={() => handleUpdateEpisode(1)}
-              disabled={currentEpisode >= (calculatedMaxEps as number)}
+              disabled={currentEpisode >= (calculatedAvailableEps as number)}
               className="w-8 h-8 flex items-center justify-center rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-500 active:scale-95 disabled:opacity-30 disabled:bg-gray-800"
             >+</button>
           </div>
         </div>
 
-        {/* MANUAL RELEASE TIMES */}
-        {(!work.nextAiringEpisode || work.type === "MANGA") && inLibrary && (
-          <div className="mt-4 flex flex-col gap-3 bg-[#1a1d24] border border-gray-800 rounded-xl p-4">
-            <span className="font-bold text-gray-300 flex items-center gap-2 text-sm">
-              <CalendarIcon size={16} className="text-blue-500" /> Wöchentlicher Release
-            </span>
-            <div className="flex gap-2 text-sm">
-              <select 
-                value={customDay} 
-                onChange={e => setCustomDay(parseInt(e.target.value))} 
-                className="flex-1 bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-blue-500"
-              >
-                <option value={1}>Montag</option>
-                <option value={2}>Dienstag</option>
-                <option value={3}>Mittwoch</option>
-                <option value={4}>Donnerstag</option>
-                <option value={5}>Freitag</option>
-                <option value={6}>Samstag</option>
-                <option value={0}>Sonntag</option>
-              </select>
-              {work.type !== "MANGA" && (
-                <input 
-                  type="time" 
-                  value={customTime} 
-                  onChange={e => setCustomTime(e.target.value)} 
-                  className="w-24 bg-gray-900 border border-gray-700 rounded-lg p-2 text-white outline-none focus:border-blue-500" 
-                />
-              )}
-              <button 
-                onClick={handleSaveCustomRelease} 
-                className="bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-lg font-bold text-white transition"
-              >
-                {hasCustomOverride ? <Check size={18} /> : "Speichern"}
-              </button>
+        {/* SETTINGS MODAL */}
+        {showSettingsModal && (
+          <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+            <div className="bg-[#1a1d24] border border-gray-800 rounded-2xl p-6 w-full max-w-sm shadow-xl">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-bold">Werk Einstellungen</h3>
+                <button onClick={() => setShowSettingsModal(false)} className="text-gray-500 hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 mb-1">Manuelle Gesamt-Folgen</label>
+                  <input 
+                    type="number" 
+                    placeholder={work.episodes || work.chapters || "?"} 
+                    value={manualMaxEpisode}
+                    onChange={(e) => setManualMaxEpisode(e.target.value === "" ? "" : parseInt(e.target.value))}
+                    className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-1">Falls AniList die falsche Folgenanzahl hat.</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 mb-1">Synchro-Versatz (Folgen)</label>
+                  <input 
+                    type="number" 
+                    min="0"
+                    value={synchroOffset}
+                    onChange={(e) => setSynchroOffset(parseInt(e.target.value) || 0)}
+                    className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-1">Wie viele Folgen hinkt die Synchro hinterher? Dadurch wird die maximal auswählbare Folge reduziert.</p>
+                </div>
+
+                {(!work.nextAiringEpisode || work.type === "MANGA") && (
+                  <div className="pt-2 border-t border-gray-800">
+                    <label className="block text-xs font-bold text-gray-400 mb-2">Wöchentlicher Release (Optional)</label>
+                    <div className="flex gap-2 text-sm">
+                      <select 
+                        value={customDay} 
+                        onChange={e => setCustomDay(parseInt(e.target.value))} 
+                        className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500"
+                      >
+                        <option value={1}>Montag</option>
+                        <option value={2}>Dienstag</option>
+                        <option value={3}>Mittwoch</option>
+                        <option value={4}>Donnerstag</option>
+                        <option value={5}>Freitag</option>
+                        <option value={6}>Samstag</option>
+                        <option value={0}>Sonntag</option>
+                      </select>
+                      {work.type !== "MANGA" && (
+                        <input 
+                          type="time" 
+                          value={customTime} 
+                          onChange={e => setCustomTime(e.target.value)} 
+                          className="w-24 bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500" 
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end mt-6">
+                <button 
+                  onClick={async () => {
+                    const user = auth?.currentUser;
+                    if (user && inLibrary) {
+                      if (manualMaxEpisode === "") await clearManualMaxEpisode(id);
+                      else await setCalendarOverride(id, undefined, customDay, customTime, manualMaxEpisode as number);
+                      // Update synchro_offset_episodes in DB
+                      await saveUserWork(user.uid, id, { synchro_offset_episodes: synchroOffset });
+                      setHasCustomOverride(true);
+                      setShowSettingsModal(false);
+                    }
+                  }}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition"
+                >
+                  Speichern
+                </button>
+              </div>
             </div>
-            {hasCustomOverride && <p className="text-xs text-green-400 mt-1">Im Kalender aktiviert!</p>}
           </div>
         )}
+
+
 
         {/* ACTION BUTTONS */}
         <div className="mt-6 flex flex-col gap-3">

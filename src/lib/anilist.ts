@@ -128,6 +128,8 @@ export const GET_WORK_DETAILS = `
               romaji
             }
             type
+            episodes
+            chapters
           }
         }
       }

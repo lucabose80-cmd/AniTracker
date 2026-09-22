@@ -52,6 +52,7 @@ export interface UserWork {
   synchro_offset_episodes?: number;
   selected_platform: string;
   manual_max_episode?: number;
+  auto_added?: boolean;
   
   adaptationScores: {
     story: number;
