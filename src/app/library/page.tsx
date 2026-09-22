@@ -9,6 +9,7 @@ import {
   closestCenter,
   KeyboardSensor,
   PointerSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   DragEndEvent,
@@ -33,7 +34,7 @@ import { ArrowUp, ArrowDown, Minus, Save, Share, Play, Check, Bookmark } from "l
 import { createActivity } from "@/lib/db/feed";
 
 // Simple Sortable Item Component
-function SortableItem({ id, index, workDetails, userWork, previousRank, globalOverride, onRemove }: { id: string, index: number, workDetails?: any, userWork?: any, previousRank?: number, globalOverride?: any, onRemove: (id: string) => void }) {
+function SortableItem({ id, index, workDetails, userWork, previousRank, globalOverride, onRemove, onClick }: { id: string, index: number, workDetails?: any, userWork?: any, previousRank?: number, globalOverride?: any, onRemove: (id: string) => void, onClick?: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   
   const style = {
@@ -97,7 +98,12 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
         </div>
       )}
       {id.startsWith("empty") ? (
-        <span className="text-gray-700 text-3xl font-light pointer-events-none">+</span>
+        <button 
+          onPointerDown={(e) => { e.stopPropagation(); onClick && onClick(); }}
+          className="absolute inset-0 w-full h-full flex items-center justify-center text-gray-700 text-4xl font-light hover:text-gray-500 transition-colors bg-[#1a1d24]"
+        >
+          +
+        </button>
       ) : workDetails ? (
         <Link href={`/work/${id}`} className="absolute inset-0 block h-full w-full">
           <img src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" className="h-full w-full object-cover pointer-events-none" />
@@ -147,10 +153,36 @@ export default function LibraryPage() {
   const [sortBy, setSortBy] = useState<"RELEASE" | "SCORE" | "PROGRESS" | "TITLE">("RELEASE");
   const [activeTab, setActiveTab] = useState<"CURRENT" | "COMPLETED" | "PLANNING">("CURRENT");
 
+  const [isSelectorOpen, setIsSelectorOpen] = useState(false);
+  const [selectingIndex, setSelectingIndex] = useState<number | null>(null);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
+
+  const handleEmptySlotClick = (index: number) => {
+    setSelectingIndex(index);
+    setIsSelectorOpen(true);
+  };
+
+  const handleSelectWorkForSlot = async (workId: string) => {
+    if (selectingIndex === null) return;
+    const newItems = [...items];
+    newItems[selectingIndex] = workId;
+    setItems(newItems);
+    setIsSelectorOpen(false);
+    
+    if (auth.currentUser) {
+      try {
+        const { updateWeeklyRanking } = await import("@/lib/db/users");
+        await updateWeeklyRanking(auth.currentUser.uid, contentType as "ANIME" | "MANGA", newItems);
+      } catch(e) {
+        console.error(e);
+      }
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
@@ -370,7 +402,17 @@ export default function LibraryPage() {
                 const prevRanking = contentType === "ANIME" ? userProfile?.weekly_ranking_anime?.previous : userProfile?.weekly_ranking_manga?.previous;
                 const prevRank = prevRanking ? prevRanking.indexOf(id) : undefined;
                 return (
-                  <SortableItem key={id} id={id} index={index} workDetails={aniListDetails[id]} userWork={uWork} previousRank={prevRank} globalOverride={globalOverrides[id]} onRemove={handleRemoveFromRanking} />
+                  <SortableItem 
+                    key={id} 
+                    id={id} 
+                    index={index} 
+                    workDetails={aniListDetails[id]} 
+                    userWork={uWork} 
+                    previousRank={prevRank} 
+                    globalOverride={globalOverrides[id]} 
+                    onRemove={handleRemoveFromRanking} 
+                    onClick={() => handleEmptySlotClick(index)}
+                  />
                 );
               })}
             </div>
@@ -521,6 +563,39 @@ export default function LibraryPage() {
           )}
         </section>
       </DndContext>
+
+      {/* Modal for selecting a work for an empty slot */}
+      {isSelectorOpen && selectingIndex !== null && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center p-4">
+          <div className="bg-[#1a1d24] border border-gray-800 rounded-2xl w-full max-w-lg p-6 flex flex-col max-h-[80vh] shadow-2xl">
+            <div className="flex justify-between items-center mb-4 shrink-0">
+              <h3 className="text-lg font-bold">Werk für Platz {selectingIndex + 1} auswählen</h3>
+              <button onClick={() => setIsSelectorOpen(false)} className="text-gray-400 hover:text-white text-xl leading-none">✕</button>
+            </div>
+            <div className="overflow-y-auto flex-1 grid grid-cols-3 sm:grid-cols-4 gap-3 pr-2 scrollbar-thin">
+              {filteredWorks
+                .filter(w => !items.includes(w.work_id) && w.status === "CURRENT")
+                .map(w => (
+                <button 
+                  key={w.work_id} 
+                  onClick={() => handleSelectWorkForSlot(w.work_id)}
+                  className="relative aspect-[3/4] rounded-lg overflow-hidden border border-gray-800 hover:border-blue-500 text-left transition focus:outline-none"
+                >
+                  <img src={aniListDetails[w.work_id]?.coverImage?.large} className="w-full h-full object-cover" />
+                  <div className="absolute bottom-0 w-full bg-black/80 p-2 text-[10px] font-bold text-white line-clamp-2">
+                    {aniListDetails[w.work_id]?.title?.english || aniListDetails[w.work_id]?.title?.romaji}
+                  </div>
+                </button>
+              ))}
+              {filteredWorks.filter(w => !items.includes(w.work_id) && w.status === "CURRENT").length === 0 && (
+                <div className="col-span-full text-center text-gray-500 py-8">
+                  Keine verfügbaren Werke in "Aktiv" gefunden.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
