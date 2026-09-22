@@ -34,6 +34,9 @@ export default function Home() {
   const [communityRanking, setCommunityRanking] = useState<any[]>([]);
   const [isLoadingCommunity, setIsLoadingCommunity] = useState(true);
 
+  // Home Screen Tab State
+  const [activeHomeTab, setActiveHomeTab] = useState<"COMMUNITY" | "UPNEXT" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS">("COMMUNITY");
+
   // 1. Load Trending (Always)
   useEffect(() => {
     async function loadTrending() {
@@ -210,10 +213,101 @@ export default function Home() {
   const isLoadingDetails = userWorks.length > 0 && Object.keys(userAniListDetails).length === 0;
 
   return (
-    <div className="flex flex-col gap-8 px-4 pt-6 pb-24">
+    <div className="flex flex-col gap-6 px-4 pt-6 pb-24">
+      {/* HOME TABS */}
+      <div className="flex gap-2 overflow-x-auto pb-2 snap-x scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+        <button
+          onClick={() => setActiveHomeTab("COMMUNITY")}
+          className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
+            activeHomeTab === "COMMUNITY" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
+          }`}
+        >
+          Community Ranking
+        </button>
+        {isLoggedIn && (
+          <button
+            onClick={() => setActiveHomeTab("UPNEXT")}
+            className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
+              activeHomeTab === "UPNEXT" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
+            }`}
+          >
+            Up Next
+          </button>
+        )}
+        <button
+          onClick={() => setActiveHomeTab("TRENDING")}
+          className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
+            activeHomeTab === "TRENDING" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
+          }`}
+        >
+          Trending
+        </button>
+        <button
+          onClick={() => setActiveHomeTab("UPCOMING")}
+          className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
+            activeHomeTab === "UPCOMING" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
+          }`}
+        >
+          Nächste Season
+        </button>
+        <button
+          onClick={() => setActiveHomeTab("RECOMMENDATIONS")}
+          className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
+            activeHomeTab === "RECOMMENDATIONS" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
+          }`}
+        >
+          Empfehlungen
+        </button>
+      </div>
+
+      {/* COMMUNITY WEEKLY RANKING */}
+      {activeHomeTab === "COMMUNITY" && (
+        <section className="animate-in fade-in slide-in-from-right-4 duration-300">
+          <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
+            <Star className="text-blue-500" /> 
+            Top 9 Community Ranking
+          </h2>
+          <div className="grid grid-cols-3 gap-3">
+            {isLoadingCommunity ? (
+              [1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => (
+                <div key={i} className="relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg">
+                  <div className="aspect-[3/4] w-full bg-gray-800 animate-pulse" />
+                </div>
+              ))
+            ) : communityRanking.length === 0 ? (
+              <div className="col-span-3 text-gray-500 text-sm border border-gray-800 bg-[#1a1d24] rounded-xl p-6 text-center w-full">
+                Noch keine Rankings für diese Woche.
+              </div>
+            ) : (
+              communityRanking.map((work, index) => (
+                <Link href={`/work/${work.id}`} key={work.id} className="relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-[1.02]">
+                  <img 
+                    src={work.coverImage?.extraLarge || work.coverImage?.large} 
+                    alt={work.title.romaji}
+                    className="aspect-[3/4] w-full object-cover"
+                    loading="lazy"
+                  />
+                  <div className="absolute top-1 left-1 flex h-6 w-6 sm:h-8 sm:w-8 items-center justify-center rounded-full bg-blue-600 font-bold text-white shadow-lg border-2 border-white/20 text-xs sm:text-base">
+                    {index + 1}
+                  </div>
+                  <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/95 via-black/70 to-transparent p-2 sm:p-3">
+                    <h3 className="font-bold text-white line-clamp-1 text-[10px] sm:text-sm">{work.title.english || work.title.romaji}</h3>
+                    <div className="flex justify-between items-center mt-1">
+                      <span className="text-[9px] sm:text-[10px] font-bold text-gray-400 bg-gray-800 px-1 py-0.5 rounded">
+                        {work.communityPoints} Pkt
+                      </span>
+                    </div>
+                  </div>
+                </Link>
+              ))
+            )}
+          </div>
+        </section>
+      )}
+
       {/* UP NEXT SECTION */}
-      {isLoggedIn && (
-        <section>
+      {activeHomeTab === "UPNEXT" && isLoggedIn && (
+        <section className="animate-in fade-in slide-in-from-right-4 duration-300">
           <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
             <Star className="text-blue-500" /> 
             Up Next (Dein Rückstand)
@@ -259,170 +353,133 @@ export default function Home() {
         </section>
       )}
 
-      {/* COMMUNITY WEEKLY RANKING */}
-      <section>
-        <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
-          <Star className="text-blue-500" /> 
-          Community Weekly Ranking
-        </h2>
-        <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-4 scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-          {isLoadingCommunity ? (
-            [1, 2, 3, 4].map((i) => (
-              <div key={i} className="relative min-w-[180px] snap-center overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg">
-                <div className="aspect-[3/4] w-full bg-gray-800 animate-pulse" />
-              </div>
-            ))
-          ) : communityRanking.length === 0 ? (
-            <div className="text-gray-500 text-sm border border-gray-800 bg-[#1a1d24] rounded-xl p-6 text-center w-full">
-              Noch keine Rankings für diese Woche.
+      {/* TRENDING SECTION */}
+      {activeHomeTab === "TRENDING" && (
+        <section className="animate-in fade-in slide-in-from-right-4 duration-300">
+          <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
+            <Flame className="text-blue-500" /> 
+            Trending {contentType === "ANIME" ? "Anime" : "Manga"}
+          </h2>
+          {isLoadingTrending ? (
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className="aspect-[3/4] rounded-xl bg-gray-800 animate-pulse" />
+              ))}
             </div>
           ) : (
-            communityRanking.map((work, index) => (
-              <Link href={`/work/${work.id}`} key={work.id} className="relative min-w-[180px] snap-center overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-[1.02]">
-                <img 
-                  src={work.coverImage?.extraLarge || work.coverImage?.large} 
-                  alt={work.title.romaji}
-                  className="aspect-[3/4] w-full object-cover"
-                  loading="lazy"
-                />
-                <div className="absolute top-2 left-2 flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 font-bold text-white shadow-lg border-2 border-white/20">
-                  {index + 1}
-                </div>
-                <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/95 via-black/70 to-transparent p-3">
-                  <h3 className="font-bold text-white line-clamp-1 text-sm">{work.title.english || work.title.romaji}</h3>
-                  <div className="flex justify-between items-center mt-1">
-                    <span className="text-[10px] font-bold text-gray-400 bg-gray-800 px-1.5 py-0.5 rounded">
-                      {work.communityPoints} Pkt
-                    </span>
-                  </div>
-                </div>
-              </Link>
-            ))
-          )}
-        </div>
-      </section>
-
-      {/* TRENDING SECTION */}
-      <section>
-        <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
-          <Flame className="text-blue-500" /> 
-          Trending {contentType === "ANIME" ? "Anime" : "Manga"}
-        </h2>
-        {isLoadingTrending ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="aspect-[3/4] rounded-xl bg-gray-800 animate-pulse" />
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {trendingWorks.map((work) => (
-              <Link href={`/work/${work.id}`} key={work.id} className="group relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-105">
-                <img 
-                  src={work.coverImage.extraLarge || work.coverImage.large} 
-                  alt={work.title.english || work.title.romaji}
-                  className="aspect-[3/4] w-full object-cover"
-                />
-                <div className="absolute bottom-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent p-3 pt-6">
-                  <h3 className="font-bold text-white text-xs line-clamp-2">{work.title.english || work.title.romaji}</h3>
-                </div>
-              </Link>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* UPCOMING SECTION */}
-      <section>
-        <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
-          <Sparkles className="text-yellow-400" /> 
-          Nächste Season (Bald verfügbar)
-        </h2>
-        
-        {isLoadingTrending ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="aspect-[3/4] rounded-xl bg-gray-800 animate-pulse" />
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {upcomingWorks.map((work) => (
-              <Link href={`/work/${work.id}`} key={work.id} className="group relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-105">
-                <img 
-                  src={work.coverImage.extraLarge || work.coverImage.large} 
-                  alt={work.title.english || work.title.romaji}
-                  className="aspect-[3/4] w-full object-cover"
-                />
-                <div className="absolute bottom-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent p-3 pt-6">
-                  <h3 className="font-bold text-white text-xs line-clamp-2">{work.title.english || work.title.romaji}</h3>
-                </div>
-              </Link>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* RECOMMENDATIONS SECTION */}
-      <section>
-        <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
-          <Sparkles className="text-blue-500" /> 
-          Für Dich Empfohlen
-        </h2>
-        
-        {/* Genre Selector */}
-        <div className="flex gap-2 overflow-x-auto pb-4 snap-x [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-          {GENRES.map(g => (
-            <button 
-              key={g} 
-              onClick={() => setSelectedGenre(g)}
-              className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
-                selectedGenre === g ? "bg-blue-600 text-white" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
-              }`}
-            >
-              {g}
-            </button>
-          ))}
-        </div>
-
-        {/* User's Top Favorites in Selected Genre */}
-        {isLoggedIn && myTopInGenre.length > 0 && (
-          <div className="mb-6">
-            <h3 className="text-sm font-bold text-gray-400 mb-3">Deine Top Favoriten in {selectedGenre}</h3>
-            <div className="flex gap-3 overflow-x-auto pb-4 snap-x [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-              {myTopInGenre.map(work => (
-                <Link href={`/work/${work.work_id}`} key={work.work_id} className="relative w-28 shrink-0 snap-start overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24]">
-                  <img src={work.details?.coverImage?.large} alt="Cover" className="aspect-[3/4] w-full object-cover" />
-                  <div className="absolute top-1 right-1 bg-black/70 backdrop-blur-md rounded px-1.5 py-0.5 text-[10px] font-bold text-blue-400 border border-gray-700">
-                    ★ {work.evaluation.overallScore.toFixed(1)}
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+              {trendingWorks.map((work) => (
+                <Link href={`/work/${work.id}`} key={work.id} className="group relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-105">
+                  <img 
+                    src={work.coverImage.extraLarge || work.coverImage.large} 
+                    alt={work.title.english || work.title.romaji}
+                    className="aspect-[3/4] w-full object-cover"
+                  />
+                  <div className="absolute bottom-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent p-2 sm:p-3 pt-6">
+                    <h3 className="font-bold text-white text-[10px] sm:text-xs line-clamp-2">{work.title.english || work.title.romaji}</h3>
                   </div>
                 </Link>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </section>
+      )}
 
-        {/* General/Community Recommendations */}
-        <div>
-           <h3 className="text-sm font-bold text-gray-400 mb-3">Top Empfehlungen ({selectedGenre})</h3>
-           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-             {isLoadingRecs ? (
-               [1, 2, 3].map(i => <div key={i} className="aspect-[3/4] w-full bg-[#1a1d24] border border-gray-800 rounded-xl animate-pulse" />)
-             ) : recommendedWorks.length === 0 ? (
-               <p className="text-sm text-gray-500 col-span-full">Keine Empfehlungen gefunden.</p>
-             ) : (
-               recommendedWorks.map(work => (
-                 <Link href={`/work/${work.id}`} key={work.id} className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500">
-                   <img src={work.coverImage?.extraLarge || work.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
-                   <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/90 to-transparent p-2 text-center opacity-0 transition group-hover:opacity-100">
-                     <p className="text-[10px] font-bold text-white line-clamp-2">{work.title.english || work.title.romaji}</p>
-                   </div>
-                 </Link>
-               ))
-             )}
-           </div>
-        </div>
-      </section>
+      {/* UPCOMING SECTION */}
+      {activeHomeTab === "UPCOMING" && (
+        <section className="animate-in fade-in slide-in-from-right-4 duration-300">
+          <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
+            <Sparkles className="text-yellow-400" /> 
+            Nächste Season
+          </h2>
+          
+          {isLoadingTrending ? (
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className="aspect-[3/4] rounded-xl bg-gray-800 animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+              {upcomingWorks.map((work) => (
+                <Link href={`/work/${work.id}`} key={work.id} className="group relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-105">
+                  <img 
+                    src={work.coverImage.extraLarge || work.coverImage.large} 
+                    alt={work.title.english || work.title.romaji}
+                    className="aspect-[3/4] w-full object-cover"
+                  />
+                  <div className="absolute bottom-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent p-2 sm:p-3 pt-6">
+                    <h3 className="font-bold text-white text-[10px] sm:text-xs line-clamp-2">{work.title.english || work.title.romaji}</h3>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* RECOMMENDATIONS SECTION */}
+      {activeHomeTab === "RECOMMENDATIONS" && (
+        <section className="animate-in fade-in slide-in-from-right-4 duration-300">
+          <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
+            <Sparkles className="text-blue-500" /> 
+            Für Dich Empfohlen
+          </h2>
+          
+          {/* Genre Selector */}
+          <div className="flex gap-2 overflow-x-auto pb-4 snap-x [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+            {GENRES.map(g => (
+              <button 
+                key={g} 
+                onClick={() => setSelectedGenre(g)}
+                className={`snap-start shrink-0 px-4 py-2 rounded-full text-xs sm:text-sm font-bold transition-colors ${
+                  selectedGenre === g ? "bg-blue-600 text-white" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
+                }`}
+              >
+                {g}
+              </button>
+            ))}
+          </div>
+
+          {/* User's Top Favorites in Selected Genre */}
+          {isLoggedIn && myTopInGenre.length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-sm font-bold text-gray-400 mb-3">Deine Top Favoriten in {selectedGenre}</h3>
+              <div className="flex gap-3 overflow-x-auto pb-4 snap-x [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+                {myTopInGenre.map(work => (
+                  <Link href={`/work/${work.work_id}`} key={work.work_id} className="relative w-24 sm:w-28 shrink-0 snap-start overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24]">
+                    <img src={work.details?.coverImage?.large} alt="Cover" className="aspect-[3/4] w-full object-cover" />
+                    <div className="absolute top-1 right-1 bg-black/70 backdrop-blur-md rounded px-1.5 py-0.5 text-[10px] font-bold text-blue-400 border border-gray-700">
+                      ★ {work.evaluation.overallScore.toFixed(1)}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* General/Community Recommendations */}
+          <div>
+             <h3 className="text-sm font-bold text-gray-400 mb-3">Top Empfehlungen ({selectedGenre})</h3>
+             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+               {isLoadingRecs ? (
+                 [1, 2, 3, 4, 5, 6].map(i => <div key={i} className="aspect-[3/4] w-full bg-[#1a1d24] border border-gray-800 rounded-xl animate-pulse" />)
+               ) : recommendedWorks.length === 0 ? (
+                 <p className="text-sm text-gray-500 col-span-full">Keine Empfehlungen gefunden.</p>
+               ) : (
+                 recommendedWorks.map(work => (
+                   <Link href={`/work/${work.id}`} key={work.id} className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500">
+                     <img src={work.coverImage?.extraLarge || work.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
+                     <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/90 to-transparent p-2 text-center opacity-0 transition group-hover:opacity-100">
+                       <p className="text-[10px] font-bold text-white line-clamp-2">{work.title.english || work.title.romaji}</p>
+                     </div>
+                   </Link>
+                 ))
+               )}
+             </div>
+          </div>
+        </section>
+      )}
     </div>
   );
 }
