@@ -148,9 +148,9 @@ export const SEARCH_WORKS = `
 `;
 
 export const GET_UPCOMING_WORKS = `
-  query($type: MediaType, $page: Int = 1, $perPage: Int = 10) {
+  query($type: MediaType, $season: MediaSeason, $seasonYear: Int, $page: Int = 1, $perPage: Int = 10) {
     Page(page: $page, perPage: $perPage) {
-      media(type: $type, status: NOT_YET_RELEASED, sort: POPULARITY_DESC) {
+      media(type: $type, status: NOT_YET_RELEASED, sort: POPULARITY_DESC, season: $season, seasonYear: $seasonYear) {
         id
         title {
           romaji

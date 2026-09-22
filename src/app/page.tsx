@@ -36,12 +36,13 @@ export default function Home() {
 
   // Home Screen Tab State
   const [activeHomeTab, setActiveHomeTab] = useState<"COMMUNITY" | "UPNEXT" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS">("UPNEXT");
+  const [authLoaded, setAuthLoaded] = useState(false);
 
   useEffect(() => {
-    if (!isLoggedIn && activeHomeTab === "UPNEXT") {
+    if (authLoaded && !isLoggedIn && activeHomeTab === "UPNEXT") {
       setActiveHomeTab("COMMUNITY");
     }
-  }, [isLoggedIn]);
+  }, [authLoaded, isLoggedIn]);
 
   function getCurrentSeason() {
     const month = new Date().getMonth();
@@ -51,6 +52,14 @@ export default function Home() {
     return "WINTER";
   }
 
+  function getNextSeason() {
+    const current = getCurrentSeason();
+    if (current === "WINTER") return { season: "SPRING", year: new Date().getFullYear() };
+    if (current === "SPRING") return { season: "SUMMER", year: new Date().getFullYear() };
+    if (current === "SUMMER") return { season: "FALL", year: new Date().getFullYear() };
+    return { season: "WINTER", year: new Date().getFullYear() + 1 };
+  }
+
   // 1. Load Trending (Always)
   useEffect(() => {
     async function loadTrending() {
@@ -58,10 +67,11 @@ export default function Home() {
       try {
         const typeArg = contentType === "ANIME" ? "ANIME" : "MANGA";
         const seasonArgs = contentType === "ANIME" ? { season: getCurrentSeason(), seasonYear: new Date().getFullYear() } : {};
+        const nextSeasonArgs = contentType === "ANIME" ? { season: getNextSeason().season, seasonYear: getNextSeason().year } : {};
         
         const [trendingData, upcomingData] = await Promise.all([
           fetchAniList(GET_TRENDING_WORKS, { type: typeArg, page: 1, perPage: 20, ...seasonArgs }),
-          fetchAniList(GET_UPCOMING_WORKS, { type: typeArg, page: 1, perPage: 10 })
+          fetchAniList(GET_UPCOMING_WORKS, { type: typeArg, page: 1, perPage: 10, ...nextSeasonArgs })
         ]);
 
         setTrendingWorks(trendingData.Page.media);
@@ -121,6 +131,7 @@ export default function Home() {
   // 2. Load User Profile & Favorite Genres
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      setAuthLoaded(true);
       if (user) {
         setIsLoggedIn(true);
         const works = await getAllUserWorks(user.uid);
