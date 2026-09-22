@@ -35,7 +35,21 @@ export default function Home() {
   const [isLoadingCommunity, setIsLoadingCommunity] = useState(true);
 
   // Home Screen Tab State
-  const [activeHomeTab, setActiveHomeTab] = useState<"COMMUNITY" | "UPNEXT" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS">("COMMUNITY");
+  const [activeHomeTab, setActiveHomeTab] = useState<"COMMUNITY" | "UPNEXT" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS">("UPNEXT");
+
+  useEffect(() => {
+    if (!isLoggedIn && activeHomeTab === "UPNEXT") {
+      setActiveHomeTab("COMMUNITY");
+    }
+  }, [isLoggedIn]);
+
+  function getCurrentSeason() {
+    const month = new Date().getMonth();
+    if (month >= 2 && month <= 4) return "SPRING";
+    if (month >= 5 && month <= 7) return "SUMMER";
+    if (month >= 8 && month <= 10) return "FALL";
+    return "WINTER";
+  }
 
   // 1. Load Trending (Always)
   useEffect(() => {
@@ -43,9 +57,10 @@ export default function Home() {
       setIsLoadingTrending(true);
       try {
         const typeArg = contentType === "ANIME" ? "ANIME" : "MANGA";
+        const seasonArgs = contentType === "ANIME" ? { season: getCurrentSeason(), seasonYear: new Date().getFullYear() } : {};
         
         const [trendingData, upcomingData] = await Promise.all([
-          fetchAniList(GET_TRENDING_WORKS, { type: typeArg, page: 1, perPage: 10 }),
+          fetchAniList(GET_TRENDING_WORKS, { type: typeArg, page: 1, perPage: 20, ...seasonArgs }),
           fetchAniList(GET_UPCOMING_WORKS, { type: typeArg, page: 1, perPage: 10 })
         ]);
 
@@ -368,7 +383,7 @@ export default function Home() {
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-              {trendingWorks.map((work) => (
+              {trendingWorks.filter(w => !userWorks.some(uw => uw.work_id === w.id.toString() && uw.status === "CURRENT")).slice(0, 10).map((work) => (
                 <Link href={`/work/${work.id}`} key={work.id} className="group relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-105">
                   <img 
                     src={work.coverImage.extraLarge || work.coverImage.large} 

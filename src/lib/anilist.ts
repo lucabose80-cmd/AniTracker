@@ -101,9 +101,9 @@ export async function fetchAniListBatch(ids: number[]) {
 // -- Queries --
 
 export const GET_TRENDING_WORKS = `
-  query($type: MediaType, $page: Int = 1, $perPage: Int = 10) {
+  query($type: MediaType, $season: MediaSeason, $seasonYear: Int, $page: Int = 1, $perPage: Int = 20) {
     Page(page: $page, perPage: $perPage) {
-      media(type: $type, sort: TRENDING_DESC) {
+      media(type: $type, sort: TRENDING_DESC, season: $season, seasonYear: $seasonYear) {
         id
         title {
           romaji

@@ -4,8 +4,23 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import { useRouter } from "next/navigation";
 import { Library as LibraryIcon, Search, LayoutGrid } from "lucide-react";
-import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent, useDraggable } from "@dnd-kit/core";
-import { arrayMove, SortableContext, sortableKeyboardCoordinates, horizontalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+  useDraggable,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  rectSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { auth } from "@/lib/firebase";
 import { getUserProfile, updateTop9List } from "@/lib/db/users";
@@ -54,7 +69,7 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
       style={style} 
       {...attributes} 
       {...listeners}
-      className={`w-24 shrink-0 aspect-[3/4] relative cursor-grab active:cursor-grabbing rounded-xl bg-[#1a1d24] border ${isDragging ? 'border-blue-500 shadow-2xl scale-105' : 'border-gray-800'} flex items-center justify-center font-bold text-gray-500 overflow-hidden`}
+      className={`w-full aspect-[3/4] relative cursor-grab active:cursor-grabbing rounded-xl bg-[#1a1d24] border ${isDragging ? 'border-blue-500 shadow-2xl scale-105' : 'border-gray-800'} flex items-center justify-center font-bold text-gray-500 overflow-hidden`}
     >
       <span className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white backdrop-blur-md z-10 pointer-events-none">
         {index + 1}
@@ -348,16 +363,14 @@ export default function LibraryPage() {
             </button>
           </div>
           
-          <SortableContext items={items} strategy={horizontalListSortingStrategy}>
-            <div className="flex gap-3 overflow-x-auto pb-4 snap-x snap-mandatory [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+          <SortableContext items={items} strategy={rectSortingStrategy}>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 pb-2">
               {items.map((id, index) => {
                 const uWork = allWorks.find(w => w.work_id === id);
                 const prevRanking = contentType === "ANIME" ? userProfile?.weekly_ranking_anime?.previous : userProfile?.weekly_ranking_manga?.previous;
                 const prevRank = prevRanking ? prevRanking.indexOf(id) : undefined;
                 return (
-                  <div key={id} className="snap-center">
-                    <SortableItem id={id} index={index} workDetails={aniListDetails[id]} userWork={uWork} previousRank={prevRank} globalOverride={globalOverrides[id]} onRemove={handleRemoveFromRanking} />
-                  </div>
+                  <SortableItem key={id} id={id} index={index} workDetails={aniListDetails[id]} userWork={uWork} previousRank={prevRank} globalOverride={globalOverrides[id]} onRemove={handleRemoveFromRanking} />
                 );
               })}
             </div>

@@ -190,6 +190,9 @@ export default function ProfilePage() {
     setFavItems(topWorks);
   }, [contentType, dbUser, aniListDetails, allWorks]);
 
+  const watchedAnimeCount = allWorks.filter(w => w.status === "COMPLETED" && aniListDetails[w.work_id]?.type === "ANIME").length;
+  const readMangaCount = allWorks.filter(w => w.status === "COMPLETED" && aniListDetails[w.work_id]?.type === "MANGA").length;
+
   return (
     <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-lg mx-auto">
       <div className="flex items-center justify-between">
@@ -351,11 +354,11 @@ export default function ProfilePage() {
         <h3 className="mb-3 text-lg font-bold">Statistiken</h3>
         <div className="grid grid-cols-2 gap-4">
           <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-4 text-center">
-            <span className="block text-2xl font-bold text-blue-500">0</span>
+            <span className="block text-2xl font-bold text-blue-500">{watchedAnimeCount}</span>
             <span className="text-xs text-gray-400">Gesehene Anime</span>
           </div>
           <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-4 text-center">
-            <span className="block text-2xl font-bold text-blue-500">0</span>
+            <span className="block text-2xl font-bold text-blue-500">{readMangaCount}</span>
             <span className="text-xs text-gray-400">Gelesene Manga</span>
           </div>
         </div>
