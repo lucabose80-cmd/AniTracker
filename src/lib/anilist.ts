@@ -199,6 +199,11 @@ export const GET_WORK_DETAILS = `
       chapters
       averageScore
       genres
+      startDate {
+        year
+        month
+        day
+      }
       nextAiringEpisode {
         episode
         airingAt

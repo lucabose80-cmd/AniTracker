@@ -356,7 +356,15 @@ export default function WorkDetailPage() {
           ))}
         </div>
 
-        <p className="mt-4 text-sm text-gray-300 line-clamp-4" dangerouslySetInnerHTML={{ __html: work.description || "" }} />
+        {/* Release Date */}
+        {work.startDate?.year && (
+          <div className="mt-4 text-sm font-bold text-yellow-500 flex items-center gap-1.5">
+            <CalendarIcon size={14} />
+            Release: {work.startDate.day ? `${work.startDate.day.toString().padStart(2, '0')}.` : ""}{work.startDate.month ? `${work.startDate.month.toString().padStart(2, '0')}.` : ""}{work.startDate.year}
+          </div>
+        )}
+
+        <p className={`mt-2 text-sm text-gray-300 ${work.startDate?.year ? '' : 'mt-4'} line-clamp-4`} dangerouslySetInnerHTML={{ __html: work.description || "" }} />
 
         {/* EPISODE TRACKING */}
         <div className="mt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-900 border border-gray-800 rounded-xl p-4">
