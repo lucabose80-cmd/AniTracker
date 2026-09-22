@@ -92,6 +92,36 @@ export const SEARCH_WORKS = `
   }
 `;
 
+export const GET_UPCOMING_WORKS = `
+  query($type: MediaType, $page: Int = 1, $perPage: Int = 10) {
+    Page(page: $page, perPage: $perPage) {
+      media(type: $type, status: NOT_YET_RELEASED, sort: POPULARITY_DESC) {
+        id
+        title {
+          romaji
+          english
+        }
+        coverImage {
+          extraLarge
+          large
+        }
+        format
+        episodes
+        chapters
+        averageScore
+        relations {
+          edges {
+            relationType
+            node {
+              id
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
 export const GET_WORK_DETAILS = `
   query($id: Int!) {
     Media(id: $id) {
