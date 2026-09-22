@@ -129,6 +129,7 @@ export default function LibraryPage() {
   const [globalOverrides, setGlobalOverrides] = useState<Record<string, any>>({});
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [sortBy, setSortBy] = useState<"RELEASE" | "SCORE" | "PROGRESS" | "TITLE">("RELEASE");
   const [activeTab, setActiveTab] = useState<"CURRENT" | "COMPLETED" | "PLANNING">("CURRENT");
 
   const sensors = useSensors(
@@ -368,25 +369,41 @@ export default function LibraryPage() {
             <h3 className="text-lg font-bold">Alle Werke</h3>
           </div>
           
-          <div className="flex bg-[#1a1d24] border border-gray-800 rounded-lg p-1 mb-4 w-full sm:w-fit mx-auto sm:mx-0">
-            <button
-              onClick={() => setActiveTab("CURRENT")}
-              className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-1 text-xs font-bold rounded-md transition ${activeTab === "CURRENT" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}
-            >
-              <Play size={12} /> Aktiv
-            </button>
-            <button
-              onClick={() => setActiveTab("COMPLETED")}
-              className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-1 text-xs font-bold rounded-md transition ${activeTab === "COMPLETED" ? "bg-green-600 text-white" : "text-gray-400 hover:text-white"}`}
-            >
-              <Check size={12} /> Fertig
-            </button>
-            <button
-              onClick={() => setActiveTab("PLANNING")}
-              className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-1 text-xs font-bold rounded-md transition ${activeTab === "PLANNING" ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"}`}
-            >
-              <Bookmark size={12} /> Wunschliste
-            </button>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+            <div className="flex w-full sm:w-auto bg-[#1a1d24] border border-gray-800 rounded-lg overflow-hidden shrink-0">
+              <button
+                onClick={() => setActiveTab("CURRENT")}
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-md transition ${activeTab === "CURRENT" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}
+              >
+                <Play size={12} /> Aktiv
+              </button>
+              <button
+                onClick={() => setActiveTab("COMPLETED")}
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-md transition ${activeTab === "COMPLETED" ? "bg-green-600 text-white" : "text-gray-400 hover:text-white"}`}
+              >
+                <Check size={12} /> Fertig
+              </button>
+              <button
+                onClick={() => setActiveTab("PLANNING")}
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-md transition ${activeTab === "PLANNING" ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"}`}
+              >
+                <Bookmark size={12} /> Wunschliste
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+              <span className="text-xs text-gray-400 font-bold hidden sm:inline">Sortieren:</span>
+              <select 
+                value={sortBy} 
+                onChange={e => setSortBy(e.target.value as any)}
+                className="bg-[#1a1d24] border border-gray-800 rounded-lg text-xs font-bold text-gray-300 py-1.5 px-3 outline-none focus:border-blue-500 transition-colors w-full sm:w-auto cursor-pointer"
+              >
+                <option value="RELEASE">Kürzlich aktualisiert</option>
+                <option value="SCORE">Bewertung</option>
+                <option value="PROGRESS">Fortschritt</option>
+                <option value="TITLE">Alphabetisch</option>
+              </select>
+            </div>
           </div>
           
           {isLoading ? (
@@ -399,7 +416,33 @@ export default function LibraryPage() {
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-              {filteredWorks.filter(w => w.status === activeTab).map(work => {
+              {filteredWorks
+                .filter(w => w.status === activeTab)
+                .sort((a, b) => {
+                  const detA = aniListDetails[a.work_id];
+                  const detB = aniListDetails[b.work_id];
+                  
+                  if (sortBy === "SCORE") {
+                    const scoreA = a.evaluation?.overallScore || 0;
+                    const scoreB = b.evaluation?.overallScore || 0;
+                    if (scoreB !== scoreA) return scoreB - scoreA;
+                  }
+                  if (sortBy === "PROGRESS") {
+                    const pA = a.current_episode || 0;
+                    const pB = b.current_episode || 0;
+                    if (pB !== pA) return pB - pA;
+                  }
+                  if (sortBy === "TITLE") {
+                    const titleA = detA?.title?.romaji || "";
+                    const titleB = detB?.title?.romaji || "";
+                    return titleA.localeCompare(titleB);
+                  }
+                  
+                  // RELEASE (default fallback to ID/Timestamp or nothing if exact match isn't available)
+                  // Assuming larger ID means newer entry as simple fallback
+                  return parseInt(b.work_id) - parseInt(a.work_id);
+                })
+                .map(work => {
                 const details = aniListDetails[work.work_id];
                 const globalOverride = globalOverrides[work.work_id];
                 let behindCount = 0;

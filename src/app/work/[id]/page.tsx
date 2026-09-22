@@ -118,10 +118,12 @@ export default function WorkDetailPage() {
   };
 
   const aniListMax = work?.episodes || work?.chapters || 9999;
-  const aniListAvailable = work?.nextAiringEpisode ? work.nextAiringEpisode.episode - 1 : aniListMax;
-  
   const calculatedMaxEps = manualMaxEpisode !== "" ? manualMaxEpisode : aniListMax;
-  const baseAvailable = manualMaxEpisode !== "" ? manualMaxEpisode : aniListAvailable;
+  
+  // If it's releasing, it shouldn't jump to the manual max episode.
+  // It should be capped at the smaller of max and currently available.
+  let baseAvailable = work?.nextAiringEpisode ? (work.nextAiringEpisode.episode - 1) : calculatedMaxEps;
+  if (baseAvailable > calculatedMaxEps) baseAvailable = calculatedMaxEps;
   
   let calculatedAvailableEps = typeof baseAvailable === "number" && baseAvailable !== 9999 ? baseAvailable : 9999;
   if (synchroOffset > 0 && calculatedAvailableEps !== 9999) {

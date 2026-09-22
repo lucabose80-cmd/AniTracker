@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAppStore } from "@/lib/store";
-import { fetchAniList, GET_TRENDING_WORKS, GET_RECOMMENDATIONS_BY_GENRE, fetchAniListBatch } from "@/lib/anilist";
+import { fetchAniList, GET_TRENDING_WORKS, GET_UPCOMING_WORKS, GET_RECOMMENDATIONS_BY_GENRE, fetchAniListBatch } from "@/lib/anilist";
 import { Star, Flame, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { auth } from "@/lib/firebase";
@@ -15,8 +15,9 @@ const GENRES = ["Action", "Adventure", "Comedy", "Drama", "Fantasy", "Horror", "
 export default function Home() {
   const { contentType } = useAppStore();
   
-  // Trending State
+  // Trending & Upcoming State
   const [trendingWorks, setTrendingWorks] = useState<any[]>([]);
+  const [upcomingWorks, setUpcomingWorks] = useState<any[]>([]);
   const [isLoadingTrending, setIsLoadingTrending] = useState(true);
   
   // User State
@@ -39,8 +40,14 @@ export default function Home() {
       setIsLoadingTrending(true);
       try {
         const typeArg = contentType === "ANIME" ? "ANIME" : "MANGA";
-        const data = await fetchAniList(GET_TRENDING_WORKS, { type: typeArg, page: 1, perPage: 10 });
-        setTrendingWorks(data.Page.media);
+        
+        const [trendingData, upcomingData] = await Promise.all([
+          fetchAniList(GET_TRENDING_WORKS, { type: typeArg, page: 1, perPage: 10 }),
+          fetchAniList(GET_UPCOMING_WORKS, { type: typeArg, page: 1, perPage: 10 })
+        ]);
+
+        setTrendingWorks(trendingData.Page.media);
+        setUpcomingWorks(upcomingData.Page.media);
       } catch (error) {
         console.error("Failed to load trending", error);
       } finally {
@@ -219,9 +226,9 @@ export default function Home() {
               Du bist auf dem neuesten Stand! Keine fehlenden {contentType === "ANIME" ? "Folgen" : "Kapitel"}.
             </div>
           ) : (
-            <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-4 scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
               {upNextWorks.map((work) => (
-              <div key={work.work_id} className="relative min-w-[260px] snap-center overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg flex flex-col">
+              <div key={work.work_id} className="relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg flex flex-col">
                 <div className="relative aspect-video w-full overflow-hidden">
                   <img 
                     src={work.details?.bannerImage || work.details?.coverImage?.extraLarge} 
@@ -235,14 +242,14 @@ export default function Home() {
                 </div>
                 <div className="p-4 flex flex-col flex-1 justify-between -mt-8 relative z-10">
                   <div>
-                    <h3 className="font-bold text-white line-clamp-1">{work.details?.title?.english || work.details?.title?.romaji}</h3>
+                    <h3 className="font-bold text-white text-sm line-clamp-1">{work.details?.title?.english || work.details?.title?.romaji}</h3>
                     <p className="text-xs text-gray-400 mt-1">Als nächstes: {work.details?.type === "MANGA" ? "Kapitel" : "Folge"} {work.nextEpToWatch}</p>
                   </div>
                   <Link 
                     href={`/work/${work.work_id}?episode=${work.nextEpToWatch}`}
                     className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded-lg text-center transition shadow-lg"
                   >
-                    Folge {work.nextEpToWatch} kommentieren & abhaken
+                    Check in
                   </Link>
                 </div>
               </div>
@@ -301,34 +308,59 @@ export default function Home() {
           <Flame className="text-blue-500" /> 
           Trending {contentType === "ANIME" ? "Anime" : "Manga"}
         </h2>
-        <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-4 scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-          {isLoadingTrending ? (
-            [1, 2, 3].map((i) => (
-              <div key={i} className="relative min-w-[240px] snap-center overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg">
-                <div className="aspect-[3/4] w-full bg-gray-800 animate-pulse" />
-              </div>
-            ))
-          ) : (
-            trendingWorks.map((work) => (
-              <Link href={`/work/${work.id}`} key={work.id} className="relative min-w-[240px] snap-center overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-[1.02]">
+        {isLoadingTrending ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="aspect-[3/4] rounded-xl bg-gray-800 animate-pulse" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            {trendingWorks.map((work) => (
+              <Link href={`/work/${work.id}`} key={work.id} className="group relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-105">
                 <img 
-                  src={work.coverImage?.extraLarge || work.coverImage?.large} 
-                  alt={work.title.romaji}
+                  src={work.coverImage.extraLarge || work.coverImage.large} 
+                  alt={work.title.english || work.title.romaji}
                   className="aspect-[3/4] w-full object-cover"
-                  loading="lazy"
                 />
-                <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/95 via-black/70 to-transparent p-4">
-                  <h3 className="font-bold text-white line-clamp-1">{work.title.english || work.title.romaji}</h3>
-                  <div className="flex items-center gap-2 text-xs text-gray-300 mt-1">
-                    <Star size={12} className="text-yellow-500" />
-                    <span>{(work.averageScore / 10).toFixed(1)}</span>
-                    <span className="text-blue-400 font-semibold">{work.format || contentType}</span>
-                  </div>
+                <div className="absolute bottom-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent p-3 pt-6">
+                  <h3 className="font-bold text-white text-xs line-clamp-2">{work.title.english || work.title.romaji}</h3>
                 </div>
               </Link>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* UPCOMING SECTION */}
+      <section>
+        <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
+          <Sparkles className="text-yellow-400" /> 
+          Nächste Season (Bald verfügbar)
+        </h2>
+        
+        {isLoadingTrending ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="aspect-[3/4] rounded-xl bg-gray-800 animate-pulse" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            {upcomingWorks.map((work) => (
+              <Link href={`/work/${work.id}`} key={work.id} className="group relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-105">
+                <img 
+                  src={work.coverImage.extraLarge || work.coverImage.large} 
+                  alt={work.title.english || work.title.romaji}
+                  className="aspect-[3/4] w-full object-cover"
+                />
+                <div className="absolute bottom-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent p-3 pt-6">
+                  <h3 className="font-bold text-white text-xs line-clamp-2">{work.title.english || work.title.romaji}</h3>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* RECOMMENDATIONS SECTION */}

@@ -29,7 +29,6 @@ export default function CalendarPage() {
   const [globalOverrides, setGlobalOverrides] = useState<Record<string, any>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [selectedDay, setSelectedDay] = useState<number>(new Date().getDay());
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDateString, setEditDateString] = useState("");
@@ -142,11 +141,6 @@ export default function CalendarPage() {
     loadData();
   };
 
-  const dayAnime = airingAnime.filter(anime => {
-    const date = new Date(anime.nextAiringEpisode.airingAt * 1000);
-    return date.getDay() === selectedDay;
-  });
-
   return (
     <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-lg mx-auto">
       <h2 className="flex items-center gap-2 text-xl font-bold">
@@ -161,131 +155,122 @@ export default function CalendarPage() {
         </div>
       ) : (
         <>
-          {/* Day Selector */}
-          <div className="flex justify-between items-center bg-[#1a1d24] border border-gray-800 rounded-xl p-2">
-            {DAYS.map(day => {
-              const isSelected = selectedDay === day.value;
-              const hasAnime = airingAnime.some(a => new Date(a.nextAiringEpisode.airingAt * 1000).getDay() === day.value);
-              
-              return (
-                <button
-                  key={day.label}
-                  onClick={() => setSelectedDay(day.value)}
-                  className={`relative flex-1 py-2 text-sm font-bold rounded-lg transition-colors ${
-                    isSelected 
-                      ? "bg-blue-600 text-white shadow-md" 
-                      : "text-gray-400 hover:text-gray-200 hover:bg-gray-800/50"
-                  }`}
-                >
-                  {day.label}
-                  {hasAnime && !isSelected && (
-                    <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-blue-500" />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
           {/* Schedule List */}
-          <div className="flex flex-col gap-4 mt-2">
+          <div className="flex flex-col gap-8 mt-2">
             {isLoading ? (
               <div className="text-center text-gray-500 py-8 animate-pulse">Lade Kalender...</div>
-            ) : dayAnime.length === 0 ? (
+            ) : airingAnime.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-gray-500 bg-[#1a1d24] border border-gray-800 rounded-xl border-dashed">
                 <Tv size={48} className="mb-4 text-gray-700" strokeWidth={1} />
-                <p>An diesem Tag erscheint nichts Neues.</p>
+                <p>Es erscheinen diese Woche keine neuen Folgen.</p>
                 <p className="text-xs mt-1">Füge mehr aktuell laufende Anime hinzu!</p>
               </div>
             ) : (
-              dayAnime.map(anime => {
-                const date = new Date(anime.nextAiringEpisode.airingAt * 1000);
-                const timeString = format(date, "HH:mm");
-                const countdown = formatDistanceToNow(date, { addSuffix: true, locale: de });
-                const strId = anime.id.toString();
+              DAYS.map(day => {
+                const dayAnimeList = airingAnime.filter(anime => {
+                  const date = new Date(anime.nextAiringEpisode.airingAt * 1000);
+                  return date.getDay() === day.value;
+                });
                 
-                // Calculate Behind Status
-                const uWork = userWorkMap[strId];
-                const currentEp = uWork?.current_episode || 0;
-                
-                let episodesOut = anime.nextAiringEpisode.episode - 1;
-                const override = globalOverrides[strId];
-                if (override?.manualMaxEpisode !== undefined && override?.manualMaxEpisode !== null) {
-                  episodesOut = override.manualMaxEpisode;
-                }
-                
-                const behindCount = Math.max(0, episodesOut - currentEp);
-
-                const isEditing = editingId === strId;
+                if (dayAnimeList.length === 0) return null;
                 
                 return (
-                  <Link 
-                    href={`/work/${strId}`} 
-                    key={strId}
-                    className="relative flex gap-4 p-3 bg-[#1a1d24] border border-gray-800 rounded-xl shadow-md hover:border-blue-500 transition-colors group overflow-hidden"
-                  >
-                    <div className="relative shrink-0">
-                      <img 
-                        src={anime.coverImage.large} 
-                        alt="Cover" 
-                        className="w-16 h-24 object-cover rounded-lg shadow-sm"
-                      />
-                      {behindCount > 0 && (
-                        <div className="absolute top-0 right-0 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-bl-lg border-b border-l border-gray-800">
-                          {behindCount}
-                        </div>
-                      )}
-                    </div>
+                  <div key={day.label} className="flex flex-col gap-4">
+                    <h3 className="text-lg font-bold text-white border-b border-gray-800 pb-2">{day.label}</h3>
+                    <div className="flex flex-col gap-4">
+                      {dayAnimeList.map(anime => {
+                        const date = new Date(anime.nextAiringEpisode.airingAt * 1000);
+                        const timeString = format(date, "HH:mm");
+                        const countdown = formatDistanceToNow(date, { addSuffix: true, locale: de });
+                        const strId = anime.id.toString();
+                        
+                        // Calculate Behind Status
+                        const uWork = userWorkMap[strId];
+                        const currentEp = uWork?.current_episode || 0;
+                        
+                        let episodesOut = anime.nextAiringEpisode.episode - 1;
+                        const override = globalOverrides[strId];
+                        if (override?.manualMaxEpisode !== undefined && override?.manualMaxEpisode !== null) {
+                          episodesOut = override.manualMaxEpisode;
+                        }
+                        
+                        const behindCount = Math.max(0, episodesOut - currentEp);
 
-                    <div className="flex flex-col justify-between flex-1 py-1">
-                      <div>
-                        <div className="flex justify-between items-start gap-2">
-                          <h3 className="font-bold text-sm text-gray-200 line-clamp-2 group-hover:text-blue-400 transition-colors">
-                            {anime.title.english || anime.title.romaji}
-                          </h3>
-                        </div>
-                        <p className="text-xs text-blue-400 font-semibold mt-1">
-                          Episode {anime.nextAiringEpisode.episode}
-                        </p>
-                      </div>
-                      
-                      {isEditing ? (
-                        <div className="flex items-center gap-2 mt-2" onClick={e => e.preventDefault()}>
-                          <input 
-                            type="datetime-local" 
-                            value={editDateString}
-                            onChange={(e) => setEditDateString(e.target.value)}
-                            className="bg-gray-900 border border-gray-700 rounded text-xs text-white p-1"
-                          />
-                          <button onClick={(e) => handleSaveOverride(strId, e)} className="bg-green-600 p-1 rounded text-white">
-                            <Check size={14} />
-                          </button>
-                          <button onClick={(e) => { e.preventDefault(); setEditingId(null); }} className="bg-red-600 p-1 rounded text-white">
-                            <X size={14} />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex justify-between items-end mt-3">
-                          <div className="flex items-center gap-3">
-                            <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-gray-900 border border-gray-800">
-                              <Clock size={12} className="text-gray-400" />
-                              <span className="text-xs font-bold text-gray-300">{timeString} Uhr</span>
-                            </div>
-                            <span className="text-[10px] font-medium text-gray-500 bg-gray-900/50 px-2 py-1 rounded">
-                              {countdown}
-                            </span>
-                          </div>
-                          
-                          <button 
-                            onClick={(e) => handleEditClick(anime, e)}
-                            className="text-gray-500 hover:text-white transition p-1"
-                            title="Zeit korrigieren"
+                        const isEditing = editingId === strId;
+                        
+                        return (
+                          <Link 
+                            href={`/work/${strId}`} 
+                            key={strId}
+                            className="relative flex gap-4 p-3 bg-[#1a1d24] border border-gray-800 rounded-xl shadow-md hover:border-blue-500 transition-colors group overflow-hidden"
                           >
-                            <Edit2 size={14} />
-                          </button>
-                        </div>
-                      )}
+                            <div className="relative shrink-0">
+                              <img 
+                                src={anime.coverImage.large} 
+                                alt="Cover" 
+                                className="w-16 h-24 object-cover rounded-lg shadow-sm"
+                              />
+                              {behindCount > 0 && (
+                                <div className="absolute top-0 right-0 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-bl-lg border-b border-l border-gray-800">
+                                  {behindCount}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex flex-col justify-between flex-1 py-1">
+                              <div>
+                                <div className="flex justify-between items-start gap-2">
+                                  <h3 className="font-bold text-sm text-gray-200 line-clamp-2 group-hover:text-blue-400 transition-colors">
+                                    {anime.title.english || anime.title.romaji}
+                                  </h3>
+                                </div>
+                                <p className="text-xs text-blue-400 font-semibold mt-1">
+                                  Episode {anime.nextAiringEpisode.episode}
+                                </p>
+                              </div>
+                              
+                              {isEditing ? (
+                                <div className="flex items-center gap-2 mt-2" onClick={e => e.preventDefault()}>
+                                  <input 
+                                    type="datetime-local" 
+                                    value={editDateString}
+                                    onChange={(e) => setEditDateString(e.target.value)}
+                                    className="bg-gray-900 border border-gray-700 rounded text-xs text-white p-1"
+                                  />
+                                  <button onClick={(e) => handleSaveOverride(strId, e)} className="bg-green-600 p-1 rounded text-white">
+                                    <Check size={14} />
+                                  </button>
+                                  <button onClick={(e) => { e.preventDefault(); setEditingId(null); }} className="bg-red-600 p-1 rounded text-white">
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex justify-between items-end mt-3">
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-gray-900 border border-gray-800">
+                                      <Clock size={12} className="text-gray-400" />
+                                      <span className="text-xs font-bold text-gray-300">{timeString} Uhr</span>
+                                    </div>
+                                    <span className="text-[10px] font-medium text-gray-500 bg-gray-900/50 px-2 py-1 rounded">
+                                      {countdown}
+                                    </span>
+                                  </div>
+                                  
+                                  <button 
+                                    onClick={(e) => handleEditClick(anime, e)}
+                                    className="text-gray-500 hover:text-white transition p-1"
+                                    title="Zeit korrigieren"
+                                  >
+                                    <Edit2 size={14} />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </Link>
+                        );
+                      })}
                     </div>
-                  </Link>
+                  </div>
                 );
               })
             )}
