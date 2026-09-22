@@ -144,6 +144,11 @@ export const GET_WORK_DETAILS = `
       chapters
       averageScore
       genres
+      nextAiringEpisode {
+        episode
+        airingAt
+        timeUntilAiring
+      }
       tags {
         name
         rank
