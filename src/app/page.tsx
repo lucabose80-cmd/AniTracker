@@ -394,18 +394,30 @@ export default function Home() {
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-              {trendingWorks.filter(w => !userWorks.some(uw => uw.work_id === w.id.toString() && uw.status === "CURRENT")).slice(0, 10).map((work) => (
-                <Link href={`/work/${work.id}`} key={work.id} className="group relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-105">
-                  <img 
-                    src={work.coverImage.extraLarge || work.coverImage.large} 
-                    alt={work.title.english || work.title.romaji}
-                    className="aspect-[3/4] w-full object-cover"
-                  />
-                  <div className="absolute bottom-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent p-2 sm:p-3 pt-6">
-                    <h3 className="font-bold text-white text-[10px] sm:text-xs line-clamp-2">{work.title.english || work.title.romaji}</h3>
-                  </div>
-                </Link>
-              ))}
+              {trendingWorks.filter(w => !userWorks.some(uw => uw.work_id === w.id.toString() && uw.status === "CURRENT")).slice(0, 10).map((work) => {
+                const isUnreleased = work.status === "NOT_YET_RELEASED";
+                const isSequel = work.relations?.edges?.some((edge: any) => {
+                  return (edge.relationType === "PREQUEL" || edge.relationType === "PARENT") &&
+                         userWorks.some(uw => uw.work_id === edge.node.id.toString());
+                });
+                
+                let borderClass = "border-gray-800";
+                if (isUnreleased) borderClass = "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]";
+                else if (isSequel) borderClass = "border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]";
+
+                return (
+                  <Link href={`/work/${work.id}`} key={work.id} className={`group relative overflow-hidden rounded-xl border ${borderClass} bg-[#1a1d24] shadow-lg transition-transform hover:scale-105 hover:border-gray-600`}>
+                    <img 
+                      src={work.coverImage.extraLarge || work.coverImage.large} 
+                      alt={work.title.english || work.title.romaji}
+                      className="aspect-[3/4] w-full object-cover"
+                    />
+                    <div className="absolute bottom-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent p-2 sm:p-3 pt-6">
+                      <h3 className="font-bold text-white text-[10px] sm:text-xs line-clamp-2">{work.title.english || work.title.romaji}</h3>
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
           )}
         </section>

@@ -120,6 +120,15 @@ export const GET_TRENDING_WORKS = `
         chapters
         averageScore
         genres
+        status
+        relations {
+          edges {
+            relationType
+            node {
+              id
+            }
+          }
+        }
       }
     }
   }
