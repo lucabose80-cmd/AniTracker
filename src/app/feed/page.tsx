@@ -417,7 +417,7 @@ export default function FeedPage() {
                     {activity.action_type === "WEEKLY_RANKING" ? (
                       <div className="mt-2 bg-black/40 rounded-lg p-3 border border-gray-800">
                         <p className="text-sm font-bold text-yellow-500 mb-2">🏆 Die Top Plätze diese Woche:</p>
-                        <div className="flex flex-col gap-3">
+                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2">
                           {(() => {
                             const isOldPost = activity.details?.startsWith("Wochen-Ranking");
                             const rankedIds = (activity.details && !isOldPost) 
@@ -428,15 +428,15 @@ export default function FeedPage() {
                               const rankedWork = workDetails[id];
                               if (!rankedWork) return null;
                               return (
-                                <div key={id} className="flex gap-3 items-center">
-                                   <div className="text-yellow-500 font-bold w-5 shrink-0 text-right">{idx + 1}.</div>
-                                   <Link href={`/work/${id}`} className="shrink-0">
-                                     <img src={rankedWork.coverImage?.large} alt="Cover" className="w-8 h-12 object-cover rounded shadow border border-gray-700 hover:border-blue-500 transition" />
-                                   </Link>
-                                   <div className="flex-1 min-w-0">
-                                     <h4 className="font-bold text-gray-100 text-sm line-clamp-1">{rankedWork.title?.english || rankedWork.title?.romaji}</h4>
-                                   </div>
-                                </div>
+                                <Link key={id} href={`/work/${id}`} className="relative aspect-[3/4] rounded-lg overflow-hidden group border border-gray-700 hover:border-blue-500 transition shadow-sm">
+                                  <div className="absolute top-1 left-1 bg-yellow-500 text-black text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full shadow-md z-10 border border-yellow-300">
+                                    {idx + 1}
+                                  </div>
+                                  <img src={rankedWork.coverImage?.large} alt="Cover" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                                  <div className="absolute bottom-0 inset-x-0 bg-black/80 text-[9px] text-gray-200 px-1 py-1 truncate text-center font-bold backdrop-blur-sm">
+                                    {rankedWork.title?.english || rankedWork.title?.romaji}
+                                  </div>
+                                </Link>
                               )
                             });
                           })()}

@@ -14,7 +14,7 @@ import { UserWork } from "@/types/database";
 import { getAllUserWorks } from "@/lib/db/works";
 import { getCalendarOverrides } from "@/lib/db/calendar";
 import Link from "next/link";
-import { ArrowUp, ArrowDown, Minus, Save, Share } from "lucide-react";
+import { ArrowUp, ArrowDown, Minus, Save, Share, Play, Check, Bookmark } from "lucide-react";
 import { createActivity } from "@/lib/db/feed";
 
 // Simple Sortable Item Component
@@ -368,24 +368,24 @@ export default function LibraryPage() {
             <h3 className="text-lg font-bold">Alle Werke</h3>
           </div>
           
-          <div className="flex bg-[#1a1d24] border border-gray-800 rounded-lg p-1 mb-4">
+          <div className="flex bg-[#1a1d24] border border-gray-800 rounded-lg p-1 mb-4 w-full sm:w-fit mx-auto sm:mx-0">
             <button
               onClick={() => setActiveTab("CURRENT")}
-              className={`flex-1 py-1.5 text-sm font-bold rounded-md transition ${activeTab === "CURRENT" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-1 text-xs font-bold rounded-md transition ${activeTab === "CURRENT" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}
             >
-              Aktiv
+              <Play size={12} /> Aktiv
             </button>
             <button
               onClick={() => setActiveTab("COMPLETED")}
-              className={`flex-1 py-1.5 text-sm font-bold rounded-md transition ${activeTab === "COMPLETED" ? "bg-green-600 text-white" : "text-gray-400 hover:text-white"}`}
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-1 text-xs font-bold rounded-md transition ${activeTab === "COMPLETED" ? "bg-green-600 text-white" : "text-gray-400 hover:text-white"}`}
             >
-              Fertig
+              <Check size={12} /> Fertig
             </button>
             <button
               onClick={() => setActiveTab("PLANNING")}
-              className={`flex-1 py-1.5 text-sm font-bold rounded-md transition ${activeTab === "PLANNING" ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"}`}
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-1 text-xs font-bold rounded-md transition ${activeTab === "PLANNING" ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"}`}
             >
-              Wunschliste
+              <Bookmark size={12} /> Wunschliste
             </button>
           </div>
           

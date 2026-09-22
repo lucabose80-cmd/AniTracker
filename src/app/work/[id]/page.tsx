@@ -42,8 +42,9 @@ export default function WorkDetailPage() {
     overallScore: 0,
   });
 
-  const [hasEnding, setHasEnding] = useState(false);
+  const [hasRomance, setHasRomance] = useState(false);
   const [isRomanceMainFocus, setIsRomanceMainFocus] = useState(false);
+  const [malRated, setMalRated] = useState(false);
   const [watchMode, setWatchMode] = useState<WatchMode>("SUB");
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
@@ -87,7 +88,10 @@ export default function WorkDetailPage() {
           // Legacy support: if local override exists but no global override, use local (or we just ignore local entirely, ignoring local is cleaner)
           setEvaluation(userWork.evaluation);
           setWatchMode(userWork.classification?.watchMode || "SUB");
-          if (userWork.evaluation.ending > 0) setHasEnding(true);
+          setMalRated(userWork.mal_rated || false);
+          if (userWork.evaluation.romanceAndChemistry > 0) setHasRomance(true);
+        } else {
+          setHasRomance(isRomance);
         }
       } catch (err) {
         console.error(err);
@@ -100,7 +104,7 @@ export default function WorkDetailPage() {
 
   const currentScore = calculateOverallScore({
     evaluation,
-    hasEnding,
+    hasRomance,
     isRomanceMainFocus,
     isAnime: work?.type === "ANIME",
     watchMode,
@@ -110,6 +114,8 @@ export default function WorkDetailPage() {
     setEvaluation(prev => ({ ...prev, [field]: parseFloat(value) }));
   };
 
+  const calculatedMaxEps = manualMaxEpisode !== "" ? manualMaxEpisode : (work?.episodes || work?.chapters || 9999);
+
   const handleQuickAdd = async (status: "CURRENT" | "COMPLETED" | "PLANNING") => {
     const user = auth?.currentUser;
     if (!user) {
@@ -118,13 +124,23 @@ export default function WorkDetailPage() {
     }
     setIsSaving(true);
     try {
+      let epsToSave = currentEpisode;
+      if (status === "COMPLETED" && calculatedMaxEps !== 9999) {
+        epsToSave = calculatedMaxEps as number;
+        setCurrentEpisode(epsToSave);
+      }
+
       if (inLibrary) {
         await updateUserWorkStatus(user.uid, id, status);
+        if (epsToSave !== currentEpisode) {
+          await updateEpisodeProgress(user.uid, id, epsToSave);
+        }
       } else {
         await saveUserWork(user.uid, id, {
           status: status,
           evaluation: evaluation,
-          current_episode: currentEpisode
+          current_episode: epsToSave,
+          mal_rated: malRated
         });
         await addToHistory(user.uid, id);
         // Create feed activity
@@ -186,6 +202,7 @@ export default function WorkDetailPage() {
           actionDialogScale: 0,
           pacingScale: 0,
         },
+        mal_rated: malRated,
         status: userWorkStatus !== "NONE" ? userWorkStatus : "COMPLETED"
       });
       
@@ -211,10 +228,9 @@ export default function WorkDetailPage() {
     const user = auth?.currentUser;
     if (!user) return alert("Bitte einloggen");
     
-    const maxEps = work?.episodes || work?.chapters || 9999;
     let newEp = currentEpisode + increment;
     if (newEp < 0) newEp = 0;
-    if (newEp > maxEps) newEp = maxEps;
+    if (newEp > calculatedMaxEps) newEp = calculatedMaxEps as number;
     
     setCurrentEpisode(newEp);
     
@@ -312,14 +328,16 @@ export default function WorkDetailPage() {
           <div className="flex items-center gap-4 self-end sm:self-auto">
             <button 
               onClick={() => handleUpdateEpisode(-1)}
-              className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-800 text-white font-bold hover:bg-gray-700 active:scale-95"
+              disabled={currentEpisode <= 0}
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-800 text-white font-bold hover:bg-gray-700 active:scale-95 disabled:opacity-30"
             >-</button>
             <span className="font-mono font-bold text-lg text-blue-400">
               {currentEpisode} <span className="text-sm text-gray-500">/ {manualMaxEpisode !== "" ? manualMaxEpisode : (work.episodes || work.chapters || "?")}</span>
             </span>
             <button 
               onClick={() => handleUpdateEpisode(1)}
-              className="w-8 h-8 flex items-center justify-center rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-500 active:scale-95"
+              disabled={currentEpisode >= (calculatedMaxEps as number)}
+              className="w-8 h-8 flex items-center justify-center rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-500 active:scale-95 disabled:opacity-30 disabled:bg-gray-800"
             >+</button>
           </div>
         </div>
@@ -406,26 +424,37 @@ export default function WorkDetailPage() {
             className="w-full rounded-xl bg-[#1a1d24] border border-gray-800 py-3.5 font-bold text-white transition hover:bg-gray-800 active:scale-95 flex items-center justify-center gap-2"
           >
             <Star size={20} className={showEvaluation ? "text-yellow-500" : "text-gray-400"} /> 
-            {showEvaluation ? "Deep Evaluation schließen" : "Deep Evaluation öffnen"}
+            {showEvaluation ? "Bewertungsmatrix schließen" : "Bewertungsmatrix öffnen"}
           </button>
         </div>
 
         {/* --- DEEP EVALUATION UI --- */}
         {showEvaluation && (
           <div className="mt-6 rounded-2xl border border-gray-800 bg-[#1a1d24] p-5 shadow-lg animate-in fade-in slide-in-from-top-4">
-          <h2 className="text-xl font-bold mb-6 text-white flex justify-between items-center">
-            Deep Evaluation
-            <span className="text-2xl text-blue-500">{currentScore.toFixed(2)}<span className="text-sm text-gray-500">/10</span></span>
-          </h2>
+          
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-xl font-bold text-white">
+              Bewertungsmatrix
+            </h2>
+            <div className="flex flex-col items-end">
+              <span className="text-2xl font-bold text-blue-500">{currentScore.toFixed(2)}<span className="text-sm text-gray-500">/10</span></span>
+              <label className="flex items-center gap-2 text-xs text-gray-400 mt-1 cursor-pointer">
+                <input type="checkbox" checked={malRated} onChange={(e) => setMalRated(e.target.checked)} className="rounded bg-gray-900 border-gray-700 text-blue-600 focus:ring-blue-600" />
+                Auf MyAnimeList bewertet
+              </label>
+            </div>
+          </div>
 
           <div className="space-y-6">
             {/* Standard Metrics */}
             {[
-              { label: "Story & Plot (x2.0)", field: "plotAndStory" },
-              { label: "Main Cast (x2.0)", field: "castAndCharacters" },
-              { label: "Side Characters (x1.0)", field: "sideCharacters" },
-              { label: "Artstyle & Animation (x1.5)", field: "artstyleAndAnimation" },
-              { label: "Binge-Factor (x1.0)", field: "bingeFactor" },
+              { label: "Story & Handlung (x2.0)", field: "plotAndStory" },
+              { label: "Hauptcharaktere (x2.0)", field: "castAndCharacters" },
+              { label: "Nebencharaktere (x1.0)", field: "sideCharacters" },
+              { label: "Zeichenstil & Animation (x1.5)", field: "artstyleAndAnimation" },
+              { label: "Ende (x1.5)", field: "ending" },
+              { label: "Binge-Faktor (x1.0)", field: "bingeFactor" },
+              { label: "Comedy (x1.0)", field: "comedy" },
             ].map((metric) => (
               <div key={metric.field}>
                 <div className="flex justify-between text-sm mb-1">
@@ -444,31 +473,23 @@ export default function WorkDetailPage() {
             {/* Conditional Metrics */}
             <div className="pt-4 border-t border-gray-800">
               <label className="flex items-center gap-2 mb-4 text-sm text-gray-300">
-                <input type="checkbox" checked={hasEnding} onChange={(e) => setHasEnding(e.target.checked)} className="rounded bg-gray-900 border-gray-700 text-blue-600 focus:ring-blue-600" />
-                Hat ein richtiges Ende? (Ending Score x1.5)
+                <input type="checkbox" checked={hasRomance} onChange={(e) => setHasRomance(e.target.checked)} className="rounded bg-gray-900 border-gray-700 text-blue-600 focus:ring-blue-600" />
+                Ist Romance enthalten?
               </label>
               
-              {hasEnding && (
+              {hasRomance && (
                 <div className="mb-4">
                   <div className="flex justify-between text-sm mb-1">
-                    <span className="text-gray-300 font-medium">Ending</span>
-                    <span className="font-bold text-white">{evaluation.ending || '-'}</span>
+                    <span className="text-gray-300 font-medium">Romance & Chemie</span>
+                    <span className="font-bold text-white">{evaluation.romanceAndChemistry || '-'}</span>
                   </div>
-                  <input type="range" min="0" max="10" step="0.5" value={evaluation.ending} onChange={(e) => handleSlider("ending", e.target.value)} className="w-full accent-blue-500" />
+                  <input type="range" min="0" max="10" step="0.5" value={evaluation.romanceAndChemistry} onChange={(e) => handleSlider("romanceAndChemistry", e.target.value)} className="w-full accent-blue-500 mb-2" />
+                  <label className="flex items-center gap-2 text-xs text-gray-400">
+                    <input type="checkbox" checked={isRomanceMainFocus} onChange={(e) => setIsRomanceMainFocus(e.target.checked)} className="rounded bg-gray-900 border-gray-700" />
+                    Romance ist der Main-Plot (Gewichtung x2.0 statt x1.0)
+                  </label>
                 </div>
               )}
-            </div>
-
-            <div className="pt-4 border-t border-gray-800">
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-300 font-medium">Romance & Chemistry</span>
-                <span className="font-bold text-white">{evaluation.romanceAndChemistry || '-'}</span>
-              </div>
-              <input type="range" min="0" max="10" step="0.5" value={evaluation.romanceAndChemistry} onChange={(e) => handleSlider("romanceAndChemistry", e.target.value)} className="w-full accent-blue-500 mb-2" />
-              <label className="flex items-center gap-2 text-xs text-gray-400">
-                <input type="checkbox" checked={isRomanceMainFocus} onChange={(e) => setIsRomanceMainFocus(e.target.checked)} />
-                Ist Romance der Main Focus? (Gewichtung x2.0 statt x1.0)
-              </label>
             </div>
 
             {/* Anime Specific */}
@@ -511,7 +532,7 @@ export default function WorkDetailPage() {
             <div className="pt-4 border-t border-gray-800">
               <span className="block text-sm text-gray-300 font-medium mb-2">Emotional Bonus</span>
               <div className="grid grid-cols-2 gap-2">
-                {(["None", "Leicht", "Mitgenommen", "Tränen nah", "Tränen ausgelöst"] as EmotionalImpact[]).map((impact) => (
+                {(["None", "Leicht", "Mitgenommen", "Tränen nah", "Tränen ausgelöst", "Geweint"] as EmotionalImpact[]).map((impact) => (
                   <button
                     key={impact}
                     onClick={() => setEvaluation(prev => ({ ...prev, emotionalImpact: impact }))}

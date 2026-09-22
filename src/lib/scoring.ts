@@ -2,7 +2,7 @@ import { UserWork, EmotionalImpact, WatchMode } from "@/types/database";
 
 interface ScoringParams {
   evaluation: UserWork["evaluation"];
-  hasEnding: boolean;
+  hasRomance: boolean;
   isRomanceMainFocus: boolean;
   isAnime: boolean;
   watchMode: WatchMode;
@@ -10,7 +10,7 @@ interface ScoringParams {
 
 export function calculateOverallScore({
   evaluation,
-  hasEnding,
+  hasRomance,
   isRomanceMainFocus,
   isAnime,
   watchMode,
@@ -37,17 +37,22 @@ export function calculateOverallScore({
   // Artstyle: x1.5
   addScore(evaluation.artstyleAndAnimation, 1.5);
   
-  // Ending: x1.5 (if applicable)
-  if (hasEnding) {
-    addScore(evaluation.ending, 1.5);
-  }
+  // Ending: x1.5 (immer)
+  addScore(evaluation.ending, 1.5);
   
   // Binge-Factor: x1.0
   addScore(evaluation.bingeFactor, 1.0);
+
+  // Comedy: x1.0
+  if (evaluation.comedy) {
+    addScore(evaluation.comedy, 1.0);
+  }
   
   // Romance: x1.0 (subplot) OR x2.0 (main focus)
-  const romanceWeight = isRomanceMainFocus ? 2.0 : 1.0;
-  addScore(evaluation.romanceAndChemistry, romanceWeight);
+  if (hasRomance) {
+    const romanceWeight = isRomanceMainFocus ? 2.0 : 1.0;
+    addScore(evaluation.romanceAndChemistry, romanceWeight);
+  }
   
   // Intro/Outro: x0.5 (Anime only)
   if (isAnime) {
@@ -66,8 +71,9 @@ export function calculateOverallScore({
   const emotionalBonusMap: Record<EmotionalImpact, number> = {
     "Leicht": 0.1,
     "Mitgenommen": 0.3,
-    "Tränen nah": 0.7,
-    "Tränen ausgelöst": 1.2,
+    "Tränen nah": 0.5,
+    "Tränen ausgelöst": 0.8,
+    "Geweint": 1.2,
     "None": 0.0
   };
   

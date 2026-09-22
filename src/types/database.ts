@@ -1,6 +1,6 @@
 export type WorkType = "ANIME" | "MANGA" | "MANHWA";
 export type UserWorkStatus = "PLANNING" | "CURRENT" | "COMPLETED" | "DROPPED" | "NONE";
-export type EmotionalImpact = "Leicht" | "Mitgenommen" | "Tränen nah" | "Tränen ausgelöst" | "None";
+export type EmotionalImpact = "Leicht" | "Mitgenommen" | "Tränen nah" | "Tränen ausgelöst" | "Geweint" | "None";
 export type WatchMode = "SUB" | "DUB" | "BEIDES" | "N/A";
 
 export interface UserProfile {
@@ -49,6 +49,7 @@ export interface UserWork {
   current_episode: number;
   priority_tier: 1 | 2 | 3;
   sync_offset_days: number;
+  synchro_offset_episodes?: number;
   selected_platform: string;
   manual_max_episode?: number;
   
@@ -57,6 +58,8 @@ export interface UserWork {
     pacing: number;
   };
   
+  mal_rated?: boolean;
+
   classification: {
     watchMode: WatchMode;
     romanceLevel: number;
@@ -78,6 +81,7 @@ export interface UserWork {
     introOutro: number;
     voiceActing: number;
     romanceAndChemistry: number;
+    comedy?: number;
     bingeFactor: number;
     emotionalImpact: EmotionalImpact;
     comments: string;

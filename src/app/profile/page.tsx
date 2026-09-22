@@ -14,8 +14,8 @@ import { useAppStore } from "@/lib/store";
 
 function FavoriteItem({ id, index, workDetails }: { id: string, index: number, workDetails?: any }) {
   return (
-    <div className={`w-24 shrink-0 aspect-[3/4] relative rounded-xl bg-[#1a1d24] border border-gray-800 flex items-center justify-center font-bold text-gray-500 overflow-hidden shadow-lg`}>
-      <span className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 font-bold text-white shadow-md z-10 border border-white/20">
+    <div className={`w-full aspect-[3/4] relative rounded-lg bg-[#1a1d24] border border-gray-700 hover:border-blue-500 transition flex items-center justify-center font-bold text-gray-500 overflow-hidden shadow-sm group`}>
+      <span className="absolute top-1 left-1 flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 font-bold text-white shadow-md z-10 border border-blue-400 text-[10px]">
         {index + 1}
       </span>
       
@@ -338,11 +338,9 @@ export default function ProfilePage() {
               Du hast noch keine Werke bewertet.
             </div>
           ) : (
-            <div className="flex gap-3 overflow-x-auto pb-4 snap-x snap-mandatory [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2">
               {favItems.map((item, index) => (
-                <div key={item.id} className="snap-center">
-                  <FavoriteItem id={item.id} index={index} workDetails={item.details} />
-                </div>
+                <FavoriteItem key={item.id} id={item.id} index={index} workDetails={item.details} />
               ))}
             </div>
           )}
