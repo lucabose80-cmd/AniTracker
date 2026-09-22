@@ -4,7 +4,7 @@ import { User as UserIcon, Settings, LogOut, LogIn, Bell, Star } from "lucide-re
 import { auth } from "@/lib/firebase";
 import { signOut, onAuthStateChanged, User } from "firebase/auth";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { getUserProfile, updateNotificationSettings, updateTop9List, updateUserProfileData } from "@/lib/db/users";
 import { requestForToken } from "@/lib/fcm";
@@ -116,6 +116,43 @@ export default function ProfilePage() {
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        
+        const MAX_SIZE = 256;
+        let width = img.width;
+        let height = img.height;
+        
+        if (width > height && width > MAX_SIZE) {
+          height *= MAX_SIZE / width;
+          width = MAX_SIZE;
+        } else if (height > MAX_SIZE) {
+          width *= MAX_SIZE / height;
+          height = MAX_SIZE;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        
+        ctx?.drawImage(img, 0, 0, width, height);
+        const base64String = canvas.toDataURL("image/jpeg", 0.8);
+        setEditAvatarUrl(base64String);
+      };
+      img.src = event.target?.result as string;
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -343,15 +380,45 @@ export default function ProfilePage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-400 mb-1">Profilbild (URL)</label>
-                <input 
-                  type="url" 
-                  value={editAvatarUrl} 
-                  onChange={e => setEditAvatarUrl(e.target.value)}
-                  placeholder="https://imgur.com/..." 
-                  className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-                />
-                <p className="text-[10px] text-gray-500 mt-1">Füge einen Link zu einem Bild ein (Discord, Imgur, etc.)</p>
+                <label className="block text-xs font-bold text-gray-400 mb-1">Profilbild</label>
+                
+                <div className="flex flex-col items-center gap-3">
+                  <div className="h-20 w-20 rounded-full bg-gray-800 flex items-center justify-center overflow-hidden border border-gray-700">
+                    {editAvatarUrl ? (
+                      <img src={editAvatarUrl} alt="Preview" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-gray-500 text-xs">Kein Bild</span>
+                    )}
+                  </div>
+                  
+                  <input 
+                    type="file" 
+                    accept="image/*" 
+                    className="hidden" 
+                    ref={fileInputRef}
+                    onChange={handleImageUpload}
+                  />
+                  
+                  <div className="flex gap-2 w-full">
+                    <button 
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-2 rounded-lg transition"
+                    >
+                      Bild vom Handy wählen
+                    </button>
+                    {editAvatarUrl && (
+                      <button 
+                        type="button"
+                        onClick={() => setEditAvatarUrl("")}
+                        className="bg-red-900/50 hover:bg-red-900 text-red-400 text-xs font-bold px-3 py-2 rounded-lg transition"
+                      >
+                        Entfernen
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-gray-500 w-full text-center mt-1">Bild wird automatisch optimiert gespeichert.</p>
+                </div>
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">
