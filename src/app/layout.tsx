@@ -20,6 +20,9 @@ export const metadata: Metadata = {
   title: "WeebCheck",
   description: "Dein Tracker für Anime, Manga und Manhwa mit tiefgehenden Bewertungen.",
   manifest: "/manifest.json",
+  icons: {
+    apple: "/apple-touch-icon.png",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
