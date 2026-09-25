@@ -184,18 +184,26 @@ export default function CalendarPage() {
                         const uWork = userWorkMap[strId];
                         const offset = uWork?.synchro_offset_episodes || 0;
                         
-                        // Do NOT shift date! Just shift the episode number displayed if offset > 0
-                        // The user's episode number is the Japanese episode - offset
+                        // Calculate the actual German episode airing at Date D
+                        const germanEpAiring = anime.nextAiringEpisode.episode - offset;
+                        
+                        // What is the next episode the user needs to watch?
+                        const currentEp = uWork?.current_episode || 0;
+                        const targetUserEp = currentEp + 1;
+                        
+                        // If they are ahead or on track, shift the date to when THEIR next episode airs
+                        // Note: If targetUserEp <= germanEpAiring, the date will shift backwards (which is correct, it aired in the past)
                         let displayEpisode = anime.nextAiringEpisode.episode;
-                        if (offset > 0) {
-                          displayEpisode = Math.max(1, displayEpisode - offset);
+                        if (offset > 0 || currentEp > 0) {
+                          const weeksDiff = targetUserEp - germanEpAiring;
+                          date.setDate(date.getDate() + (weeksDiff * 7));
+                          displayEpisode = targetUserEp;
                         }
 
                         const timeString = format(date, "HH:mm");
                         const countdown = formatDistanceToNow(date, { addSuffix: true, locale: de });
                         
                         // Calculate Behind Status
-                        const currentEp = uWork?.current_episode || 0;
                         
                         let episodesOut = anime.nextAiringEpisode.episode - 1;
                         const override = globalOverrides[strId];
