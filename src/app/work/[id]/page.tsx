@@ -52,7 +52,7 @@ export default function WorkDetailPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
 
-  const [customDay, setCustomDay] = useState<number>(1);
+  const [customDay, setCustomDay] = useState<number>(-1);
   const [customTime, setCustomTime] = useState<string>("12:00");
   const [hasCustomOverride, setHasCustomOverride] = useState(false);
 
@@ -475,6 +475,7 @@ export default function WorkDetailPage() {
                         onChange={e => setCustomDay(parseInt(e.target.value))} 
                         className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500"
                       >
+                        <option value={-1}>Kein Release-Tag</option>
                         <option value={1}>Montag</option>
                         <option value={2}>Dienstag</option>
                         <option value={3}>Mittwoch</option>
@@ -502,11 +503,26 @@ export default function WorkDetailPage() {
                     const user = auth?.currentUser;
                     if (user && inLibrary) {
                       if (manualMaxEpisode === "") await clearManualMaxEpisode(id);
-                      else await setCalendarOverride(id, undefined, customDay, customTime, manualMaxEpisode as number);
-                      // Update synchro_offset_episodes in DB
-                      await saveUserWork(user.uid, id, { synchro_offset_episodes: synchroOffset === "" ? 0 : synchroOffset });
-                      setHasCustomOverride(true);
+                      else {
+                        // Pass undefined for day/time if -1 so we don't accidentally set it, or delete it if we had a function for it.
+                        // Actually, if it's -1 we should clear it, but setCalendarOverride doesn't clear if undefined. We will pass null as any to clear it.
+                        await setCalendarOverride(id, undefined, customDay === -1 ? (null as any) : customDay, customDay === -1 ? (null as any) : customTime, manualMaxEpisode as number);
+                      }
+                      
+                      if (manualMaxEpisode === "" && customDay !== -1) {
+                         await setCalendarOverride(id, undefined, customDay, customTime, undefined);
+                      }
+
+                      // Update synchro_offset_episodes and manual_available_eps in DB
+                      await saveUserWork(user.uid, id, { 
+                        synchro_offset_episodes: synchroOffset === "" ? 0 : synchroOffset,
+                        manual_available_eps: manualAvailableEps === "" ? null : manualAvailableEps
+                      });
+                      
+                      setHasCustomOverride(customDay !== -1);
                       setShowSettingsModal(false);
+                      setSaveMessage("Einstellungen gespeichert!");
+                      setTimeout(() => setSaveMessage(""), 3000);
                     }
                   }}
                   className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition"

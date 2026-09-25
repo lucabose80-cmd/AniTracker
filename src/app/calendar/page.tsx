@@ -95,7 +95,7 @@ export default function CalendarPage() {
             cloned.nextAiringEpisode = {
               ...m.nextAiringEpisode, // keep episode num if exists
               airingAt: computedAiringAt,
-              episode: m.nextAiringEpisode?.episode || ((over?.manualMaxEpisode || userWorkMap[strId]?.current_episode || 0) + 1)
+              episode: m.nextAiringEpisode?.episode || ((userWorkMap[strId]?.manual_available_eps || m.chapters || m.episodes || userWorkMap[strId]?.current_episode || 0) + 1)
             };
             scheduled.push(cloned);
           }
