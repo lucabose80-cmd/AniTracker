@@ -120,7 +120,7 @@ export async function performWeeklyMaintenance(uid: string, profile: UserProfile
   const lastMaintenance = profile.last_maintenance_timestamp || 0;
   
   if (lastMaintenance < lastMonday) {
-    const { updateUserWork } = await import("@/lib/db/works");
+    const { saveUserWork } = await import("@/lib/db/works");
     let needsUpdate = false;
     
     for (const work of userWorks) {
@@ -144,7 +144,7 @@ export async function performWeeklyMaintenance(uid: string, profile: UserProfile
         
         const current = Number(work.current_episode) || 0;
         if (current >= maxAiredEp && maxAiredEp > 0) {
-          await updateUserWork(uid, work.work_id, { status: "COMPLETED" });
+          await saveUserWork(uid, work.work_id, { status: "COMPLETED" });
           needsUpdate = true;
         }
       }

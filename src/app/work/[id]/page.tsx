@@ -126,7 +126,7 @@ export default function WorkDetailPage() {
   if (baseAvailable > calculatedMaxEps) baseAvailable = calculatedMaxEps;
   
   let calculatedAvailableEps = typeof baseAvailable === "number" && baseAvailable !== 9999 ? baseAvailable : 9999;
-  if (synchroOffset > 0 && calculatedAvailableEps !== 9999) {
+  if (typeof synchroOffset === "number" && synchroOffset > 0 && calculatedAvailableEps !== 9999) {
     calculatedAvailableEps = Math.max(0, calculatedAvailableEps - synchroOffset);
   }
 

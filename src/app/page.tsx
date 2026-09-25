@@ -5,6 +5,7 @@ import { useAppStore } from "@/lib/store";
 import { fetchAniList, GET_TRENDING_WORKS, GET_UPCOMING_WORKS, GET_RECOMMENDATIONS_BY_GENRE, fetchAniListBatch } from "@/lib/anilist";
 import { Star, Flame, Sparkles } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
 import { getAllUserWorks } from "@/lib/db/works";
 import { getAllUserProfiles } from "@/lib/db/users";
@@ -14,6 +15,7 @@ const GENRES = ["Action", "Adventure", "Comedy", "Drama", "Fantasy", "Horror", "
 
 export default function Home() {
   const { contentType } = useAppStore();
+  const router = useRouter();
   
   // Trending & Upcoming State
   const [trendingWorks, setTrendingWorks] = useState<any[]>([]);
@@ -192,8 +194,8 @@ export default function Home() {
   const handleCheckIn = async (workId: string, nextEp: number) => {
     if (!auth.currentUser) return;
     try {
-      const { updateUserWork } = await import("@/lib/db/works");
-      await updateUserWork(auth.currentUser.uid, workId, { current_episode: nextEp });
+      const { saveUserWork } = await import("@/lib/db/works");
+      await saveUserWork(auth.currentUser.uid, workId, { current_episode: nextEp });
       
       const { createActivity, getGlobalFeed } = await import("@/lib/db/feed");
       // Check if thread exists
@@ -201,10 +203,7 @@ export default function Home() {
       const exists = recent.some(a => a.action_type === "EPISODE_THREAD" && a.work_id === workId && a.episode_num === nextEp);
       
       if (!exists) {
-        await createActivity(auth.currentUser.uid, "EPISODE_THREAD", workId, {
-          episode_num: nextEp,
-          text: `Thread für Folge ${nextEp}`
-        });
+        await createActivity(auth.currentUser.uid, "EPISODE_THREAD", workId, `Thread für Folge ${nextEp}`, undefined, nextEp);
       }
 
       router.push(`/social`);
