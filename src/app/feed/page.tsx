@@ -192,11 +192,11 @@ export default function FeedPage() {
                   <h3 className="font-bold text-gray-200">Benachrichtigungen</h3>
                   <button onClick={() => setShowNotifications(false)} className="text-gray-400 hover:text-white"><X size={16} /></button>
                 </div>
-                {notifications.length === 0 ? (
+                {notifications.filter(n => !n.read).length === 0 ? (
                   <div className="p-4 text-center text-sm text-gray-500">Keine Neuigkeiten.</div>
                 ) : (
                   <div className="flex flex-col">
-                    {notifications.map(n => (
+                    {notifications.filter(n => !n.read).map(n => (
                       <button 
                         key={n.notification_id}
                         onClick={() => handleNotificationClick(n)}
