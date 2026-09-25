@@ -96,8 +96,8 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
       >
         {/* Collage Background */}
         {bgImages.length > 0 && (
-          <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none opacity-40">
-            <div className="grid grid-cols-3 grid-rows-3 w-full h-full gap-1">
+          <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+            <div className="grid grid-cols-3 grid-rows-3 w-full h-full gap-1 opacity-60">
               {Array.from({ length: 9 }).map((_, i) => (
                 <div key={i} className="relative w-full h-full">
                   {bgImages[i % bgImages.length] && (
@@ -110,8 +110,9 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
                 </div>
               ))}
             </div>
-            <div className="absolute inset-0 bg-gradient-to-t from-[#0f1115] via-[#0f1115]/90 to-[#0f1115]/50" />
-            <div className="absolute inset-0 bg-black/50" />
+            {/* Soft vignette/overlay so the text remains readable but images are clear */}
+            <div className="absolute inset-0 bg-[#0f1115]/50" />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#0f1115]/80 via-transparent to-[#0f1115]/80" />
           </div>
         )}
 
