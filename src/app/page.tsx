@@ -250,6 +250,7 @@ export default function Home() {
     .map(w => {
       const details = userAniListDetails[w.work_id];
       if (!details || details.type !== contentType) return null;
+      if (w.status === "COMPLETED") return null;
       let maxAiredEp = 0;
       if (w.manual_max_episode !== undefined && w.manual_max_episode !== null) {
         maxAiredEp = Number(w.manual_max_episode);

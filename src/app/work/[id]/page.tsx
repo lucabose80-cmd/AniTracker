@@ -27,6 +27,7 @@ export default function WorkDetailPage() {
   const [manualMaxEpisode, setManualMaxEpisode] = useState<number | "">("");
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [synchroOffset, setSynchroOffset] = useState<number | "">(0);
+  const [manualAvailableEps, setManualAvailableEps] = useState<number | "">("");
 
   // Form State for Deep Evaluation
   const [evaluation, setEvaluation] = useState<UserWork["evaluation"]>({
@@ -92,6 +93,7 @@ export default function WorkDetailPage() {
           setWatchMode(userWork.classification?.watchMode || "SUB");
           setMalRated(userWork.mal_rated || false);
           setSynchroOffset(userWork.synchro_offset_episodes || 0);
+          setManualAvailableEps(userWork.manual_available_eps ?? "");
           if (userWork.evaluation.romanceAndChemistry > 0) setHasRomance(true);
         } else {
           setHasRomance(isRomance);
@@ -124,6 +126,7 @@ export default function WorkDetailPage() {
   // It should be capped at the smaller of max and currently available.
   let baseAvailable = work?.nextAiringEpisode ? (work.nextAiringEpisode.episode - 1) : calculatedMaxEps;
   if (baseAvailable > calculatedMaxEps) baseAvailable = calculatedMaxEps;
+  if (manualAvailableEps !== "") baseAvailable = manualAvailableEps;
   
   let calculatedAvailableEps = typeof baseAvailable === "number" && baseAvailable !== 9999 ? baseAvailable : 9999;
   if (typeof synchroOffset === "number" && synchroOffset > 0 && calculatedAvailableEps !== 9999) {
@@ -264,6 +267,7 @@ export default function WorkDetailPage() {
         },
         mal_rated: malRated,
         synchro_offset_episodes: synchroOffset === "" ? 0 : synchroOffset,
+        manual_available_eps: manualAvailableEps === "" ? null : manualAvailableEps,
         auto_added: false,
         status: userWorkStatus !== "NONE" ? userWorkStatus : "COMPLETED"
       });
@@ -380,7 +384,24 @@ export default function WorkDetailPage() {
               className="w-8 h-8 flex items-center justify-center rounded-lg bg-gray-800 text-white font-bold hover:bg-gray-700 active:scale-95 disabled:opacity-30"
             >-</button>
             <span className="font-mono font-bold text-lg text-blue-400 flex items-center">
-              {currentEpisode} <span className="text-sm text-gray-500 ml-1">/ {calculatedMaxEps !== 9999 ? calculatedMaxEps : "?"}</span>
+              <input 
+                type="number"
+                min="0"
+                max={calculatedAvailableEps !== 9999 ? (calculatedAvailableEps as number) : undefined}
+                value={currentEpisode}
+                onChange={e => {
+                  const val = parseInt(e.target.value);
+                  if (!isNaN(val)) {
+                    let newEp = val;
+                    if (newEp < 0) newEp = 0;
+                    if (newEp > (calculatedAvailableEps as number)) newEp = calculatedAvailableEps as number;
+                    handleUpdateEpisode(newEp - currentEpisode);
+                  }
+                }}
+                className="w-16 bg-transparent text-center focus:outline-none border-b-2 border-transparent focus:border-blue-500 m-0 p-0"
+                style={{ MozAppearance: 'textfield' }}
+              />
+              <span className="text-sm text-gray-500 ml-1">/ {calculatedMaxEps !== 9999 ? calculatedMaxEps : "?"}</span>
               {inLibrary && (
                 <button onClick={() => setShowSettingsModal(true)} className="ml-3 text-gray-500 hover:text-white transition bg-gray-800 rounded p-1">
                   <Settings size={14} />
@@ -430,6 +451,20 @@ export default function WorkDetailPage() {
                   />
                   <p className="text-[10px] text-gray-500 mt-1">Wie viele Folgen hinkt die Synchro hinterher? Dadurch wird die maximal auswählbare Folge reduziert.</p>
                 </div>
+
+                {(work.type === "MANGA" || work.type === "MANHWA") && (
+                  <div>
+                    <label className="block text-xs font-bold text-gray-400 mb-1">Aktuell releaste Kapitel</label>
+                    <input 
+                      type="number" 
+                      min="0"
+                      value={manualAvailableEps}
+                      onChange={(e) => setManualAvailableEps(e.target.value === "" ? "" : parseInt(e.target.value))}
+                      className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                    />
+                    <p className="text-[10px] text-gray-500 mt-1">Hier eintragen, wenn AniList die aktuelle Kapitelzahl nicht kennt.</p>
+                  </div>
+                )}
 
                 {(!work.nextAiringEpisode || work.type === "MANGA") && (
                   <div className="pt-2 border-t border-gray-800">

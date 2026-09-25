@@ -53,6 +53,7 @@ export interface UserWork {
   priority_tier: 1 | 2 | 3;
   sync_offset_days: number;
   synchro_offset_episodes?: number;
+  manual_available_eps?: number | null;
   selected_platform: string;
   manual_max_episode?: number;
   auto_added?: boolean;
