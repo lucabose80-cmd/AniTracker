@@ -184,9 +184,11 @@ export default function CalendarPage() {
                         const uWork = userWorkMap[strId];
                         const offset = uWork?.synchro_offset_episodes || 0;
                         
-                        // Shift date by offset (assuming 1 episode = 1 week = 7 days)
+                        // Do NOT shift date! Just shift the episode number displayed if offset > 0
+                        // The user's episode number is the Japanese episode - offset
+                        let displayEpisode = anime.nextAiringEpisode.episode;
                         if (offset > 0) {
-                          date.setDate(date.getDate() + (offset * 7));
+                          displayEpisode = Math.max(1, displayEpisode - offset);
                         }
 
                         const timeString = format(date, "HH:mm");
@@ -235,7 +237,7 @@ export default function CalendarPage() {
                                   </h3>
                                 </div>
                                 <p className="text-xs text-blue-400 font-semibold mt-1">
-                                  Episode {anime.nextAiringEpisode.episode}
+                                  Episode {displayEpisode}
                                 </p>
                               </div>
                               

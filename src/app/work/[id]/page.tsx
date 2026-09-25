@@ -11,7 +11,7 @@ import { setCalendarOverride, getCalendarOverrides, clearManualMaxEpisode, Calen
 import { auth } from "@/lib/firebase";
 import { saveUserWork, getUserWork, updateEpisodeProgress, removeUserWork, updateUserWorkStatus } from "@/lib/db/works";
 import { addToHistory } from "@/lib/db/users";
-import { CommentsSection } from "./CommentsSection";
+import { WorkSocialFeed } from "./WorkSocialFeed";
 import { createActivity } from "@/lib/db/feed";
 
 export default function WorkDetailPage() {
@@ -670,7 +670,7 @@ export default function WorkDetailPage() {
         )}
         
         {/* --- COMMENTS SECTION --- */}
-        <CommentsSection workId={id} />
+        <WorkSocialFeed workId={id} work={work} />
       </div>
     </div>
   );

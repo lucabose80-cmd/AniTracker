@@ -14,23 +14,29 @@ import { de } from "date-fns/locale";
 import { deleteActivity, getActivityComments, addActivityComment, deleteActivityComment } from "@/lib/db/feed";
 import { ActivityComment } from "@/types/database";
 
-function CommentSection({ activityId, userProfiles, currentUserUid, commentCount = 0 }: { activityId: string, userProfiles: Record<string, any>, currentUserUid?: string, commentCount?: number }) {
+export function CommentSection({ activityId, userProfiles, currentUserUid, commentCount: initialCount = 0 }: { activityId: string, userProfiles: Record<string, any>, currentUserUid?: string, commentCount?: number }) {
   const [comments, setComments] = useState<ActivityComment[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [newText, setNewText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [seenCount, setSeenCount] = useState(0);
+  const [commentCount, setCommentCount] = useState(initialCount);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem(`seen_comments_${activityId}`);
       if (saved) setSeenCount(parseInt(saved, 10));
     }
+    
+    // Always fetch comments to ensure count is accurate (especially for older posts)
+    getActivityComments(activityId).then(res => {
+      setComments(res);
+      setCommentCount(res.length);
+    }).catch(console.error);
   }, [activityId]);
 
   useEffect(() => {
     if (isOpen) {
-      getActivityComments(activityId).then(setComments).catch(console.error);
       if (typeof window !== "undefined") {
         localStorage.setItem(`seen_comments_${activityId}`, commentCount.toString());
       }
@@ -44,7 +50,11 @@ function CommentSection({ activityId, userProfiles, currentUserUid, commentCount
     setIsSubmitting(true);
     try {
       const added = await addActivityComment(activityId, currentUserUid, newText.trim());
-      if (added) setComments(prev => [...prev, added]);
+      if (added) {
+        setComments(prev => [...prev, added]);
+        setCommentCount(prev => prev + 1);
+        setSeenCount(prev => prev + 1);
+      }
       setNewText("");
     } catch (e) {
       console.error(e);
@@ -58,6 +68,7 @@ function CommentSection({ activityId, userProfiles, currentUserUid, commentCount
     try {
       await deleteActivityComment(commentId, activityId);
       setComments(prev => prev.filter(c => c.comment_id !== commentId));
+      setCommentCount(prev => Math.max(0, prev - 1));
     } catch (e) {
       console.error(e);
     }
@@ -135,7 +146,7 @@ function CommentSection({ activityId, userProfiles, currentUserUid, commentCount
   );
 }
 
-function SpoilerProtectedThread({ activity, work, user, timeAgo, currentUserUid, isSpoiler, userProfiles }: any) {
+export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentUserUid, isSpoiler, userProfiles }: any) {
   const [showAnyway, setShowAnyway] = useState(false);
   
   if (isSpoiler && !showAnyway) {
@@ -392,47 +403,47 @@ export default function SocialPage() {
             
             // Render other activity types (RATING, TOP9_UPDATE, MANUAL_POST)
             return (
-              <div key={activity.activity_id} className="rounded-xl border border-gray-800 bg-[#1a1d24] p-4 relative">
+              <div key={activity.activity_id} className="rounded-xl border-2 border-blue-900/30 bg-[#141a29] p-4 shadow-lg relative overflow-hidden group">
                 {activity.user_id === currentUserUid && (
                   <button 
                     onClick={() => handleDeletePost(activity.activity_id)}
-                    className="absolute top-3 right-3 text-gray-500 hover:text-red-500 transition"
+                    className="absolute top-3 right-3 text-gray-600 hover:text-red-500 transition z-10"
                   >
                     X
                   </button>
                 )}
-                <div className="flex items-center gap-3 mb-3 pr-6">
-                  <div className="h-10 w-10 rounded-full bg-gray-700 flex items-center justify-center font-bold overflow-hidden border border-gray-600">
-                    {user.avatar_url ? (
-                      <img src={user.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
-                    ) : (
-                      user.username?.[0]?.toUpperCase() || "?"
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold text-gray-200">
-                      {user.username}
-                      <span className="text-gray-400 font-normal ml-1 text-xs">{timeAgo}</span>
-                    </p>
-                    {work && (
-                      <Link href={`/work/${work.id}`} className="text-xs text-blue-400 hover:underline line-clamp-1 font-semibold">
-                        {work.title?.english || work.title?.romaji}
-                      </Link>
-                    )}
+                
+                <div className="flex gap-4">
+                  {work && (
+                    <Link href={`/work/${work.id}`} className="shrink-0 relative">
+                      <img 
+                        src={work.coverImage?.large} 
+                        alt="Cover" 
+                        className="w-20 h-28 object-cover rounded-lg shadow-md border border-gray-800 group-hover:border-blue-500 transition"
+                      />
+                    </Link>
+                  )}
+                  
+                  <div className="flex flex-col justify-between flex-1 min-w-0 py-1">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <div className="h-4 w-4 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-[8px]">
+                          {user.avatar_url ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" /> : (user.username?.[0]?.toUpperCase() || "?")}
+                        </div>
+                        <span className="font-bold text-gray-200 text-xs">{user.username}</span>
+                        <span className="text-xs text-gray-500">{timeAgo}</span>
+                      </div>
+                      
+                      {work && (
+                        <h3 className="font-bold text-gray-100 line-clamp-1">{work.title?.english || work.title?.romaji}</h3>
+                      )}
+                      
+                      <p className="text-sm text-gray-300 mt-2 break-words whitespace-pre-wrap leading-relaxed">{activity.text || activity.details}</p>
+                    </div>
                   </div>
                 </div>
                 
-                <p className="text-sm text-gray-300 whitespace-pre-wrap">{activity.text || activity.details}</p>
-                
-                {work && (
-                  <div className="mt-3 flex items-center gap-2 text-xs text-gray-500">
-                    <Link href={`/work/${work.id}`} className="flex items-center gap-1 hover:text-blue-400 transition bg-gray-800 px-2 py-1 rounded">
-                      <PlayCircle size={14} /> Zum Werk
-                    </Link>
-                  </div>
-                )}
-                
-                <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} />
+                <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} commentCount={activity.comments_count || 0} />
               </div>
             );
           })
