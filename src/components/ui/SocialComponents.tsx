@@ -7,6 +7,7 @@ import { ActivityComment } from "@/types/database";
 import { formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
 import Link from "next/link";
+import { getUserProfile } from "@/lib/db/users";
 
 export function CommentSection({ activityId, userProfiles, currentUserUid, commentCount: initialCount = 0 }: { activityId: string, userProfiles: Record<string, any>, currentUserUid?: string, commentCount?: number }) {
   const [comments, setComments] = useState<ActivityComment[]>([]);
@@ -15,6 +16,11 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [seenCount, setSeenCount] = useState(0);
   const [commentCount, setCommentCount] = useState(initialCount);
+  const [localProfiles, setLocalProfiles] = useState<Record<string, any>>(userProfiles);
+
+  useEffect(() => {
+    setLocalProfiles(userProfiles);
+  }, [userProfiles]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -22,9 +28,20 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
       if (saved) setSeenCount(parseInt(saved, 10));
     }
     
-    getActivityComments(activityId).then(res => {
+    getActivityComments(activityId).then(async (res) => {
       setComments(res);
       setCommentCount(res.length);
+
+      // Fetch missing profiles
+      const missingIds = [...new Set(res.map(c => c.user_id).filter(id => !localProfiles[id] && !userProfiles[id]))];
+      if (missingIds.length > 0) {
+        const uMap = { ...localProfiles };
+        for (const uid of missingIds) {
+          const p = await getUserProfile(uid);
+          if (p) uMap[uid] = p;
+        }
+        setLocalProfiles(uMap);
+      }
     }).catch(console.error);
   }, [activityId]);
 
@@ -85,7 +102,7 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
       {isOpen && (
         <div className="mt-3 flex flex-col gap-3 pt-3 border-t border-gray-800">
           {comments.map(c => {
-            const author = userProfiles[c.user_id] || { username: "Unbekannt" };
+            const author = localProfiles[c.user_id] || { username: "Unbekannt" };
             return (
               <div key={c.comment_id} className="flex gap-3 text-sm relative group border-t border-gray-800/50 pt-3">
                 <div className="h-8 w-8 shrink-0 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-xs shadow-inner">

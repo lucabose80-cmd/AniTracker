@@ -128,3 +128,18 @@ export interface ActivityComment {
   timestamp: string;
   parent_comment_id?: string;
 }
+
+export interface InAppNotification {
+  notification_id: string;
+  user_id: string;       // the user receiving it
+  actor_id: string;      // the user who did the action
+  actor_name: string;
+  actor_avatar: string;
+  type: "REPLY_TO_COMMENT" | "COMMENT_ON_THREAD" | "NEW_EPISODE_THREAD";
+  activity_id: string;
+  work_id?: string;
+  comment_id?: string;
+  text: string;
+  timestamp: string;
+  read: boolean;
+}

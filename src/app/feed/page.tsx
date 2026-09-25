@@ -6,12 +6,12 @@ import { ActivityFeed } from "@/types/database";
 import { getGlobalFeed, createActivity } from "@/lib/db/feed";
 import { getUserProfile } from "@/lib/db/users";
 import { fetchAniList, GET_WORKS_BATCH } from "@/lib/anilist";
-import { MessageCircle, Star, Sparkles, Send, Activity, BookmarkPlus } from "lucide-react";
+import { MessageCircle, Star, Sparkles, Send, Activity, BookmarkPlus, Bell, X } from "lucide-react";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
-import { deleteActivity, getActivityComments, addActivityComment, deleteActivityComment } from "@/lib/db/feed";
-import { ActivityComment } from "@/types/database";
+import { deleteActivity, getActivityComments, addActivityComment, deleteActivityComment, getInAppNotifications, markNotificationRead } from "@/lib/db/feed";
+import { ActivityComment, InAppNotification } from "@/types/database";
 import { SpoilerProtectedThread, CommentSection } from "@/components/ui/SocialComponents";
 import { getAllUserWorks } from "@/lib/db/works";
 
@@ -27,6 +27,8 @@ export default function FeedPage() {
   const [currentUserUid, setCurrentUserUid] = useState<string | undefined>(undefined);
   const [userProfiles, setUserProfiles] = useState<Record<string, any>>({});
   const [currentUserWorks, setCurrentUserWorks] = useState<Record<string, number>>({});
+  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
@@ -38,9 +40,12 @@ export default function FeedPage() {
         const map: Record<string, number> = {};
         works.forEach((w: any) => { map[w.work_id] = w.current_episode; });
         setCurrentUserWorks(map);
+        
+        getInAppNotifications(user.uid).then(setNotifications).catch(console.error);
       } else {
         setUserProfile(null);
         setCurrentUserWorks({});
+        setNotifications([]);
       }
     });
     return () => unsubscribe();
@@ -136,12 +141,86 @@ export default function FeedPage() {
     }
   };
 
+  const unreadCount = notifications.filter(n => !n.read).length;
+
+  const handleNotificationClick = async (notif: InAppNotification) => {
+    if (!notif.read) {
+      await markNotificationRead(notif.notification_id);
+      setNotifications(prev => prev.map(n => n.notification_id === notif.notification_id ? { ...n, read: true } : n));
+    }
+    setShowNotifications(false);
+    
+    // Smooth scroll to the activity
+    setTimeout(() => {
+      const element = document.getElementById(`activity_${notif.activity_id}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Optional: flash the element
+        element.classList.add('ring-2', 'ring-blue-500', 'transition-all');
+        setTimeout(() => element.classList.remove('ring-2', 'ring-blue-500'), 2000);
+      }
+    }, 100);
+  };
+
   return (
-    <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-lg mx-auto">
-      <h2 className="flex items-center gap-2 text-xl font-bold">
-        <Activity className="text-blue-500" /> 
-        Community Feed
-      </h2>
+    <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-lg mx-auto relative">
+      <div className="flex items-center justify-between">
+        <h2 className="flex items-center gap-2 text-xl font-bold">
+          <Activity className="text-blue-500" /> 
+          Community Feed
+        </h2>
+        
+        {currentUserUid && (
+          <div className="relative">
+            <button 
+              onClick={() => setShowNotifications(!showNotifications)}
+              className="p-2 rounded-full bg-gray-800 hover:bg-gray-700 transition relative"
+            >
+              <Bell size={20} className="text-gray-300" />
+              {unreadCount > 0 && (
+                <span className="absolute top-0 right-0 transform translate-x-1/3 -translate-y-1/3 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full border-2 border-[#1a1d24]">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+            
+            {showNotifications && (
+              <div className="absolute right-0 top-full mt-2 w-72 max-h-96 overflow-y-auto bg-[#1a1d24] border border-gray-700 rounded-xl shadow-2xl z-50 flex flex-col">
+                <div className="flex items-center justify-between p-3 border-b border-gray-800 bg-[#141a29] sticky top-0 z-10">
+                  <h3 className="font-bold text-gray-200">Benachrichtigungen</h3>
+                  <button onClick={() => setShowNotifications(false)} className="text-gray-400 hover:text-white"><X size={16} /></button>
+                </div>
+                {notifications.length === 0 ? (
+                  <div className="p-4 text-center text-sm text-gray-500">Keine Neuigkeiten.</div>
+                ) : (
+                  <div className="flex flex-col">
+                    {notifications.map(n => (
+                      <button 
+                        key={n.notification_id}
+                        onClick={() => handleNotificationClick(n)}
+                        className={`flex gap-3 p-3 border-b border-gray-800/50 hover:bg-gray-800 transition text-left ${n.read ? 'opacity-70' : 'bg-blue-900/10'}`}
+                      >
+                        <div className="w-8 h-8 rounded-full bg-gray-700 shrink-0 overflow-hidden">
+                          {n.actor_avatar ? <img src={n.actor_avatar} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-bold text-xs">{n.actor_name[0]}</div>}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-gray-300">
+                            <span className="font-bold text-gray-200">{n.actor_name}</span> 
+                            {n.type === "REPLY_TO_COMMENT" ? " hat auf deinen Kommentar geantwortet:" : " hat kommentiert:"}
+                          </p>
+                          <p className="text-sm text-gray-400 truncate mt-0.5 italic">"{n.text}"</p>
+                          <p className="text-[10px] text-gray-500 mt-1">{formatDistanceToNow(new Date(n.timestamp), { addSuffix: true, locale: de })}</p>
+                        </div>
+                        {!n.read && <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0 mt-1" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Post Box */}
       {auth.currentUser ? (
@@ -195,16 +274,17 @@ export default function FeedPage() {
               const isSpoiler = (activity.episode_num || 0) > userCurrentEp;
               
               return (
-                <SpoilerProtectedThread 
-                  key={activity.activity_id}
-                  activity={activity}
-                  work={work}
-                  user={user}
-                  timeAgo={timeAgo}
-                  currentUserUid={currentUserUid}
-                  isSpoiler={isSpoiler}
-                  userProfiles={userProfiles}
-                />
+                <div id={`activity_${activity.activity_id}`} key={activity.activity_id}>
+                  <SpoilerProtectedThread 
+                    activity={activity}
+                    work={work}
+                    user={user}
+                    timeAgo={timeAgo}
+                    currentUserUid={currentUserUid}
+                    isSpoiler={isSpoiler}
+                    userProfiles={userProfiles}
+                  />
+                </div>
               );
             }
 
@@ -215,7 +295,7 @@ export default function FeedPage() {
                 : (activity.work_id ? [activity.work_id] : []);
               
               return (
-                <div key={activity.activity_id} className="rounded-xl border border-yellow-700/50 bg-[#1a1d24] p-4 shadow-lg relative">
+                <div id={`activity_${activity.activity_id}`} key={activity.activity_id} className="rounded-xl border border-yellow-700/50 bg-[#1a1d24] p-4 shadow-lg relative">
                   {activity.user_id === currentUserUid && (
                     <button 
                       onClick={() => handleDeletePost(activity.activity_id)}
@@ -259,7 +339,7 @@ export default function FeedPage() {
             
             // Render other activity types (RATING, TOP9_UPDATE, MANUAL_POST)
             return (
-              <div key={activity.activity_id} className="rounded-xl border-2 border-blue-900/30 bg-[#141a29] p-4 shadow-lg relative overflow-hidden group">
+              <div id={`activity_${activity.activity_id}`} key={activity.activity_id} className="rounded-xl border-2 border-blue-900/30 bg-[#141a29] p-4 shadow-lg relative overflow-hidden group">
                 {activity.user_id === currentUserUid && (
                   <button 
                     onClick={() => handleDeletePost(activity.activity_id)}

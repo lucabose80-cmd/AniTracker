@@ -13,6 +13,7 @@ export function WorkSocialFeed({ workId, work }: { workId: string, work: any }) 
   const [feed, setFeed] = useState<ActivityFeed[]>([]);
   const [userProfiles, setUserProfiles] = useState<Record<string, any>>({});
   const [currentUserUid, setCurrentUserUid] = useState<string | undefined>(undefined);
+  const [sortAsc, setSortAsc] = useState(false);
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged((u) => setCurrentUserUid(u?.uid));
@@ -31,7 +32,7 @@ export function WorkSocialFeed({ workId, work }: { workId: string, work: any }) 
         profilesList.forEach(p => map[p.uid] = p);
         setUserProfiles(map);
         
-        setFeed(allFeed.filter(a => a.work_id === workId));
+        setFeed(allFeed.filter(a => a.work_id === workId && a.action_type === "EPISODE_THREAD"));
       } catch (e) {
         console.error(e);
       }
@@ -45,10 +46,24 @@ export function WorkSocialFeed({ workId, work }: { workId: string, work: any }) 
     </div>
   );
 
+  const sortedFeed = [...feed].sort((a, b) => {
+    const timeA = new Date(a.timestamp).getTime();
+    const timeB = new Date(b.timestamp).getTime();
+    return sortAsc ? timeA - timeB : timeB - timeA;
+  });
+
   return (
     <div className="mt-8 flex flex-col gap-4">
-      <h3 className="text-lg font-bold text-white mb-2 border-b border-gray-800 pb-2">Social Feed zu diesem Werk</h3>
-      {feed.map(activity => {
+      <div className="flex items-center justify-between border-b border-gray-800 pb-2 mb-2">
+        <h3 className="text-lg font-bold text-white">Social Feed zu diesem Werk</h3>
+        <button 
+          onClick={() => setSortAsc(!sortAsc)}
+          className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg transition font-bold"
+        >
+          {sortAsc ? "Frühster bis Spätester" : "Spätester bis Frühster"}
+        </button>
+      </div>
+      {sortedFeed.map(activity => {
         const user = userProfiles[activity.user_id] || { username: "Unbekannt" };
         const timeAgo = formatDistanceToNow(new Date(activity.timestamp), { addSuffix: true, locale: de });
         

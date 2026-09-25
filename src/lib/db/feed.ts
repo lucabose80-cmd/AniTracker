@@ -1,6 +1,7 @@
 import { db } from "@/lib/firebase";
-import { collection, doc, setDoc, getDocs, query, orderBy, limit, deleteDoc, updateDoc, increment } from "firebase/firestore";
-import { ActivityFeed, ActivityComment } from "@/types/database";
+import { collection, doc, setDoc, getDocs, query, orderBy, limit, deleteDoc, updateDoc, increment, getDoc, where } from "firebase/firestore";
+import { ActivityFeed, ActivityComment, InAppNotification } from "@/types/database";
+import { getUserProfile } from "@/lib/db/users";
 
 export async function createActivity(
   user_id: string,
@@ -111,8 +112,64 @@ export async function addActivityComment(activityId: string, userId: string, tex
   const activityRef = doc(db, "activity_feed", activityId);
   try {
     await updateDoc(activityRef, { comments_count: increment(1) });
+    
+    // Notification Logic
+    const activitySnap = await getDoc(activityRef);
+    if (activitySnap.exists()) {
+      const activityData = activitySnap.data() as ActivityFeed;
+      const actorProfile = await getUserProfile(userId);
+      const actorName = actorProfile?.username || "Unbekannt";
+      const actorAvatar = actorProfile?.avatar_url || "";
+      
+      const notificationsRef = collection(db, "notifications");
+      
+      // 1. Notify Parent Comment Author (if reply)
+      if (parentCommentId) {
+        const parentDoc = await getDoc(doc(db, "activity_comments", parentCommentId));
+        if (parentDoc.exists()) {
+          const parentData = parentDoc.data() as ActivityComment;
+          if (parentData.user_id !== userId) {
+            const notifRef = doc(notificationsRef);
+            const notif: InAppNotification = {
+              notification_id: notifRef.id,
+              user_id: parentData.user_id,
+              actor_id: userId,
+              actor_name: actorName,
+              actor_avatar: actorAvatar,
+              type: "REPLY_TO_COMMENT",
+              activity_id: activityId,
+              work_id: activityData.work_id,
+              comment_id: comment_id,
+              text: text,
+              timestamp: timestamp,
+              read: false
+            };
+            await setDoc(notifRef, notif);
+          }
+        }
+      } 
+      // 2. Notify Thread/Activity Author (if not reply, and not their own post)
+      else if (activityData.user_id !== userId) {
+        const notifRef = doc(notificationsRef);
+        const notif: InAppNotification = {
+          notification_id: notifRef.id,
+          user_id: activityData.user_id,
+          actor_id: userId,
+          actor_name: actorName,
+          actor_avatar: actorAvatar,
+          type: activityData.action_type === "EPISODE_THREAD" ? "COMMENT_ON_THREAD" : "REPLY_TO_COMMENT", // Actually it's a comment on their post
+          activity_id: activityId,
+          work_id: activityData.work_id,
+          comment_id: comment_id,
+          text: text,
+          timestamp: timestamp,
+          read: false
+        };
+        await setDoc(notifRef, notif);
+      }
+    }
   } catch (e) {
-    console.error("Failed to update comments_count", e);
+    console.error("Failed to update comments_count or send notification", e);
   }
 
   return comment;
@@ -148,4 +205,24 @@ export async function deleteActivityComment(commentId: string, activityId: strin
   } catch (e) {
     console.error("Failed to decrement comments_count", e);
   }
+}
+
+export async function getInAppNotifications(userId: string): Promise<InAppNotification[]> {
+  if (!db) return [];
+  const notifRef = collection(db, "notifications");
+  const q = query(notifRef, where("user_id", "==", userId), limit(30));
+  const snap = await getDocs(q);
+  
+  const notifications: InAppNotification[] = [];
+  snap.forEach(d => {
+    notifications.push(d.data() as InAppNotification);
+  });
+  
+  return notifications.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+}
+
+export async function markNotificationRead(notificationId: string): Promise<void> {
+  if (!db) return;
+  const notifRef = doc(db, "notifications", notificationId);
+  await updateDoc(notifRef, { read: true });
 }
