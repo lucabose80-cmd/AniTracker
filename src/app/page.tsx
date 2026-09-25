@@ -26,6 +26,7 @@ export default function Home() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userWorks, setUserWorks] = useState<UserWork[]>([]);
   const [userAniListDetails, setUserAniListDetails] = useState<Record<string, any>>({});
+  const [calendarOverrides, setCalendarOverrides] = useState<Record<string, any>>({});
   
   // Recommendations State
   const [selectedGenre, setSelectedGenre] = useState<string>("Action");
@@ -138,6 +139,10 @@ export default function Home() {
         setIsLoggedIn(true);
         const works = await getAllUserWorks(user.uid);
         setUserWorks(works);
+
+        const { getCalendarOverrides } = await import("@/lib/db/calendar");
+        const overrides = await getCalendarOverrides();
+        setCalendarOverrides(overrides);
 
         // Fetch AniList Details for ALL User Works to support Up Next & Top Genres
         const idsToFetch = works.map(w => parseInt(w.work_id, 10));
@@ -255,7 +260,14 @@ export default function Home() {
       if (w.manual_max_episode !== undefined && w.manual_max_episode !== null) {
         maxAiredEp = Number(w.manual_max_episode);
       } else if (details.type === "MANGA") {
-        maxAiredEp = details.chapters || 0;
+        const globalManual = calendarOverrides[w.work_id]?.manualAvailableEps;
+        if (globalManual !== undefined && globalManual !== null) {
+          maxAiredEp = globalManual;
+        } else if ((w as any).manual_available_eps !== undefined && (w as any).manual_available_eps !== null) {
+          maxAiredEp = Number((w as any).manual_available_eps);
+        } else {
+          maxAiredEp = details.chapters || 0;
+        }
       } else {
         if (details.status === "RELEASING" && details.nextAiringEpisode) {
           maxAiredEp = details.nextAiringEpisode.episode - 1;

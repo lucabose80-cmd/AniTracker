@@ -75,14 +75,35 @@ export default function CalendarPage() {
               computedAiringAt = over.airingAt;
               hasSchedule = true;
             } else if (over.weeklyDay !== undefined && over.weeklyTime !== undefined) {
-              // Compute next occurrence in the current week
+              // Compute next occurrence in the future
               const [hours, minutes] = over.weeklyTime.split(':').map(Number);
               const date = new Date();
               date.setHours(hours, minutes, 0, 0);
               const currentDay = date.getDay();
-              const diff = over.weeklyDay - currentDay;
+              
+              let diff = over.weeklyDay - currentDay;
+              if (diff < 0) diff += 7;
+              
+              // If diff is 0 (today) but the time has already passed, the next occurrence is next week
+              if (diff === 0 && date.getTime() < new Date().getTime()) {
+                  diff += 7;
+              }
+              
               date.setDate(date.getDate() + diff);
               computedAiringAt = Math.floor(date.getTime() / 1000);
+              
+              const freqWeeks = over.releaseFrequency || 1;
+              const lastInc = over.lastIncrementedAt || 0;
+              
+              if (lastInc > 0 && freqWeeks > 1) {
+                 // Calculate if we need to skip weeks based on frequency
+                 const weeksPassed = Math.floor((computedAiringAt - lastInc) / (7 * 24 * 3600));
+                 if (weeksPassed % freqWeeks !== 0) {
+                     const weeksToAdd = freqWeeks - (weeksPassed % freqWeeks);
+                     computedAiringAt += weeksToAdd * 7 * 24 * 3600;
+                 }
+              }
+              
               hasSchedule = true;
             }
           } else if (m.nextAiringEpisode) {
@@ -95,7 +116,7 @@ export default function CalendarPage() {
             cloned.nextAiringEpisode = {
               ...m.nextAiringEpisode, // keep episode num if exists
               airingAt: computedAiringAt,
-              episode: m.nextAiringEpisode?.episode || ((userWorkMap[strId]?.manual_available_eps || m.chapters || m.episodes || userWorkMap[strId]?.current_episode || 0) + 1)
+              episode: m.nextAiringEpisode?.episode || ((over?.manualAvailableEps ?? userWorkMap[strId]?.manual_available_eps ?? m.chapters ?? m.episodes ?? userWorkMap[strId]?.current_episode ?? 0) + 1)
             };
             scheduled.push(cloned);
           }

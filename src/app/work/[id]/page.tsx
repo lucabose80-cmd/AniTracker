@@ -54,6 +54,7 @@ export default function WorkDetailPage() {
 
   const [customDay, setCustomDay] = useState<number>(-1);
   const [customTime, setCustomTime] = useState<string>("12:00");
+  const [releaseFrequency, setReleaseFrequency] = useState<number>(1);
   const [hasCustomOverride, setHasCustomOverride] = useState(false);
 
   useEffect(() => {
@@ -77,8 +78,14 @@ export default function WorkDetailPage() {
             if (overrides[id].weeklyDay !== undefined) setCustomDay(overrides[id].weeklyDay!);
             if (overrides[id].weeklyTime !== undefined) setCustomTime(overrides[id].weeklyTime!);
           }
+          if (overrides[id].releaseFrequency !== undefined) {
+            setReleaseFrequency(overrides[id].releaseFrequency!);
+          }
           if (overrides[id].manualMaxEpisode !== undefined) {
             setManualMaxEpisode(overrides[id].manualMaxEpisode!);
+          }
+          if (overrides[id].manualAvailableEps !== undefined) {
+            setManualAvailableEps(overrides[id].manualAvailableEps!);
           }
         }
         const isRomance = data.Media.genres?.includes("Romance") || false;
@@ -93,7 +100,10 @@ export default function WorkDetailPage() {
           setWatchMode(userWork.classification?.watchMode || "SUB");
           setMalRated(userWork.mal_rated || false);
           setSynchroOffset(userWork.synchro_offset_episodes || 0);
-          setManualAvailableEps(userWork.manual_available_eps ?? "");
+          // If not globally set, we could fallback to local, but global is preferred
+          if (!overrides[id] || overrides[id].manualAvailableEps === undefined) {
+            setManualAvailableEps(userWork.manual_available_eps ?? "");
+          }
           if (userWork.evaluation.romanceAndChemistry > 0) setHasRomance(true);
         } else {
           setHasRomance(isRomance);
@@ -493,6 +503,19 @@ export default function WorkDetailPage() {
                         />
                       )}
                     </div>
+                    {customDay !== -1 && (work.type === "MANGA" || work.type === "MANHWA") && (
+                      <div className="mt-2">
+                        <select
+                          value={releaseFrequency}
+                          onChange={e => setReleaseFrequency(parseInt(e.target.value))}
+                          className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500"
+                        >
+                          <option value={1}>Jede Woche</option>
+                          <option value={2}>Alle 2 Wochen</option>
+                          <option value={4}>Alle 4 Wochen (Monatlich)</option>
+                        </select>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -504,19 +527,32 @@ export default function WorkDetailPage() {
                     if (user && inLibrary) {
                       if (manualMaxEpisode === "") await clearManualMaxEpisode(id);
                       else {
-                        // Pass undefined for day/time if -1 so we don't accidentally set it, or delete it if we had a function for it.
-                        // Actually, if it's -1 we should clear it, but setCalendarOverride doesn't clear if undefined. We will pass null as any to clear it.
-                        await setCalendarOverride(id, undefined, customDay === -1 ? (null as any) : customDay, customDay === -1 ? (null as any) : customTime, manualMaxEpisode as number);
+                        await setCalendarOverride(
+                          id, 
+                          undefined, 
+                          customDay === -1 ? (null as any) : customDay, 
+                          customDay === -1 ? (null as any) : customTime, 
+                          manualMaxEpisode as number,
+                          customDay === -1 ? (null as any) : releaseFrequency,
+                          manualAvailableEps === "" ? (null as any) : (manualAvailableEps as number)
+                        );
                       }
                       
-                      if (manualMaxEpisode === "" && customDay !== -1) {
-                         await setCalendarOverride(id, undefined, customDay, customTime, undefined);
+                      if (manualMaxEpisode === "" && (customDay !== -1 || manualAvailableEps !== "")) {
+                         await setCalendarOverride(
+                           id, 
+                           undefined, 
+                           customDay === -1 ? (null as any) : customDay, 
+                           customDay === -1 ? (null as any) : customTime, 
+                           undefined,
+                           customDay === -1 ? (null as any) : releaseFrequency,
+                           manualAvailableEps === "" ? (null as any) : (manualAvailableEps as number)
+                         );
                       }
 
-                      // Update synchro_offset_episodes and manual_available_eps in DB
+                      // Update synchro_offset_episodes in DB (manual_available_eps is now global)
                       await saveUserWork(user.uid, id, { 
                         synchro_offset_episodes: synchroOffset === "" ? 0 : synchroOffset,
-                        manual_available_eps: manualAvailableEps === "" ? null : manualAvailableEps
                       });
                       
                       setHasCustomOverride(customDay !== -1);
