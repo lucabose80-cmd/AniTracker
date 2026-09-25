@@ -14,17 +14,29 @@ import { de } from "date-fns/locale";
 import { deleteActivity, getActivityComments, addActivityComment, deleteActivityComment } from "@/lib/db/feed";
 import { ActivityComment } from "@/types/database";
 
-function CommentSection({ activityId, userProfiles, currentUserUid }: { activityId: string, userProfiles: Record<string, any>, currentUserUid?: string }) {
+function CommentSection({ activityId, userProfiles, currentUserUid, commentCount = 0 }: { activityId: string, userProfiles: Record<string, any>, currentUserUid?: string, commentCount?: number }) {
   const [comments, setComments] = useState<ActivityComment[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [newText, setNewText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [seenCount, setSeenCount] = useState(0);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(`seen_comments_${activityId}`);
+      if (saved) setSeenCount(parseInt(saved, 10));
+    }
+  }, [activityId]);
 
   useEffect(() => {
     if (isOpen) {
       getActivityComments(activityId).then(setComments).catch(console.error);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(`seen_comments_${activityId}`, commentCount.toString());
+      }
+      setSeenCount(commentCount);
     }
-  }, [isOpen, activityId]);
+  }, [isOpen, activityId, commentCount]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,7 +70,12 @@ function CommentSection({ activityId, userProfiles, currentUserUid }: { activity
         className="flex items-center gap-1.5 text-xs font-bold text-gray-400 hover:text-white transition"
       >
         <MessageSquare size={14} /> 
-        {isOpen ? "Kommentare verbergen" : "Kommentieren"}
+        {isOpen ? "Kommentare verbergen" : `${commentCount} Kommentare`}
+        {!isOpen && commentCount > seenCount && (
+          <span className="ml-1 bg-red-600 text-white text-[10px] px-1.5 py-0.5 rounded-full shadow-md animate-pulse">
+            {commentCount - seenCount} neu
+          </span>
+        )}
       </button>
 
       {isOpen && (
@@ -66,21 +83,21 @@ function CommentSection({ activityId, userProfiles, currentUserUid }: { activity
           {comments.map(c => {
             const author = userProfiles[c.user_id] || { username: "Unbekannt" };
             return (
-              <div key={c.comment_id} className="flex gap-2 text-sm bg-black/20 p-2 rounded-lg relative group">
-                <div className="h-6 w-6 shrink-0 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-[10px]">
+              <div key={c.comment_id} className="flex gap-3 text-sm relative group border-t border-gray-800/50 pt-3">
+                <div className="h-8 w-8 shrink-0 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-xs shadow-inner">
                   {author.avatar_url ? <img src={author.avatar_url} alt="" className="w-full h-full object-cover" /> : (author.username?.[0]?.toUpperCase() || "?")}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-blue-400">{author.username}</span>
+                    <span className="font-bold text-gray-200">{author.username}</span>
                     <span className="text-[10px] text-gray-500">{formatDistanceToNow(new Date(c.timestamp), { addSuffix: true, locale: de })}</span>
                   </div>
-                  <p className="text-gray-300 mt-0.5 break-words">{c.text}</p>
+                  <p className="text-gray-300 mt-0.5 break-words leading-relaxed">{c.text}</p>
                 </div>
                 {c.user_id === currentUserUid && (
                   <button 
                     onClick={() => handleDelete(c.comment_id)}
-                    className="absolute top-2 right-2 text-red-500/50 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"
+                    className="absolute top-3 right-0 text-gray-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"
                   >
                     X
                   </button>
@@ -141,31 +158,59 @@ function SpoilerProtectedThread({ activity, work, user, timeAgo, currentUserUid,
 
   return (
     <div className="rounded-xl border-2 border-blue-900/50 bg-[#141a29] p-4 shadow-lg relative overflow-hidden group">
-      <div className="absolute top-0 right-0 p-2">
-        <span className="text-[10px] bg-blue-600 text-white px-2 py-1 rounded-full font-bold shadow-md">
-          OFFIZIELLER THREAD
-        </span>
-      </div>
-      
       <div className="flex gap-4">
         {work && (
-          <Link href={`/work/${work.id}?episode=${activity.episode_num || ''}`} className="shrink-0">
+          <Link href={`/work/${work.id}?episode=${activity.episode_num || ''}`} className="shrink-0 relative">
             <img 
               src={work.coverImage?.large} 
               alt="Cover" 
-              className="w-16 h-24 object-cover rounded-lg shadow-md border border-gray-800 group-hover:border-blue-500 transition"
+              className="w-20 h-28 object-cover rounded-lg shadow-md border border-gray-800 group-hover:border-blue-500 transition"
             />
           </Link>
         )}
-        <div className="flex flex-col justify-between flex-1 min-w-0">
+        <div className="flex flex-col justify-between flex-1 min-w-0 py-1">
           <div>
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <span className="text-[9px] bg-blue-600 text-white px-2 py-0.5 rounded-full font-bold shadow-md">
+                OFFIZIELLER THREAD
+              </span>
+              <span className="text-xs text-gray-500">{timeAgo}</span>
+            </div>
             <h3 className="font-bold text-gray-100 line-clamp-1">{work?.title?.english || work?.title?.romaji || "Unbekanntes Werk"}</h3>
             <p className="text-sm font-semibold text-blue-400 mt-0.5">Folge / Kapitel {activity.episode_num}</p>
-            <p className="text-xs text-gray-400 mt-2">{user.username} hat den Raum eröffnet • {timeAgo}</p>
+          </div>
+
+          <div className="flex gap-2 mt-3">
+            <button 
+              onClick={async () => {
+                if (!currentUserUid) return;
+                try {
+                  const { saveUserWork } = await import("@/lib/db/works");
+                  await saveUserWork(currentUserUid, work.id.toString(), { status: "CURRENT" });
+                  alert("Zu 'Aktiv' hinzugefügt!");
+                } catch(e) { console.error(e); }
+              }}
+              className="text-[10px] bg-green-600 hover:bg-green-500 text-white px-2 py-1 rounded font-bold transition"
+            >
+              + Aktiv
+            </button>
+            <button 
+              onClick={async () => {
+                if (!currentUserUid) return;
+                try {
+                  const { saveUserWork } = await import("@/lib/db/works");
+                  await saveUserWork(currentUserUid, work.id.toString(), { status: "PLANNING" });
+                  alert("Zur Wunschliste hinzugefügt!");
+                } catch(e) { console.error(e); }
+              }}
+              className="text-[10px] bg-purple-600 hover:bg-purple-500 text-white px-2 py-1 rounded font-bold transition"
+            >
+              + Wunschliste
+            </button>
           </div>
         </div>
       </div>
-      <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} />
+      <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} commentCount={activity.comments_count || 0} />
     </div>
   );
 }

@@ -180,12 +180,19 @@ export default function CalendarPage() {
                     <div className="flex flex-col gap-4">
                       {dayAnimeList.map(anime => {
                         const date = new Date(anime.nextAiringEpisode.airingAt * 1000);
+                        const strId = anime.id.toString();
+                        const uWork = userWorkMap[strId];
+                        const offset = uWork?.synchro_offset_episodes || 0;
+                        
+                        // Shift date by offset (assuming 1 episode = 1 week = 7 days)
+                        if (offset > 0) {
+                          date.setDate(date.getDate() + (offset * 7));
+                        }
+
                         const timeString = format(date, "HH:mm");
                         const countdown = formatDistanceToNow(date, { addSuffix: true, locale: de });
-                        const strId = anime.id.toString();
                         
                         // Calculate Behind Status
-                        const uWork = userWorkMap[strId];
                         const currentEp = uWork?.current_episode || 0;
                         
                         let episodesOut = anime.nextAiringEpisode.episode - 1;
@@ -196,7 +203,6 @@ export default function CalendarPage() {
                           episodesOut = uWork.manual_max_episode;
                         }
                         
-                        const offset = uWork?.synchro_offset_episodes || 0;
                         episodesOut = Math.max(0, episodesOut - offset);
                         const behindCount = Math.max(0, episodesOut - currentEp);
 
