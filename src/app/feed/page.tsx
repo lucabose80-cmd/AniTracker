@@ -12,201 +12,8 @@ import { formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
 import { deleteActivity, getActivityComments, addActivityComment, deleteActivityComment } from "@/lib/db/feed";
 import { ActivityComment } from "@/types/database";
-
-function CommentSection({ activityId, userProfiles, currentUserUid }: { activityId: string, userProfiles: Record<string, any>, currentUserUid?: string }) {
-  const [comments, setComments] = useState<ActivityComment[]>([]);
-  const [isOpen, setIsOpen] = useState(false);
-  const [newText, setNewText] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (isOpen) {
-      getActivityComments(activityId).then(setComments).catch(console.error);
-    }
-  }, [isOpen, activityId]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newText.trim() || !currentUserUid) return;
-    setIsSubmitting(true);
-    try {
-      const added = await addActivityComment(activityId, currentUserUid, newText.trim());
-      if (added) setComments(prev => [...prev, added]);
-      setNewText("");
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleDelete = async (commentId: string) => {
-    if (!confirm("Kommentar wirklich löschen?")) return;
-    try {
-      await deleteActivityComment(commentId, activityId);
-      setComments(prev => prev.filter(c => c.comment_id !== commentId));
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const buildTree = (allComments: ActivityComment[]) => {
-    const map = new Map<string, any>();
-    const roots: any[] = [];
-    allComments.forEach(c => map.set(c.comment_id, { ...c, children: [] }));
-    allComments.forEach(c => {
-      if (c.parent_comment_id && map.has(c.parent_comment_id)) {
-        map.get(c.parent_comment_id).children.push(map.get(c.comment_id));
-      } else {
-        roots.push(map.get(c.comment_id));
-      }
-    });
-    return roots;
-  };
-
-  const commentTree = buildTree(comments);
-
-  const CommentNode = ({ node, level = 0 }: { node: any, level?: number }) => {
-    const author = userProfiles[node.user_id] || { username: "Unbekannt" };
-    const [replyOpen, setReplyOpen] = useState(false);
-    const [replyText, setReplyText] = useState("");
-    const [isReplying, setIsReplying] = useState(false);
-    const [collapsed, setCollapsed] = useState(false);
-
-    const handleReply = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!replyText.trim() || !currentUserUid) return;
-      setIsReplying(true);
-      try {
-        const added = await addActivityComment(activityId, currentUserUid, replyText.trim(), node.comment_id);
-        if (added) {
-          setComments(prev => [...prev, added]);
-          setReplyOpen(false);
-          setReplyText("");
-        }
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setIsReplying(false);
-      }
-    };
-
-    return (
-      <div className="flex gap-2 text-sm mt-3 relative group">
-        <div className="h-6 w-6 shrink-0 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-[10px] mt-1 z-10">
-          {author.avatar_url ? <img src={author.avatar_url} alt="" className="w-full h-full object-cover" /> : (author.username?.[0]?.toUpperCase() || "?")}
-        </div>
-        
-        {/* Thread line for children */}
-        {!collapsed && node.children.length > 0 && (
-          <div 
-            onClick={() => setCollapsed(true)}
-            className="absolute left-3 top-8 bottom-[-10px] w-0.5 bg-gray-700/50 hover:bg-blue-500/50 cursor-pointer transition z-0" 
-          />
-        )}
-
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-blue-400">{author.username}</span>
-            <span className="text-[10px] text-gray-500">{formatDistanceToNow(new Date(node.timestamp), { addSuffix: true, locale: de })}</span>
-            {collapsed && (
-              <button onClick={() => setCollapsed(false)} className="text-[10px] bg-gray-800 px-2 rounded-full hover:bg-gray-700">
-                +{node.children.length} Antworten
-              </button>
-            )}
-          </div>
-          
-          {!collapsed && (
-            <>
-              <p className="text-gray-300 mt-0.5 break-words bg-black/20 p-2 rounded-r-lg rounded-bl-lg border border-gray-800/50 inline-block">{node.text}</p>
-              
-              <div className="flex items-center gap-3 mt-1">
-                {currentUserUid && (
-                  <button onClick={() => setReplyOpen(!replyOpen)} className="text-[10px] text-gray-500 hover:text-gray-300 transition font-bold">
-                    Antworten
-                  </button>
-                )}
-                {node.user_id === currentUserUid && (
-                  <button onClick={() => handleDelete(node.comment_id)} className="text-[10px] text-red-500/50 hover:text-red-500 transition font-bold">
-                    Löschen
-                  </button>
-                )}
-              </div>
-
-              {replyOpen && (
-                <form onSubmit={handleReply} className="flex gap-2 mt-2 max-w-sm">
-                  <input 
-                    type="text" 
-                    value={replyText}
-                    onChange={e => setReplyText(e.target.value)}
-                    placeholder="Antworten..." 
-                    className="flex-1 bg-black/40 border border-gray-700 rounded text-xs px-2 py-1 focus:outline-none focus:border-blue-500 text-white"
-                    disabled={isReplying}
-                  />
-                  <button type="submit" disabled={!replyText.trim() || isReplying} className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-[10px] font-bold px-2 py-1 rounded transition">
-                    Senden
-                  </button>
-                </form>
-              )}
-
-              {node.children.length > 0 && (
-                <div className="ml-1 pl-3 border-l-2 border-transparent">
-                  {node.children.map((child: any) => (
-                    <CommentNode key={child.comment_id} node={child} level={level + 1} />
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  return (
-    <div className="mt-3">
-      <button 
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 text-xs font-bold text-gray-400 hover:text-white transition"
-      >
-        <MessageCircle size={14} /> 
-        {isOpen ? "Kommentare verbergen" : `${comments.length} Kommentare`}
-      </button>
-
-      {isOpen && (
-        <div className="mt-3 flex flex-col pt-3 border-t border-gray-800">
-          {commentTree.map(node => (
-            <CommentNode key={node.comment_id} node={node} />
-          ))}
-
-          {comments.length === 0 && <p className="text-xs text-gray-500 italic mt-2">Noch keine Kommentare. Sei der erste!</p>}
-
-          {currentUserUid ? (
-            <form onSubmit={handleSubmit} className="flex gap-2 mt-1">
-              <input 
-                type="text" 
-                value={newText}
-                onChange={e => setNewText(e.target.value)}
-                placeholder="Schreibe einen Kommentar..." 
-                className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 text-white"
-                disabled={isSubmitting}
-              />
-              <button 
-                type="submit" 
-                disabled={!newText.trim() || isSubmitting}
-                className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition"
-              >
-                Senden
-              </button>
-            </form>
-          ) : (
-            <p className="text-xs text-gray-500">Du musst angemeldet sein, um zu kommentieren.</p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
+import { SpoilerProtectedThread, CommentSection } from "@/components/ui/SocialComponents";
+import { getAllUserWorks } from "@/lib/db/works";
 
 export default function FeedPage() {
   const [feed, setFeed] = useState<ActivityFeed[]>([]);
@@ -219,6 +26,7 @@ export default function FeedPage() {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [currentUserUid, setCurrentUserUid] = useState<string | undefined>(undefined);
   const [userProfiles, setUserProfiles] = useState<Record<string, any>>({});
+  const [currentUserWorks, setCurrentUserWorks] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
@@ -226,8 +34,13 @@ export default function FeedPage() {
         setCurrentUserUid(user.uid);
         const profile = await getUserProfile(user.uid);
         setUserProfile(profile);
+        const works = await getAllUserWorks(user.uid);
+        const map: Record<string, number> = {};
+        works.forEach((w: any) => { map[w.work_id] = w.current_episode; });
+        setCurrentUserWorks(map);
       } else {
         setUserProfile(null);
+        setCurrentUserWorks({});
       }
     });
     return () => unsubscribe();
@@ -373,102 +186,126 @@ export default function FeedPage() {
           <div className="text-center text-gray-500 py-8">Noch keine Aktivitäten. Mach den ersten Post!</div>
         ) : (
           feed.map((activity) => {
-            const hasWork = !!activity.work_id;
-            const work = hasWork ? workDetails[activity.work_id!] : null;
-            const authorProfile = userProfiles[activity.user_id];
-            const username = authorProfile?.username || `User ${activity.user_id.substring(0, 4)}`;
-            const avatarUrl = authorProfile?.avatar_url || `https://api.dicebear.com/9.x/notionists/svg?seed=${activity.user_id}`;
+            const user = userProfiles[activity.user_id] || { username: "Unbekannt" };
+            const work = activity.work_id ? workDetails[activity.work_id] : null;
+            const timeAgo = formatDistanceToNow(new Date(activity.timestamp), { addSuffix: true, locale: de });
+            
+            if (activity.action_type === "EPISODE_THREAD") {
+              const userCurrentEp = currentUserWorks[activity.work_id!] || 0;
+              const isSpoiler = (activity.episode_num || 0) > userCurrentEp;
+              
+              return (
+                <SpoilerProtectedThread 
+                  key={activity.activity_id}
+                  activity={activity}
+                  work={work}
+                  user={user}
+                  timeAgo={timeAgo}
+                  currentUserUid={currentUserUid}
+                  isSpoiler={isSpoiler}
+                  userProfiles={userProfiles}
+                />
+              );
+            }
 
+            if (activity.action_type === "WEEKLY_RANKING") {
+              const isOldPost = activity.details?.startsWith("Wochen-Ranking");
+              const rankedIds = (activity.details && !isOldPost) 
+                ? activity.details.split(",") 
+                : (activity.work_id ? [activity.work_id] : []);
+              
+              return (
+                <div key={activity.activity_id} className="rounded-xl border border-yellow-700/50 bg-[#1a1d24] p-4 shadow-lg relative">
+                  {activity.user_id === currentUserUid && (
+                    <button 
+                      onClick={() => handleDeletePost(activity.activity_id)}
+                      className="absolute top-3 right-3 text-gray-500 hover:text-red-500 transition"
+                    >
+                      X
+                    </button>
+                  )}
+                  <div className="flex items-center gap-2 mb-3 flex-wrap">
+                    <span className="text-[9px] bg-yellow-600 text-white px-2 py-0.5 rounded-full font-bold shadow-md">
+                      WOCHEN-RANKING
+                    </span>
+                    <span className="font-bold text-gray-200 text-xs">{user.username}</span>
+                    <span className="text-xs text-gray-500">{timeAgo}</span>
+                  </div>
+                  
+                  <div className="bg-black/40 rounded-lg p-3 border border-gray-800">
+                    <p className="text-sm font-bold text-yellow-500 mb-2">🏆 Die Top Plätze diese Woche:</p>
+                    <div className="flex flex-col gap-3">
+                      {rankedIds.map((id, idx) => {
+                        const rankedWork = workDetails[id];
+                        if (!rankedWork) return null;
+                        return (
+                          <div key={id} className="flex gap-3 items-center">
+                             <div className="text-yellow-500 font-bold w-5 shrink-0 text-right">{idx + 1}.</div>
+                             <Link href={`/work/${id}`} className="shrink-0">
+                               <img src={rankedWork.coverImage?.large} alt="Cover" className="w-8 h-12 object-cover rounded shadow border border-gray-700 hover:border-blue-500 transition" />
+                             </Link>
+                             <div className="flex-1 min-w-0">
+                               <h4 className="font-bold text-gray-100 text-sm line-clamp-1">{rankedWork.title?.english || rankedWork.title?.romaji}</h4>
+                             </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} commentCount={activity.comments_count || 0} />
+                </div>
+              );
+            }
+            
+            // Render other activity types (RATING, TOP9_UPDATE, MANUAL_POST)
             return (
-              <div key={activity.activity_id} className="bg-[#1a1d24] border border-gray-800 rounded-xl p-4 shadow-md">
-                <div className="flex gap-3">
-                  <img 
-                    src={avatarUrl} 
-                    alt="Avatar" 
-                    className="w-10 h-10 rounded-full bg-gray-800 shrink-0 object-cover"
-                  />
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-1 text-sm">
-                        <span className="font-bold text-gray-200">{username}</span>
-                        {activity.action_type !== "MANUAL_POST" && (
-                          <span className="flex items-center gap-1 text-gray-500 ml-1">
-                            {getActionIcon(activity.action_type)}
+              <div key={activity.activity_id} className="rounded-xl border-2 border-blue-900/30 bg-[#141a29] p-4 shadow-lg relative overflow-hidden group">
+                {activity.user_id === currentUserUid && (
+                  <button 
+                    onClick={() => handleDeletePost(activity.activity_id)}
+                    className="absolute top-3 right-3 text-gray-600 hover:text-red-500 transition z-10"
+                  >
+                    X
+                  </button>
+                )}
+                
+                <div className="flex gap-4">
+                  {work && (
+                    <Link href={`/work/${work.id}`} className="shrink-0 relative">
+                      <img 
+                        src={work.coverImage?.large} 
+                        alt="Cover" 
+                        className="w-20 h-28 object-cover rounded-lg shadow-md border border-gray-800 group-hover:border-blue-500 transition"
+                      />
+                    </Link>
+                  )}
+                  
+                  <div className="flex flex-col justify-between flex-1 min-w-0 py-1">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        {activity.action_type === "RATING" ? (
+                          <span className="text-[9px] bg-purple-600 text-white px-2 py-0.5 rounded-full font-bold shadow-md">
+                            BEWERTUNG
+                          </span>
+                        ) : (
+                          <span className="text-[9px] bg-gray-600 text-white px-2 py-0.5 rounded-full font-bold shadow-md">
+                            BEITRAG
                           </span>
                         )}
+                        <span className="font-bold text-gray-200 text-xs">{user.username}</span>
+                        <span className="text-xs text-gray-500">{timeAgo}</span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-gray-500">
-                          {formatDistanceToNow(new Date(activity.timestamp), { addSuffix: true, locale: de })}
-                        </span>
-                        {activity.user_id === currentUserUid && (
-                          <button 
-                            onClick={() => handleDeletePost(activity.activity_id)}
-                            className="text-gray-600 hover:text-red-500 transition font-bold text-xs bg-black/20 rounded-full w-5 h-5 flex items-center justify-center"
-                            title="Beitrag löschen"
-                          >
-                            ×
-                          </button>
-                        )}
-                      </div>
+                      
+                      {work && (
+                        <h3 className="font-bold text-gray-100 line-clamp-1">{work.title?.english || work.title?.romaji}</h3>
+                      )}
+                      
+                      <p className="text-sm text-gray-300 mt-2 break-words whitespace-pre-wrap leading-relaxed">{activity.text || activity.details}</p>
                     </div>
-
-                    {/* Manual Post Text or System Details */}
-                    {activity.action_type === "WEEKLY_RANKING" ? (
-                      <div className="mt-2 bg-black/40 rounded-lg p-3 border border-gray-800">
-                        <p className="text-sm font-bold text-yellow-500 mb-2">🏆 Die Top Plätze diese Woche:</p>
-                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2">
-                          {(() => {
-                            const isOldPost = activity.details?.startsWith("Wochen-Ranking");
-                            const rankedIds = (activity.details && !isOldPost) 
-                              ? activity.details.split(",") 
-                              : (activity.work_id ? [activity.work_id] : []);
-                            
-                            return rankedIds.map((id, idx) => {
-                              const rankedWork = workDetails[id];
-                              if (!rankedWork) return null;
-                              return (
-                                <Link key={id} href={`/work/${id}`} className="relative aspect-[3/4] rounded-lg overflow-hidden group border border-gray-700 hover:border-blue-500 transition shadow-sm">
-                                  <div className="absolute top-1 left-1 bg-yellow-500 text-black text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full shadow-md z-10 border border-yellow-300">
-                                    {idx + 1}
-                                  </div>
-                                  <img src={rankedWork.coverImage?.large} alt="Cover" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
-                                  <div className="absolute bottom-0 inset-x-0 bg-black/80 text-[9px] text-gray-200 px-1 py-1 truncate text-center font-bold backdrop-blur-sm">
-                                    {rankedWork.title?.english || rankedWork.title?.romaji}
-                                  </div>
-                                </Link>
-                              )
-                            });
-                          })()}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-sm text-gray-300 whitespace-pre-wrap">
-                        {activity.text || activity.details}
-                      </div>
-                    )}
-
-                    {/* Attached Work Card */}
-                    {hasWork && work && activity.action_type !== "WEEKLY_RANKING" && (
-                      <Link href={`/work/${work.id}`} className="mt-3 flex gap-3 p-2 rounded-lg bg-gray-900 border border-gray-800 hover:border-gray-700 transition group">
-                        <img 
-                          src={work.coverImage?.large} 
-                          alt="Cover" 
-                          className="w-12 h-16 object-cover rounded"
-                        />
-                        <div className="flex flex-col justify-center">
-                          <h4 className="text-sm font-bold text-gray-200 group-hover:text-blue-400 transition-colors line-clamp-1">{work.title?.romaji}</h4>
-                          <div className="flex items-center gap-1 text-xs text-gray-500 mt-1">
-                            <Star size={10} className="text-yellow-500" />
-                            <span>{(work.averageScore / 10).toFixed(1)}</span>
-                          </div>
-                        </div>
-                      </Link>
-                    )}
-                    
-                    <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} />
                   </div>
                 </div>
+                
+                <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} commentCount={activity.comments_count || 0} />
               </div>
             );
           })
