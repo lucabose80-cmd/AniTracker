@@ -73,9 +73,15 @@ export function WorkSocialFeed({ workId, work }: { workId: string, work: any }) 
               <div className="flex flex-col justify-between flex-1 min-w-0 py-1">
                 <div>
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <div className="h-4 w-4 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-[8px]">
-                      {user.avatar_url ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" /> : (user.username?.[0]?.toUpperCase() || "?")}
-                    </div>
+                    {activity.action_type === "RATING" ? (
+                      <span className="text-[9px] bg-purple-600 text-white px-2 py-0.5 rounded-full font-bold shadow-md">
+                        BEWERTUNG
+                      </span>
+                    ) : (
+                      <span className="text-[9px] bg-gray-600 text-white px-2 py-0.5 rounded-full font-bold shadow-md">
+                        BEITRAG
+                      </span>
+                    )}
                     <span className="font-bold text-gray-200 text-xs">{user.username}</span>
                     <span className="text-xs text-gray-500">{timeAgo}</span>
                   </div>

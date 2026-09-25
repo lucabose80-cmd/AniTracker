@@ -154,16 +154,12 @@ export default function SocialPage() {
                       X
                     </button>
                   )}
-                  <div className="flex items-center gap-3 mb-3">
-                    <div className="h-10 w-10 rounded-full bg-yellow-600/20 flex items-center justify-center font-bold overflow-hidden border border-yellow-600/50 text-yellow-500">
-                      <Trophy size={20} />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-semibold text-gray-200">
-                        {user.username} <span className="text-gray-400 font-normal">hat sein Wochen-Ranking aktualisiert</span>
-                      </p>
-                      <p className="text-xs text-gray-500">{timeAgo}</p>
-                    </div>
+                  <div className="flex items-center gap-2 mb-3 flex-wrap">
+                    <span className="text-[9px] bg-yellow-600 text-white px-2 py-0.5 rounded-full font-bold shadow-md">
+                      WOCHEN-RANKING
+                    </span>
+                    <span className="font-bold text-gray-200 text-xs">{user.username}</span>
+                    <span className="text-xs text-gray-500">{timeAgo}</span>
                   </div>
                   
                   <div className="bg-black/40 rounded-lg p-3 border border-gray-800">
@@ -217,9 +213,15 @@ export default function SocialPage() {
                   <div className="flex flex-col justify-between flex-1 min-w-0 py-1">
                     <div>
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <div className="h-4 w-4 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-[8px]">
-                          {user.avatar_url ? <img src={user.avatar_url} alt="" className="w-full h-full object-cover" /> : (user.username?.[0]?.toUpperCase() || "?")}
-                        </div>
+                        {activity.action_type === "RATING" ? (
+                          <span className="text-[9px] bg-purple-600 text-white px-2 py-0.5 rounded-full font-bold shadow-md">
+                            BEWERTUNG
+                          </span>
+                        ) : (
+                          <span className="text-[9px] bg-gray-600 text-white px-2 py-0.5 rounded-full font-bold shadow-md">
+                            BEITRAG
+                          </span>
+                        )}
                         <span className="font-bold text-gray-200 text-xs">{user.username}</span>
                         <span className="text-xs text-gray-500">{timeAgo}</span>
                       </div>
