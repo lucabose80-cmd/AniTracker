@@ -141,7 +141,7 @@ export async function GET(req: Request) {
               },
               webpush: {
                 headers: { Urgency: "high" },
-                notification: { icon: "https://anitracker-delta.vercel.app/icon-192x192.png?v=2" },
+                notification: { icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png" },
                 fcmOptions: { link: `/work/${schedule.mediaId}` }
               },
               tokens,
