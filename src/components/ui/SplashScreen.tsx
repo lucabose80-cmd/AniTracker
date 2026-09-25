@@ -118,7 +118,7 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
 
         <div className="flex flex-col items-center space-y-8 relative z-10">
           <h1 className="text-5xl font-extrabold tracking-tighter text-white">
-            <span className="text-blue-600">Ani</span>Tracker
+            <span className="text-blue-600">Weeb</span>Check
           </h1>
           <p className="text-gray-400 text-sm max-w-xs text-center">
             Dein Tracker für Anime, Manga und Manhwa mit tiefgehenden Bewertungen.

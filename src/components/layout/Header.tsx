@@ -31,7 +31,7 @@ export function Header() {
     <header className="sticky top-0 z-50 w-full border-b border-gray-800 bg-[#0f1115]/80 backdrop-blur-md">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         <h1 className="text-xl font-bold text-white">
-          <span className="text-blue-600">Ani</span>Tracker
+          <span className="text-blue-600">Weeb</span>Check
         </h1>
 
         <div className="flex items-center gap-4">
