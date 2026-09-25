@@ -5,7 +5,7 @@ import { getGlobalFeed } from "@/lib/db/feed";
 import { getAllUserProfiles } from "@/lib/db/users";
 import { ActivityFeed } from "@/types/database";
 import { auth } from "@/lib/firebase";
-import { SpoilerProtectedThread, CommentSection } from "@/app/social/page";
+import { SpoilerProtectedThread, CommentSection } from "@/components/ui/SocialComponents";
 import { formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
 
