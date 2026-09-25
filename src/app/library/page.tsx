@@ -30,7 +30,7 @@ import { UserWork } from "@/types/database";
 import { getAllUserWorks } from "@/lib/db/works";
 import { getCalendarOverrides } from "@/lib/db/calendar";
 import Link from "next/link";
-import { ArrowUp, ArrowDown, Minus, Save, Share, Play, Check, Bookmark } from "lucide-react";
+import { ArrowUp, ArrowDown, Minus, Save, Share, Play, Check, Bookmark, Star } from "lucide-react";
 import { createActivity } from "@/lib/db/feed";
 
 // Simple Sortable Item Component
@@ -54,13 +54,14 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
       maxAiredEp = userWork.manual_max_episode;
     } else if (workDetails.type === "MANGA") {
       maxAiredEp = workDetails.chapters || 0;
-    } else {
       if (workDetails.status === "RELEASING" && workDetails.nextAiringEpisode) {
         maxAiredEp = workDetails.nextAiringEpisode.episode - 1;
       } else if (workDetails.status === "FINISHED") {
         maxAiredEp = workDetails.episodes || 0;
       }
     }
+    const offset = userWork.synchro_offset_episodes || 0;
+    maxAiredEp = Math.max(0, maxAiredEp - offset);
     behindCount = Math.max(0, maxAiredEp - currentEp);
   }
 
@@ -355,6 +356,18 @@ export default function LibraryPage() {
 
   const filteredWorks = allWorks.filter(w => aniListDetails[w.work_id]?.type === contentType);
 
+  let isRankingReset = false;
+  if (userProfile) {
+    const rankingData = contentType === "ANIME" ? userProfile.weekly_ranking_anime : userProfile.weekly_ranking_manga;
+    const lastActive = rankingData?.last_active || 0;
+    const d = new Date();
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(d.setDate(diff));
+    monday.setHours(0, 0, 0, 0);
+    isRankingReset = lastActive < monday.getTime();
+  }
+
   return (
     <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-5xl mx-auto">
       <h2 className="flex items-center gap-2 text-xl font-bold">
@@ -396,7 +409,7 @@ export default function LibraryPage() {
           </div>
           
           <SortableContext items={items} strategy={rectSortingStrategy}>
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 pb-2">
+            <div className={`grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 pb-2 transition-all duration-500 ${isRankingReset ? "opacity-50 grayscale" : ""}`}>
               {items.map((id, index) => {
                 const uWork = allWorks.find(w => w.work_id === id);
                 const prevRanking = contentType === "ANIME" ? userProfile?.weekly_ranking_anime?.previous : userProfile?.weekly_ranking_manga?.previous;
@@ -510,20 +523,33 @@ export default function LibraryPage() {
                     maxAiredEp = work.manual_max_episode;
                   } else if (details.type === "MANGA") {
                     maxAiredEp = details.chapters || 0;
-                  } else {
                     if (details.status === "RELEASING" && details.nextAiringEpisode) {
                       maxAiredEp = details.nextAiringEpisode.episode - 1;
                     } else if (details.status === "FINISHED") {
                       maxAiredEp = details.episodes || 0;
                     }
                   }
+                  const offset = work.synchro_offset_episodes || 0;
+                  maxAiredEp = Math.max(0, maxAiredEp - offset);
                   behindCount = Math.max(0, maxAiredEp - currentEp);
                 }
 
                 const content = (
                   <div 
                     className={`block group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500 hover:shadow-lg ${work.status === "CURRENT" ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${work.auto_added ? "opacity-50 grayscale hover:grayscale-0 hover:opacity-100" : ""}`}
+                    onPointerDown={(e) => {
+                      e.currentTarget.dataset.startX = e.clientX.toString();
+                      e.currentTarget.dataset.startY = e.clientY.toString();
+                    }}
                     onClick={(e) => {
+                      const startX = parseFloat(e.currentTarget.dataset.startX || "0");
+                      const startY = parseFloat(e.currentTarget.dataset.startY || "0");
+                      const dx = Math.abs(e.clientX - startX);
+                      const dy = Math.abs(e.clientY - startY);
+                      if (dx > 10 || dy > 10) {
+                        e.preventDefault();
+                        return;
+                      }
                       router.push(`/work/${work.work_id}`);
                     }}
                   >
@@ -535,6 +561,11 @@ export default function LibraryPage() {
                     {behindCount > 0 && (
                       <div className="absolute top-1 right-1 flex items-center justify-center rounded-full bg-red-600 text-[10px] px-1.5 py-0.5 font-bold text-white shadow-md z-10 pointer-events-none">
                         {behindCount}
+                      </div>
+                    )}
+                    {sortBy === "SCORE" && work.evaluation?.overallScore !== undefined && work.evaluation.overallScore > 0 && (
+                      <div className="absolute top-1 left-1 flex items-center justify-center rounded-full border border-yellow-400 bg-yellow-600/90 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-md z-10 pointer-events-none gap-1">
+                        <Star size={10} className="fill-white" /> {work.evaluation.overallScore.toFixed(1)}
                       </div>
                     )}
                     {work.auto_added && (

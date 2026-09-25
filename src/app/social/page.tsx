@@ -6,6 +6,7 @@ import { getGlobalFeed } from "@/lib/db/feed";
 import { ActivityFeed } from "@/types/database";
 import { fetchAniListBatch } from "@/lib/anilist";
 import { getUserProfile } from "@/lib/db/users";
+import { getAllUserWorks } from "@/lib/db/works";
 import { auth } from "@/lib/firebase";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
@@ -117,16 +118,79 @@ function CommentSection({ activityId, userProfiles, currentUserUid }: { activity
   );
 }
 
+function SpoilerProtectedThread({ activity, work, user, timeAgo, currentUserUid, isSpoiler, userProfiles }: any) {
+  const [showAnyway, setShowAnyway] = useState(false);
+  
+  if (isSpoiler && !showAnyway) {
+    return (
+      <div className="rounded-xl border border-red-900/50 bg-[#1a1d24] p-6 text-center shadow-lg relative overflow-hidden flex flex-col items-center justify-center min-h-[160px]">
+        <div className="absolute inset-0 bg-red-900/10" />
+        <p className="text-red-400 font-bold mb-2 relative z-10 flex items-center gap-2">
+          SPOILER WARNUNG
+        </p>
+        <p className="text-sm text-gray-400 mb-4 relative z-10">{work?.title?.english || work?.title?.romaji} - {work?.type === "MANGA" ? "Kapitel" : "Folge"} {activity.episode_num}</p>
+        <button 
+          onClick={() => setShowAnyway(true)} 
+          className="bg-red-900/50 hover:bg-red-900 text-white text-xs font-bold px-4 py-2 rounded-lg transition relative z-10 shadow-lg"
+        >
+          Trotzdem anzeigen
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border-2 border-blue-900/50 bg-[#141a29] p-4 shadow-lg relative overflow-hidden group">
+      <div className="absolute top-0 right-0 p-2">
+        <span className="text-[10px] bg-blue-600 text-white px-2 py-1 rounded-full font-bold shadow-md">
+          OFFIZIELLER THREAD
+        </span>
+      </div>
+      
+      <div className="flex gap-4">
+        {work && (
+          <Link href={`/work/${work.id}?episode=${activity.episode_num || ''}`} className="shrink-0">
+            <img 
+              src={work.coverImage?.large} 
+              alt="Cover" 
+              className="w-16 h-24 object-cover rounded-lg shadow-md border border-gray-800 group-hover:border-blue-500 transition"
+            />
+          </Link>
+        )}
+        <div className="flex flex-col justify-between flex-1 min-w-0">
+          <div>
+            <h3 className="font-bold text-gray-100 line-clamp-1">{work?.title?.english || work?.title?.romaji || "Unbekanntes Werk"}</h3>
+            <p className="text-sm font-semibold text-blue-400 mt-0.5">Folge / Kapitel {activity.episode_num}</p>
+            <p className="text-xs text-gray-400 mt-2">{user.username} hat den Raum eröffnet • {timeAgo}</p>
+          </div>
+        </div>
+      </div>
+      <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} />
+    </div>
+  );
+}
+
 export default function SocialPage() {
   const [feed, setFeed] = useState<ActivityFeed[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [workDetails, setWorkDetails] = useState<Record<string, any>>({});
   const [userProfiles, setUserProfiles] = useState<Record<string, any>>({});
   const [currentUserUid, setCurrentUserUid] = useState<string | undefined>(undefined);
+  const [currentUserWorks, setCurrentUserWorks] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged((user) => {
+    const unsubscribe = auth.onAuthStateChanged(async (user) => {
       setCurrentUserUid(user?.uid);
+      if (user) {
+        try {
+          const works = await getAllUserWorks(user.uid);
+          const map: Record<string, number> = {};
+          works.forEach((w: any) => { map[w.work_id] = w.current_episode; });
+          setCurrentUserWorks(map);
+        } catch (e) {
+          console.error(e);
+        }
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -211,46 +275,20 @@ export default function SocialPage() {
             const timeAgo = formatDistanceToNow(new Date(activity.timestamp), { addSuffix: true, locale: de });
             
             if (activity.action_type === "EPISODE_THREAD") {
+              const userCurrentEp = currentUserWorks[activity.work_id!] || 0;
+              const isSpoiler = (activity.episode_num || 0) > userCurrentEp;
+              
               return (
-                <div key={activity.activity_id} className="rounded-xl border-2 border-blue-900/50 bg-[#141a29] p-4 shadow-lg relative overflow-hidden group">
-                  <div className="absolute top-0 right-0 p-2">
-                    <span className="text-[10px] bg-blue-600 text-white px-2 py-1 rounded-full font-bold shadow-md">
-                      OFFIZIELLER THREAD
-                    </span>
-                  </div>
-                  
-                  <div className="absolute top-2 right-2 flex gap-2">
-                    <span className="text-[10px] bg-blue-600 text-white px-2 py-1 rounded-full font-bold shadow-md">
-                      OFFIZIELLER THREAD
-                    </span>
-                  </div>
-                  
-                  <div className="flex gap-4">
-                    {work && (
-                      <Link href={`/work/${work.id}?episode=${activity.episode_num || ''}`} className="shrink-0">
-                        <img 
-                          src={work.coverImage?.large} 
-                          alt="Cover" 
-                          className="w-16 h-24 object-cover rounded-lg shadow-md border border-gray-800 group-hover:border-blue-500 transition"
-                        />
-                      </Link>
-                    )}
-                    <div className="flex flex-col justify-between flex-1">
-                      <div>
-                        <h3 className="font-bold text-gray-100 line-clamp-1">{work?.title?.english || work?.title?.romaji || "Unbekanntes Werk"}</h3>
-                        <p className="text-sm font-semibold text-blue-400 mt-0.5">Folge / Kapitel {activity.episode_num}</p>
-                        <p className="text-xs text-gray-400 mt-2">{user.username} hat den Raum eröffnet • {timeAgo}</p>
-                      </div>
-                      
-                      <Link 
-                        href={`/work/${activity.work_id}?episode=${activity.episode_num || ''}`}
-                        className="mt-3 flex items-center gap-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 py-1.5 px-3 rounded-lg w-fit transition shadow-lg"
-                      >
-                        <MessageSquare size={14} /> Mitdiskutieren
-                      </Link>
-                    </div>
-                  </div>
-                </div>
+                <SpoilerProtectedThread 
+                  key={activity.activity_id}
+                  activity={activity}
+                  work={work}
+                  user={user}
+                  timeAgo={timeAgo}
+                  currentUserUid={currentUserUid}
+                  isSpoiler={isSpoiler}
+                  userProfiles={userProfiles}
+                />
               );
             }
 

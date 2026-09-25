@@ -10,6 +10,8 @@ const GET_RECENT_RELEASES = `
         media {
           title {
             romaji
+            english
+            native
           }
         }
       }
@@ -71,7 +73,7 @@ export async function GET(req: Request) {
             const payload = {
               notification: {
                 title: "Neue Folge verfügbar!",
-                body: `Episode ${schedule.episode} von ${schedule.media.title.english || schedule.media.title.romaji} ist jetzt online.`,
+                body: `Episode ${schedule.episode} von ${schedule.media.title.english || schedule.media.title.native || schedule.media.title.romaji} ist jetzt online.`,
               },
               data: {
                 link: `/work/${schedule.mediaId}`,

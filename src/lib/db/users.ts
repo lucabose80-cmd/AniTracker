@@ -84,7 +84,8 @@ export async function updateWeeklyRanking(uid: string, type: "ANIME" | "MANGA", 
   
   await setDoc(docRef, {
     [fieldName]: {
-      current: currentList
+      current: currentList,
+      last_active: Date.now()
     }
   }, { merge: true });
 }
@@ -98,7 +99,61 @@ export async function saveWeeklyRankingSnapshot(uid: string, type: "ANIME" | "MA
     [fieldName]: {
       current: currentList,
       previous: currentList, // snapshot sets previous to current
-      last_updated: new Date().toISOString()
+      last_updated: new Date().toISOString(),
+      last_active: Date.now()
     }
   }, { merge: true });
+}
+
+export function getLastMonday() {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d.setDate(diff));
+  monday.setHours(0, 0, 0, 0);
+  return monday.getTime();
+}
+
+export async function performWeeklyMaintenance(uid: string, profile: UserProfile, userWorks: any[], aniListDetails: Record<string, any>) {
+  if (!db) return false;
+  const lastMonday = getLastMonday();
+  const lastMaintenance = profile.last_maintenance_timestamp || 0;
+  
+  if (lastMaintenance < lastMonday) {
+    const { updateUserWork } = await import("@/lib/db/works");
+    let needsUpdate = false;
+    
+    for (const work of userWorks) {
+      if (work.status === "CURRENT") {
+        const details = aniListDetails[work.work_id];
+        if (!details) continue;
+        
+        let maxAiredEp = 0;
+        if (work.manual_max_episode !== undefined && work.manual_max_episode !== null) {
+          maxAiredEp = Number(work.manual_max_episode);
+        } else if (details.type === "MANGA") {
+          maxAiredEp = details.chapters || 0;
+        } else if (details.status === "FINISHED") {
+          maxAiredEp = details.episodes || 0;
+        } else {
+          continue; // still releasing
+        }
+        
+        const offset = Number(work.synchro_offset_episodes) || 0;
+        maxAiredEp = Math.max(0, maxAiredEp - offset);
+        
+        const current = Number(work.current_episode) || 0;
+        if (current >= maxAiredEp && maxAiredEp > 0) {
+          await updateUserWork(uid, work.work_id, { status: "COMPLETED" });
+          needsUpdate = true;
+        }
+      }
+    }
+    
+    const docRef = doc(db, "users", uid);
+    await setDoc(docRef, { last_maintenance_timestamp: Date.now() }, { merge: true });
+    
+    return needsUpdate;
+  }
+  return false;
 }

@@ -166,6 +166,17 @@ export default function Home() {
               }
             });
             setSelectedGenre(topGenre);
+
+            // Run weekly maintenance logic
+            const { getUserProfile, performWeeklyMaintenance } = await import("@/lib/db/users");
+            const profile = await getUserProfile(user.uid);
+            if (profile) {
+              const needsUpdate = await performWeeklyMaintenance(user.uid, profile, works, map);
+              if (needsUpdate) {
+                const updatedWorks = await getAllUserWorks(user.uid);
+                setUserWorks(updatedWorks);
+              }
+            }
           } catch(e) {
             console.error("Failed to load user works batch", e);
           }
@@ -177,6 +188,31 @@ export default function Home() {
     });
     return () => unsubscribe();
   }, []);
+
+  const handleCheckIn = async (workId: string, nextEp: number) => {
+    if (!auth.currentUser) return;
+    try {
+      const { updateUserWork } = await import("@/lib/db/works");
+      await updateUserWork(auth.currentUser.uid, workId, { current_episode: nextEp });
+      
+      const { createActivity, getGlobalFeed } = await import("@/lib/db/feed");
+      // Check if thread exists
+      const recent = await getGlobalFeed(50);
+      const exists = recent.some(a => a.action_type === "EPISODE_THREAD" && a.work_id === workId && a.episode_num === nextEp);
+      
+      if (!exists) {
+        await createActivity(auth.currentUser.uid, "EPISODE_THREAD", workId, {
+          episode_num: nextEp,
+          text: `Thread für Folge ${nextEp}`
+        });
+      }
+
+      router.push(`/social`);
+    } catch(e) {
+      console.error(e);
+      alert("Fehler beim Check-in");
+    }
+  };
 
   // 3. Load Recommendations when Genre changes
   useEffect(() => {
@@ -228,6 +264,8 @@ export default function Home() {
         }
       }
       
+      const offset = Number(w.synchro_offset_episodes) || 0;
+      maxAiredEp = Math.max(0, maxAiredEp - offset);
       const current = Number(w.current_episode) || 0;
       const behindCount = Math.max(0, maxAiredEp - current);
       return behindCount > 0 ? { ...w, details, behindCount, nextEpToWatch: current + 1 } : null;
@@ -365,12 +403,12 @@ export default function Home() {
                     <h3 className="font-bold text-white text-sm line-clamp-1">{work.details?.title?.english || work.details?.title?.romaji}</h3>
                     <p className="text-xs text-gray-400 mt-1">Als nächstes: {work.details?.type === "MANGA" ? "Kapitel" : "Folge"} {work.nextEpToWatch}</p>
                   </div>
-                  <Link 
-                    href={`/work/${work.work_id}?episode=${work.nextEpToWatch}`}
+                  <button 
+                    onClick={() => handleCheckIn(work.work_id, work.nextEpToWatch)}
                     className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded-lg text-center transition shadow-lg"
                   >
-                    Check in
-                  </Link>
+                    Check in & Kommentieren
+                  </button>
                 </div>
               </div>
             ))}

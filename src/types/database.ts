@@ -23,12 +23,15 @@ export interface UserProfile {
     current: string[];
     previous: string[];
     last_updated: string;
+    last_active?: number;
   };
   weekly_ranking_manga?: {
     current: string[];
     previous: string[];
     last_updated: string;
+    last_active?: number;
   };
+  last_maintenance_timestamp?: number;
 }
 
 export interface Work {

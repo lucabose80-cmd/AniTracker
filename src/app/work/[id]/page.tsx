@@ -26,7 +26,7 @@ export default function WorkDetailPage() {
   const [currentEpisode, setCurrentEpisode] = useState(0);
   const [manualMaxEpisode, setManualMaxEpisode] = useState<number | "">("");
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [synchroOffset, setSynchroOffset] = useState<number>(0);
+  const [synchroOffset, setSynchroOffset] = useState<number | "">(0);
 
   // Form State for Deep Evaluation
   const [evaluation, setEvaluation] = useState<UserWork["evaluation"]>({
@@ -263,7 +263,7 @@ export default function WorkDetailPage() {
           pacingScale: 0,
         },
         mal_rated: malRated,
-        synchro_offset_episodes: synchroOffset,
+        synchro_offset_episodes: synchroOffset === "" ? 0 : synchroOffset,
         auto_added: false,
         status: userWorkStatus !== "NONE" ? userWorkStatus : "COMPLETED"
       });
@@ -425,7 +425,7 @@ export default function WorkDetailPage() {
                     type="number" 
                     min="0"
                     value={synchroOffset}
-                    onChange={(e) => setSynchroOffset(parseInt(e.target.value) || 0)}
+                    onChange={(e) => setSynchroOffset(e.target.value === "" ? "" : parseInt(e.target.value))}
                     className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                   />
                   <p className="text-[10px] text-gray-500 mt-1">Wie viele Folgen hinkt die Synchro hinterher? Dadurch wird die maximal auswählbare Folge reduziert.</p>
@@ -469,7 +469,7 @@ export default function WorkDetailPage() {
                       if (manualMaxEpisode === "") await clearManualMaxEpisode(id);
                       else await setCalendarOverride(id, undefined, customDay, customTime, manualMaxEpisode as number);
                       // Update synchro_offset_episodes in DB
-                      await saveUserWork(user.uid, id, { synchro_offset_episodes: synchroOffset });
+                      await saveUserWork(user.uid, id, { synchro_offset_episodes: synchroOffset === "" ? 0 : synchroOffset });
                       setHasCustomOverride(true);
                       setShowSettingsModal(false);
                     }

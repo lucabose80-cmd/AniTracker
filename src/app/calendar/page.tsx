@@ -192,8 +192,12 @@ export default function CalendarPage() {
                         const override = globalOverrides[strId];
                         if (override?.manualMaxEpisode !== undefined && override?.manualMaxEpisode !== null) {
                           episodesOut = override.manualMaxEpisode;
+                        } else if (uWork?.manual_max_episode !== undefined && uWork?.manual_max_episode !== null) {
+                          episodesOut = uWork.manual_max_episode;
                         }
                         
+                        const offset = uWork?.synchro_offset_episodes || 0;
+                        episodesOut = Math.max(0, episodesOut - offset);
                         const behindCount = Math.max(0, episodesOut - currentEp);
 
                         const isEditing = editingId === strId;

@@ -6,6 +6,7 @@ import { onAuthStateChanged, User } from "firebase/auth";
 import { useRouter } from "next/navigation";
 import { LogIn } from "lucide-react";
 import { getUserProfile } from "@/lib/db/users";
+import { getAllUserWorks } from "@/lib/db/works";
 import { fetchAniListBatch } from "@/lib/anilist";
 
 export function SplashScreen({ children }: { children: React.ReactNode }) {
@@ -28,7 +29,6 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
   }, []);
 
   const [bgImages, setBgImages] = useState<string[]>([]);
-  const [currentBgIndex, setCurrentBgIndex] = useState(0);
 
   useEffect(() => {
     async function loadBgImages() {
@@ -37,10 +37,8 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
       let workIds: string[] = [];
       if (user) {
         try {
-          const profile = await getUserProfile(user.uid);
-          if (profile?.weekly_ranking_anime?.current) {
-            workIds = profile.weekly_ranking_anime.current.filter((id: string) => !id.startsWith("empty"));
-          }
+          const works = await getAllUserWorks(user.uid);
+          workIds = works.filter((w: any) => w.status === "CURRENT").slice(0, 9).map((w: any) => w.work_id);
         } catch (e) {
           console.error(e);
         }
@@ -49,7 +47,7 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
       if (workIds.length > 0) {
         try {
           const mediaList = await fetchAniListBatch(workIds.map(id => parseInt(id, 10)));
-          const images = mediaList.map((m: any) => m.bannerImage || m.coverImage?.extraLarge || m.coverImage?.large).filter(Boolean);
+          const images = mediaList.map((m: any) => m.coverImage?.extraLarge || m.coverImage?.large).filter(Boolean);
           setBgImages(images);
         } catch (e) {
           console.error(e);
@@ -59,7 +57,7 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
         try {
            const { fetchAniList, GET_TRENDING_WORKS } = await import("@/lib/anilist");
            const data = await fetchAniList(GET_TRENDING_WORKS, { type: "ANIME", page: 1, perPage: 10 });
-           const images = data.Page.media.map((m: any) => m.bannerImage || m.coverImage?.extraLarge || m.coverImage?.large).filter(Boolean);
+           const images = data.Page.media.map((m: any) => m.coverImage?.extraLarge || m.coverImage?.large).filter(Boolean);
            setBgImages(images);
         } catch(e) {}
       }
@@ -67,13 +65,7 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
     loadBgImages();
   }, [authLoaded, user]);
 
-  useEffect(() => {
-    if (bgImages.length <= 1) return;
-    const interval = setInterval(() => {
-      setCurrentBgIndex(prev => (prev + 1) % bgImages.length);
-    }, 4000);
-    return () => clearInterval(interval);
-  }, [bgImages]);
+
 
   // We can just use a simple timeout or a "START" button as requested.
   // The user requested: 'Splash Screen with zoom-in pull animation on "START".'
@@ -102,23 +94,24 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
           animateOut ? "scale-110 opacity-0 pointer-events-none" : "scale-100 opacity-100"
         }`}
       >
-        {/* Background Image Slider */}
+        {/* Collage Background */}
         {bgImages.length > 0 && (
-          <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-            {bgImages.map((img, idx) => (
-              <div 
-                key={idx}
-                className={`absolute inset-0 transition-opacity duration-1000 ${idx === currentBgIndex ? 'opacity-40' : 'opacity-0'}`}
-              >
-                <img 
-                  src={img} 
-                  alt="Background" 
-                  className={`w-full h-full object-cover transition-transform duration-[6000ms] ease-linear ${idx === currentBgIndex ? 'scale-110' : 'scale-100'}`} 
-                />
-              </div>
-            ))}
-            <div className="absolute inset-0 bg-gradient-to-t from-[#0f1115] via-[#0f1115]/80 to-[#0f1115]/40" />
-            <div className="absolute inset-0 bg-black/40" />
+          <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none opacity-40">
+            <div className="grid grid-cols-3 grid-rows-3 w-full h-full gap-1">
+              {Array.from({ length: 9 }).map((_, i) => (
+                <div key={i} className="relative w-full h-full">
+                  {bgImages[i % bgImages.length] && (
+                    <img 
+                      src={bgImages[i % bgImages.length]} 
+                      alt="Background" 
+                      className="w-full h-full object-cover" 
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="absolute inset-0 bg-gradient-to-t from-[#0f1115] via-[#0f1115]/90 to-[#0f1115]/50" />
+            <div className="absolute inset-0 bg-black/50" />
           </div>
         )}
 
