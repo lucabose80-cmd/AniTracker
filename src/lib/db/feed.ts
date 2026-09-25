@@ -42,7 +42,7 @@ export async function createActivity(
         title: "Neuer Social Beitrag",
         body: text || "Jemand hat etwas im Social Feed gepostet.",
         type: "social",
-        link: "/social"
+        link: "/feed"
       })
     }).catch(console.error);
   } else if (action_type === "WEEKLY_RANKING") {
@@ -55,7 +55,33 @@ export async function createActivity(
         title: "Neues Wochen-Ranking!",
         body: text || "Jemand hat sein neues Wochen-Ranking veröffentlicht.",
         type: "social",
-        link: "/social"
+        link: "/feed"
+      })
+    }).catch(console.error);
+  } else if (action_type === "RATING") {
+    fetch("/api/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        targetUserId: "ALL",
+        excludeUserId: user_id,
+        title: "Neue Bewertung",
+        body: text || "Jemand hat ein Werk bewertet.",
+        type: "social",
+        link: "/feed"
+      })
+    }).catch(console.error);
+  } else if (action_type === "EPISODE_THREAD") {
+    fetch("/api/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        targetUserId: "ALL",
+        excludeUserId: user_id,
+        title: "Neuer Thread",
+        body: text || `Ein neuer Thread für Folge/Kapitel ${episode_num || ''} wurde erstellt.`,
+        type: "social",
+        link: "/feed"
       })
     }).catch(console.error);
   }
@@ -145,6 +171,19 @@ export async function addActivityComment(activityId: string, userId: string, tex
               read: false
             };
             await setDoc(notifRef, notif);
+            
+            // Send Push Notification
+            fetch("/api/notify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                targetUserId: parentData.user_id,
+                title: `${actorName} hat geantwortet`,
+                body: text,
+                type: "replies",
+                link: "/feed"
+              })
+            }).catch(console.error);
           }
         }
       } 
@@ -166,6 +205,19 @@ export async function addActivityComment(activityId: string, userId: string, tex
           read: false
         };
         await setDoc(notifRef, notif);
+        
+        // Send Push Notification
+        fetch("/api/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targetUserId: activityData.user_id,
+            title: `${actorName} hat deinen Beitrag kommentiert`,
+            body: text,
+            type: "replies",
+            link: "/feed"
+          })
+        }).catch(console.error);
       }
     }
   } catch (e) {
