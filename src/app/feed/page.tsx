@@ -14,8 +14,10 @@ import { deleteActivity, getActivityComments, addActivityComment, deleteActivity
 import { ActivityComment, InAppNotification } from "@/types/database";
 import { SpoilerProtectedThread, CommentSection } from "@/components/ui/SocialComponents";
 import { getAllUserWorks } from "@/lib/db/works";
+import { useAppStore } from "@/lib/store";
 
 export default function FeedPage() {
+  const { contentType } = useAppStore();
   const [feed, setFeed] = useState<ActivityFeed[]>([]);
   const [workDetails, setWorkDetails] = useState<Record<string, any>>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -264,9 +266,16 @@ export default function FeedPage() {
         ) : feed.length === 0 ? (
           <div className="text-center text-gray-500 py-8">Noch keine Aktivitäten. Mach den ersten Post!</div>
         ) : (
-          feed.map((activity) => {
-            const user = userProfiles[activity.user_id] || { username: "Unbekannt" };
-            const work = activity.work_id ? workDetails[activity.work_id] : null;
+          feed
+            .filter(activity => {
+              if (!activity.work_id) return true;
+              const work = workDetails[activity.work_id];
+              if (!work) return true;
+              return work.type === contentType;
+            })
+            .map((activity) => {
+              const user = userProfiles[activity.user_id] || { username: "Unbekannt" };
+              const work = activity.work_id ? workDetails[activity.work_id] : null;
             const timeAgo = formatDistanceToNow(new Date(activity.timestamp), { addSuffix: true, locale: de });
             
             if (activity.action_type === "EPISODE_THREAD") {
@@ -308,7 +317,7 @@ export default function FeedPage() {
                     <span className="text-[9px] bg-yellow-600 text-white px-2 py-0.5 rounded-full font-bold shadow-md">
                       WOCHEN-RANKING
                     </span>
-                    <span className="font-bold text-gray-200 text-xs">{user.username}</span>
+                    <Link href={`/profile/${activity.user_id}`} className="font-bold text-gray-200 text-xs hover:text-blue-400 transition">{user.username}</Link>
                     <span className="text-xs text-gray-500">{timeAgo}</span>
                   </div>
                   
@@ -351,7 +360,7 @@ export default function FeedPage() {
                 
                 <div className="flex gap-4">
                   {work && (
-                    <Link href={`/work/${work.id}`} className="shrink-0 relative">
+                    <Link href={`/work/${work.id}`} prefetch={false} className="shrink-0 relative">
                       <img 
                         src={work.coverImage?.large} 
                         alt="Cover" 
@@ -372,7 +381,7 @@ export default function FeedPage() {
                             BEITRAG
                           </span>
                         )}
-                        <span className="font-bold text-gray-200 text-xs">{user.username}</span>
+                        <Link href={`/profile/${activity.user_id}`} className="font-bold text-gray-200 text-xs hover:text-blue-400 transition">{user.username}</Link>
                         <span className="text-xs text-gray-500">{timeAgo}</span>
                       </div>
                       

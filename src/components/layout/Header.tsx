@@ -6,15 +6,23 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
+import { getUserProfile } from "@/lib/db/users";
 
 export function Header() {
   const { contentType, toggleContentType } = useAppStore();
   const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<any>(null);
 
   useEffect(() => {
     if (!auth) return;
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
+      if (currentUser) {
+        const p = await getUserProfile(currentUser.uid);
+        setProfile(p);
+      } else {
+        setProfile(null);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -56,8 +64,12 @@ export function Header() {
           </Link>
 
           {user ? (
-            <Link href="/profile" className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white font-bold shadow-md hover:bg-blue-700 transition">
-              {user.email?.[0].toUpperCase() || "U"}
+            <Link href="/profile" className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white font-bold shadow-md hover:bg-blue-700 transition overflow-hidden">
+              {profile?.avatar_url ? (
+                <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+              ) : (
+                user.email?.[0].toUpperCase() || "U"
+              )}
             </Link>
           ) : (
             <Link href="/login" className="flex items-center gap-1 text-sm font-semibold text-blue-500 hover:text-blue-400 transition">

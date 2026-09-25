@@ -129,9 +129,9 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
 
     return (
       <div className="flex gap-2 text-sm mt-3 relative group">
-        <div className="h-6 w-6 shrink-0 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-[10px] mt-1 z-10 shadow-inner">
+        <Link href={`/profile/${node.user_id}`} className="h-6 w-6 shrink-0 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-[10px] mt-1 z-10 shadow-inner hover:opacity-80 transition">
           {author.avatar_url ? <img src={author.avatar_url} alt="" className="w-full h-full object-cover" /> : (author.username?.[0]?.toUpperCase() || "?")}
-        </div>
+        </Link>
         
         {/* Thread line for children */}
         {!collapsed && node.children.length > 0 && (
@@ -143,7 +143,7 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-gray-200">{author.username}</span>
+            <Link href={`/profile/${node.user_id}`} className="font-bold text-gray-200 hover:text-blue-400 transition">{author.username}</Link>
             <span className="text-[10px] text-gray-500">{formatDistanceToNow(new Date(node.timestamp), { addSuffix: true, locale: de })}</span>
             {collapsed && (
               <button onClick={() => setCollapsed(false)} className="text-[10px] bg-gray-800 px-2 rounded-full hover:bg-gray-700 transition">
@@ -274,7 +274,7 @@ export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentU
     <div className="rounded-xl border-2 border-blue-900/50 bg-[#141a29] p-4 shadow-lg relative overflow-hidden group">
       <div className="flex gap-4">
         {work && (
-          <Link href={`/work/${work.id}?episode=${activity.episode_num || ''}`} className="shrink-0 relative">
+          <Link href={`/work/${work.id}?episode=${activity.episode_num || ''}`} prefetch={false} className="shrink-0 relative">
             <img 
               src={work.coverImage?.large} 
               alt="Cover" 
