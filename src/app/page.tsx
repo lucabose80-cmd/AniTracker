@@ -196,7 +196,7 @@ export default function Home() {
     return () => unsubscribe();
   }, []);
 
-  const handleCheckIn = async (workId: string, nextEp: number) => {
+  const handleCheckIn = async (workId: string, nextEp: number, workType: string) => {
     if (!auth.currentUser) return;
     try {
       const { saveUserWork } = await import("@/lib/db/works");
@@ -208,7 +208,8 @@ export default function Home() {
       const exists = recent.some(a => a.action_type === "EPISODE_THREAD" && a.work_id === workId && a.episode_num === nextEp);
       
       if (!exists) {
-        await createActivity(auth.currentUser.uid, "EPISODE_THREAD", workId, `Thread für Folge ${nextEp}`, undefined, nextEp);
+        const text = workType === "MANGA" ? `Thread für Kapitel ${nextEp}` : `Thread für Folge ${nextEp}`;
+        await createActivity(auth.currentUser.uid, "EPISODE_THREAD", workId, text, undefined, nextEp);
       }
 
       router.push(`/social`);
@@ -416,7 +417,7 @@ export default function Home() {
                     <p className="text-xs text-gray-400 mt-1">Als nächstes: {work.details?.type === "MANGA" ? "Kapitel" : "Folge"} {work.nextEpToWatch}</p>
                   </div>
                   <button 
-                    onClick={() => handleCheckIn(work.work_id, work.nextEpToWatch)}
+                    onClick={() => handleCheckIn(work.work_id, work.nextEpToWatch, work.details?.type || "ANIME")}
                     className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded-lg text-center transition shadow-lg"
                   >
                     Check in & Kommentieren

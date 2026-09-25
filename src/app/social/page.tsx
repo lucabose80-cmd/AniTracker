@@ -13,10 +13,12 @@ import { formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
 import { deleteActivity, getActivityComments, addActivityComment, deleteActivityComment } from "@/lib/db/feed";
 import { ActivityComment } from "@/types/database";
+import { useAppStore } from "@/lib/store";
 
 import { CommentSection, SpoilerProtectedThread } from "@/components/ui/SocialComponents";
 
 export default function SocialPage() {
+  const { contentType, setContentType } = useAppStore();
   const [feed, setFeed] = useState<ActivityFeed[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [workDetails, setWorkDetails] = useState<Record<string, any>>({});
@@ -102,10 +104,36 @@ export default function SocialPage() {
 
   return (
     <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-lg mx-auto">
-      <h2 className="flex items-center gap-2 text-xl font-bold">
-        <Users className="text-blue-500" /> 
-        Social Feed
-      </h2>
+      {/* Top Header & Type Toggle */}
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="flex items-center gap-2 text-xl font-bold">
+          <Users className="text-blue-500" /> 
+          Social Feed
+        </h2>
+        
+        <div className="flex bg-[#1a1d24] p-1 rounded-full border border-gray-800">
+          <button 
+            onClick={() => setContentType("ANIME")}
+            className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+              contentType === "ANIME" 
+                ? "bg-blue-600 text-white shadow-md" 
+                : "text-gray-400 hover:text-white"
+            }`}
+          >
+            Anime
+          </button>
+          <button 
+            onClick={() => setContentType("MANGA")}
+            className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${
+              contentType === "MANGA" 
+                ? "bg-blue-600 text-white shadow-md" 
+                : "text-gray-400 hover:text-white"
+            }`}
+          >
+            Manga
+          </button>
+        </div>
+      </div>
       
       <div className="grid gap-4">
         {isLoading ? (
@@ -115,7 +143,19 @@ export default function SocialPage() {
             <p>Noch keine Aktivitäten vorhanden.</p>
           </div>
         ) : (
-          feed.map(activity => {
+          feed.filter(activity => {
+            // Filter by contentType
+            if (activity.work_id && workDetails[activity.work_id]) {
+               return workDetails[activity.work_id].type === contentType;
+            }
+            if (activity.action_type === "WEEKLY_RANKING" && activity.details) {
+               // E.g. "Wochen-Ranking für Anime beendet!"
+               // Fallback: Check if details mentions Anime or Manga
+               if (activity.details.includes("Anime")) return contentType === "ANIME";
+               if (activity.details.includes("Manga")) return contentType === "MANGA";
+            }
+            return true; // Show system broadcasts in both
+          }).map(activity => {
             const user = userProfiles[activity.user_id] || { username: "Unbekannt" };
             const work = activity.work_id ? workDetails[activity.work_id] : null;
             const timeAgo = formatDistanceToNow(new Date(activity.timestamp), { addSuffix: true, locale: de });
