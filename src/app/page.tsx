@@ -208,15 +208,11 @@ export default function Home() {
       
       // Check if thread exists
       const recent = await getGlobalFeed(200); // Check deeper to avoid duplicates
-      const existingThread = recent.find(a => a.action_type === "EPISODE_THREAD" && a.work_id === workId && a.episode_num === nextEp);
+      const exists = recent.some(a => a.action_type === "EPISODE_THREAD" && a.work_id === workId && a.episode_num === nextEp);
       
-      if (!existingThread) {
+      if (!exists) {
         const text = workType === "MANGA" ? `Thread für Kapitel ${nextEp}` : `Thread für Folge ${nextEp}`;
         await createActivity(auth.currentUser.uid, "EPISODE_THREAD", workId, text, undefined, nextEp);
-      } else if (db) {
-        // Bump the existing thread to the top so the user sees it
-        const threadRef = doc(db, "activity_feed", existingThread.activity_id);
-        await updateDoc(threadRef, { timestamp: new Date().toISOString() });
       }
 
       router.push(`/social`);

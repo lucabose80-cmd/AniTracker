@@ -47,7 +47,7 @@ export default function SocialPage() {
     async function loadFeed() {
       setIsLoading(true);
       try {
-        const activities = await getGlobalFeed(30);
+        const activities = await getGlobalFeed(250); // Fetch deep enough to find older manga posts
         setFeed(activities);
         
         // Extract unique work IDs and user IDs
