@@ -203,13 +203,20 @@ export default function Home() {
       await saveUserWork(auth.currentUser.uid, workId, { current_episode: nextEp });
       
       const { createActivity, getGlobalFeed } = await import("@/lib/db/feed");
-      // Check if thread exists
-      const recent = await getGlobalFeed(50);
-      const exists = recent.some(a => a.action_type === "EPISODE_THREAD" && a.work_id === workId && a.episode_num === nextEp);
+      const { doc, updateDoc } = await import("firebase/firestore");
+      const { db } = await import("@/lib/firebase");
       
-      if (!exists) {
+      // Check if thread exists
+      const recent = await getGlobalFeed(200); // Check deeper to avoid duplicates
+      const existingThread = recent.find(a => a.action_type === "EPISODE_THREAD" && a.work_id === workId && a.episode_num === nextEp);
+      
+      if (!existingThread) {
         const text = workType === "MANGA" ? `Thread für Kapitel ${nextEp}` : `Thread für Folge ${nextEp}`;
         await createActivity(auth.currentUser.uid, "EPISODE_THREAD", workId, text, undefined, nextEp);
+      } else if (db) {
+        // Bump the existing thread to the top so the user sees it
+        const threadRef = doc(db, "activity_feed", existingThread.activity_id);
+        await updateDoc(threadRef, { timestamp: new Date().toISOString() });
       }
 
       router.push(`/social`);
