@@ -84,6 +84,121 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
     }
   };
 
+  const buildTree = (allComments: ActivityComment[]) => {
+    const map = new Map<string, any>();
+    const roots: any[] = [];
+    allComments.forEach(c => map.set(c.comment_id, { ...c, children: [] }));
+    allComments.forEach(c => {
+      if (c.parent_comment_id && map.has(c.parent_comment_id)) {
+        map.get(c.parent_comment_id).children.push(map.get(c.comment_id));
+      } else {
+        roots.push(map.get(c.comment_id));
+      }
+    });
+    return roots;
+  };
+
+  const commentTree = buildTree(comments);
+
+  const CommentNode = ({ node, level = 0 }: { node: any, level?: number }) => {
+    const author = localProfiles[node.user_id] || { username: "Unbekannt" };
+    const [replyOpen, setReplyOpen] = useState(false);
+    const [replyText, setReplyText] = useState("");
+    const [isReplying, setIsReplying] = useState(false);
+    const [collapsed, setCollapsed] = useState(false);
+
+    const handleReply = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!replyText.trim() || !currentUserUid) return;
+      setIsReplying(true);
+      try {
+        const added = await addActivityComment(activityId, currentUserUid, replyText.trim(), node.comment_id);
+        if (added) {
+          setComments(prev => [...prev, added]);
+          setCommentCount(prev => prev + 1);
+          setSeenCount(prev => prev + 1);
+          setReplyOpen(false);
+          setReplyText("");
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setIsReplying(false);
+      }
+    };
+
+    return (
+      <div className="flex gap-2 text-sm mt-3 relative group">
+        <div className="h-6 w-6 shrink-0 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-[10px] mt-1 z-10 shadow-inner">
+          {author.avatar_url ? <img src={author.avatar_url} alt="" className="w-full h-full object-cover" /> : (author.username?.[0]?.toUpperCase() || "?")}
+        </div>
+        
+        {/* Thread line for children */}
+        {!collapsed && node.children.length > 0 && (
+          <div 
+            onClick={() => setCollapsed(true)}
+            className="absolute left-3 top-8 bottom-[-10px] w-0.5 bg-gray-700/50 hover:bg-blue-500/50 cursor-pointer transition z-0" 
+          />
+        )}
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-gray-200">{author.username}</span>
+            <span className="text-[10px] text-gray-500">{formatDistanceToNow(new Date(node.timestamp), { addSuffix: true, locale: de })}</span>
+            {collapsed && (
+              <button onClick={() => setCollapsed(false)} className="text-[10px] bg-gray-800 px-2 rounded-full hover:bg-gray-700 transition">
+                +{node.children.length} Antworten
+              </button>
+            )}
+          </div>
+          
+          {!collapsed && (
+            <>
+              <p className="text-gray-300 mt-0.5 break-words leading-relaxed">{node.text}</p>
+              
+              <div className="flex items-center gap-3 mt-1">
+                {currentUserUid && (
+                  <button onClick={() => setReplyOpen(!replyOpen)} className="text-[10px] text-gray-500 hover:text-gray-300 transition font-bold">
+                    Antworten
+                  </button>
+                )}
+                {node.user_id === currentUserUid && (
+                  <button onClick={() => handleDelete(node.comment_id)} className="text-[10px] text-red-500/50 hover:text-red-500 transition font-bold">
+                    Löschen
+                  </button>
+                )}
+              </div>
+
+              {replyOpen && (
+                <form onSubmit={handleReply} className="flex gap-2 mt-2 max-w-sm">
+                  <input 
+                    type="text" 
+                    value={replyText}
+                    onChange={e => setReplyText(e.target.value)}
+                    placeholder="Antworten..." 
+                    className="flex-1 bg-black/40 border border-gray-700 rounded text-xs px-2 py-1 focus:outline-none focus:border-blue-500 text-white"
+                    disabled={isReplying}
+                  />
+                  <button type="submit" disabled={!replyText.trim() || isReplying} className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-[10px] font-bold px-2 py-1 rounded transition">
+                    Senden
+                  </button>
+                </form>
+              )}
+
+              {node.children.length > 0 && (
+                <div className="ml-1 pl-3 border-l-2 border-transparent">
+                  {node.children.map((child: any) => (
+                    <CommentNode key={child.comment_id} node={child} level={level + 1} />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="mt-3">
       <button 
@@ -100,34 +215,12 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
       </button>
 
       {isOpen && (
-        <div className="mt-3 flex flex-col gap-3 pt-3 border-t border-gray-800">
-          {comments.map(c => {
-            const author = localProfiles[c.user_id] || { username: "Unbekannt" };
-            return (
-              <div key={c.comment_id} className="flex gap-3 text-sm relative group border-t border-gray-800/50 pt-3">
-                <div className="h-8 w-8 shrink-0 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-xs shadow-inner">
-                  {author.avatar_url ? <img src={author.avatar_url} alt="" className="w-full h-full object-cover" /> : (author.username?.[0]?.toUpperCase() || "?")}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-gray-200">{author.username}</span>
-                    <span className="text-[10px] text-gray-500">{formatDistanceToNow(new Date(c.timestamp), { addSuffix: true, locale: de })}</span>
-                  </div>
-                  <p className="text-gray-300 mt-0.5 break-words leading-relaxed">{c.text}</p>
-                </div>
-                {c.user_id === currentUserUid && (
-                  <button 
-                    onClick={() => handleDelete(c.comment_id)}
-                    className="absolute top-3 right-0 text-gray-600 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"
-                  >
-                    X
-                  </button>
-                )}
-              </div>
-            );
-          })}
+        <div className="mt-3 flex flex-col pt-3 border-t border-gray-800">
+          {commentTree.map(node => (
+            <CommentNode key={node.comment_id} node={node} />
+          ))}
 
-          {comments.length === 0 && <p className="text-xs text-gray-500 italic">Noch keine Kommentare. Sei der erste!</p>}
+          {comments.length === 0 && <p className="text-xs text-gray-500 italic mt-2">Noch keine Kommentare. Sei der erste!</p>}
 
           {currentUserUid ? (
             <form onSubmit={handleSubmit} className="flex gap-2 mt-1">
