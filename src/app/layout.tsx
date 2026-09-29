@@ -6,6 +6,8 @@ import { BottomNav } from "@/components/layout/BottomNav";
 import { SplashScreen } from "@/components/ui/SplashScreen";
 import { ServiceWorkerManager } from "@/components/ServiceWorkerManager";
 import { OfflineBanner } from "@/components/ui/OfflineBanner";
+import { ScrollToTop } from "@/components/ui/ScrollToTop";
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -48,6 +50,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             {children}
           </main>
           <BottomNav />
+          <ScrollToTop />
           <ServiceWorkerManager />
         </SplashScreen>
       </body>

@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { getUserProfile } from "@/lib/db/users";
+import { PWAInstallPrompt } from "@/components/ui/PWAInstallPrompt";
 
 export function Header() {
   const { contentType, toggleContentType } = useAppStore();
@@ -35,6 +36,7 @@ export function Header() {
         </h1>
 
         <div className="flex items-center gap-4">
+          <PWAInstallPrompt />
           <button
             onClick={toggleContentType}
             className="flex items-center gap-2 rounded-full bg-[#1a1d24] p-1 shadow-inner border border-gray-800 transition-all duration-300"

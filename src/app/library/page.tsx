@@ -47,8 +47,12 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
   };
 
   let behindCount = 0;
+  let progressPercentage = 0;
   if (workDetails && userWork) {
     const currentEp = userWork.current_episode || 0;
+    const maxEps = workDetails.episodes || workDetails.chapters || 1;
+    progressPercentage = Math.min(100, Math.max(0, (currentEp / maxEps) * 100));
+
     let maxAiredEp = 0;
     if (globalOverride?.manualMaxEpisode !== undefined && globalOverride?.manualMaxEpisode !== null) {
       maxAiredEp = globalOverride.manualMaxEpisode;
@@ -110,6 +114,9 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
       ) : workDetails ? (
         <Link href={`/work/${id}`} className="absolute inset-0 block h-full w-full">
           <Image src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" fill sizes="(max-width: 768px) 33vw, 20vw" className={`object-cover pointer-events-none ${isEligible === false ? 'opacity-60' : ''}`} />
+          <div className="absolute bottom-0 left-0 w-full h-1 bg-[#1a1d24]/80">
+            <div className="h-full bg-blue-500" style={{ width: `${progressPercentage}%` }} />
+          </div>
         </Link>
       ) : (
         <div className="absolute inset-0 w-full h-full animate-pulse bg-gray-800" />

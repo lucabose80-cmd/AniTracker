@@ -13,7 +13,7 @@ import { auth } from "@/lib/firebase";
 function SearchContent() {
   const searchParams = useSearchParams();
   const query = searchParams?.get("q") || "";
-  const { contentType } = useAppStore();
+  const { contentType, searchHistory, addSearchHistory } = useAppStore();
   const router = useRouter();
 
   const [input, setInput] = useState(query);
@@ -56,6 +56,7 @@ function SearchContent() {
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (input.trim()) {
+      addSearchHistory(input.trim());
       router.push(`/search?q=${encodeURIComponent(input.trim())}`);
     }
   };
@@ -112,6 +113,20 @@ function SearchContent() {
         />
         <button type="submit" className="hidden" />
       </form>
+
+      {!query && searchHistory.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {searchHistory.map((term) => (
+            <button
+              key={term}
+              onClick={() => router.push(`/search?q=${encodeURIComponent(term)}`)}
+              className="px-3 py-1.5 text-sm bg-gray-800 text-gray-300 rounded-full hover:bg-gray-700 transition"
+            >
+              {term}
+            </button>
+          ))}
+        </div>
+      )}
 
       {isLoading ? (
         <div className="text-center text-gray-500 animate-pulse mt-8">Lade...</div>

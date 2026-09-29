@@ -13,6 +13,9 @@ interface AppState {
   offlineQueueCount: number;
   incrementOfflineQueue: () => void;
   clearOfflineQueue: () => void;
+  searchHistory: string[];
+  addSearchHistory: (term: string) => void;
+  clearSearchHistory: () => void;
 }
 
 const idbStorage = {
@@ -42,6 +45,12 @@ export const useAppStore = create<AppState>()(
       offlineQueueCount: 0,
       incrementOfflineQueue: () => set((state) => ({ offlineQueueCount: state.offlineQueueCount + 1 })),
       clearOfflineQueue: () => set({ offlineQueueCount: 0 }),
+      searchHistory: [],
+      addSearchHistory: (term) => set((state) => {
+        const newHistory = [term, ...state.searchHistory.filter((t) => t !== term)].slice(0, 5);
+        return { searchHistory: newHistory };
+      }),
+      clearSearchHistory: () => set({ searchHistory: [] }),
     }),
     {
       name: 'anitracker-store',
