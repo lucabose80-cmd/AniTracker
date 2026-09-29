@@ -1,5 +1,5 @@
 import { db } from "@/lib/firebase";
-import { collection, doc, setDoc, getDocs, query, orderBy, limit, deleteDoc, updateDoc, increment, getDoc, where, startAfter } from "firebase/firestore";
+import { collection, doc, setDoc, getDocs, query, orderBy, limit, deleteDoc, updateDoc, increment, getDoc, where, startAfter, arrayRemove, arrayUnion } from "firebase/firestore";
 import { ActivityFeed, ActivityComment, InAppNotification } from "@/types/database";
 import { getUserProfile } from "@/lib/db/users";
 
@@ -306,3 +306,20 @@ export async function markNotificationRead(notificationId: string): Promise<void
   const notifRef = doc(db, "notifications", notificationId);
   await updateDoc(notifRef, { read: true });
 }
+
+export async function toggleLike(activityId: string, userId: string): Promise<void> {
+  if (!db) return;
+  const docRef = doc(db, "activity_feed", activityId);
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) return;
+  
+  const data = docSnap.data();
+  const likes = data.likes || [];
+  
+  if (likes.includes(userId)) {
+    await updateDoc(docRef, { likes: arrayRemove(userId) });
+  } else {
+    await updateDoc(docRef, { likes: arrayUnion(userId) });
+  }
+}
+

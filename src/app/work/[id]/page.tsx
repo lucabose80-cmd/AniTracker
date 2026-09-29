@@ -311,12 +311,19 @@ export default function WorkDetailPage() {
     
     let newEp = currentEpisode + increment;
     if (newEp < 0) newEp = 0;
-    if (newEp > calculatedAvailableEps) newEp = calculatedAvailableEps as number;
+    if (newEp > (calculatedAvailableEps as number)) newEp = calculatedAvailableEps as number;
     
+    const prevEp = currentEpisode;
     setCurrentEpisode(newEp);
     
     if (inLibrary) {
-      await updateEpisodeProgress(user.uid, id, newEp);
+      try {
+        await updateEpisodeProgress(user.uid, id, newEp);
+      } catch (error) {
+        console.error(error);
+        setCurrentEpisode(prevEp);
+        alert("Fehler beim Speichern der Episode");
+      }
     }
   };
 

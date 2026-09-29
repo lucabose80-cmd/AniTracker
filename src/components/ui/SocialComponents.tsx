@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Heart } from "lucide-react";
 import { deleteActivityComment, addActivityComment, getActivityComments } from "@/lib/db/feed";
 import { ActivityComment } from "@/types/database";
 import { formatDistanceToNow } from "date-fns";
@@ -86,17 +86,36 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newText.trim() || !currentUserUid) return;
+    
+    const prevText = newText.trim();
+    setNewText("");
     setIsSubmitting(true);
+    
+    const tempId = `temp-${Date.now()}`;
+    const optimisticComment = {
+      comment_id: tempId,
+      activity_id: activityId,
+      user_id: currentUserUid,
+      text: prevText,
+      timestamp: new Date().toISOString(),
+      isTemp: true
+    };
+    
+    setComments(prev => [...prev, optimisticComment]);
+    setCommentCount(prev => prev + 1);
+    setSeenCount(prev => prev + 1);
+
     try {
-      const added = await addActivityComment(activityId, currentUserUid, newText.trim());
+      const added = await addActivityComment(activityId, currentUserUid, prevText);
       if (added) {
-        setComments(prev => [...prev, added]);
-        setCommentCount(prev => prev + 1);
-        setSeenCount(prev => prev + 1);
+        setComments(prev => prev.map(c => c.comment_id === tempId ? added : c));
       }
-      setNewText("");
     } catch (e) {
       console.error(e);
+      setComments(prev => prev.filter(c => c.comment_id !== tempId));
+      setCommentCount(prev => prev - 1);
+      setSeenCount(prev => prev - 1);
+      setNewText(prevText);
     } finally {
       setIsSubmitting(false);
     }
@@ -139,18 +158,39 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
     const handleReply = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!replyText.trim() || !currentUserUid) return;
+      
+      const prevText = replyText.trim();
+      setReplyText("");
       setIsReplying(true);
+      
+      const tempId = `temp-${Date.now()}`;
+      const optimisticReply = {
+        comment_id: tempId,
+        activity_id: activityId,
+        user_id: currentUserUid,
+        text: prevText,
+        timestamp: new Date().toISOString(),
+        parent_comment_id: node.comment_id,
+        isTemp: true
+      };
+      
+      setComments(prev => [...prev, optimisticReply]);
+      setCommentCount(prev => prev + 1);
+      setSeenCount(prev => prev + 1);
+      setReplyOpen(false);
+
       try {
-        const added = await addActivityComment(activityId, currentUserUid, replyText.trim(), node.comment_id);
+        const added = await addActivityComment(activityId, currentUserUid, prevText, node.comment_id);
         if (added) {
-          setComments(prev => [...prev, added]);
-          setCommentCount(prev => prev + 1);
-          setSeenCount(prev => prev + 1);
-          setReplyOpen(false);
-          setReplyText("");
+          setComments(prev => prev.map(c => c.comment_id === tempId ? added : c));
         }
       } catch (e) {
         console.error(e);
+        setComments(prev => prev.filter(c => c.comment_id !== tempId));
+        setCommentCount(prev => prev - 1);
+        setSeenCount(prev => prev - 1);
+        setReplyText(prevText);
+        setReplyOpen(true);
       } finally {
         setIsReplying(false);
       }
@@ -279,6 +319,27 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
 }
 
 export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentUserUid, userProfiles, userWorkIds }: any) {
+  const [isLiked, setIsLiked] = useState(activity.likes?.includes(currentUserUid) || false);
+  const [likesCount, setLikesCount] = useState(activity.likes?.length || 0);
+
+  const handleLike = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!currentUserUid) return;
+    
+    const wasLiked = isLiked;
+    setIsLiked(!wasLiked);
+    setLikesCount((prev: number) => wasLiked ? prev - 1 : prev + 1);
+    
+    try {
+      const { toggleLike } = await import("@/lib/db/feed");
+      await toggleLike(activity.activity_id, currentUserUid);
+    } catch (err) {
+      console.error(err);
+      setIsLiked(wasLiked);
+      setLikesCount((prev: number) => wasLiked ? prev + 1 : prev - 1);
+    }
+  };
+
   return (
     <div className="rounded-xl border-2 border-blue-900/50 bg-[#141a29] p-4 shadow-lg relative overflow-hidden group">
       <div className="flex gap-4">
@@ -350,6 +411,14 @@ export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentU
                 </>
               );
             })()}
+            
+            <button
+              onClick={handleLike}
+              className={`text-[10px] flex items-center gap-1 px-2 py-1 rounded font-bold transition ${isLiked ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-white'}`}
+            >
+              <Heart size={12} className={isLiked ? "fill-current" : ""} />
+              {likesCount > 0 ? likesCount : "Like"}
+            </button>
           </div>
         </div>
       </div>

@@ -119,6 +119,7 @@ export interface ActivityFeed {
   timestamp: string; // ISO string
   details?: string;
   comments_count?: number; // Optional cache for number of comments
+  likes?: string[]; // Array of user IDs who liked this
 }
 
 export interface ActivityComment {
