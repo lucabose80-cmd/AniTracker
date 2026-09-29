@@ -7,12 +7,14 @@ import { calculateOverallScore } from "@/lib/scoring";
 import { UserWork, EmotionalImpact, WatchMode } from "@/types/database";
 import { Star, ChevronLeft, Save, Library as LibraryIcon, Check, Calendar as CalendarIcon, PlayCircle, CheckCircle, Bookmark, Settings, X } from "lucide-react";
 import Link from "next/link";
+import Image from "next/image";
 import { setCalendarOverride, getCalendarOverrides, clearManualMaxEpisode, CalendarOverride } from "@/lib/db/calendar";
 import { auth } from "@/lib/firebase";
 import { saveUserWork, getUserWork, updateEpisodeProgress, removeUserWork, updateUserWorkStatus } from "@/lib/db/works";
 import { addToHistory } from "@/lib/db/users";
 import { WorkSocialFeed } from "./WorkSocialFeed";
 import { createActivity } from "@/lib/db/feed";
+import { useAppStore } from "@/lib/store";
 
 export default function WorkDetailPage() {
   const params = useParams();
@@ -172,6 +174,7 @@ export default function WorkDetailPage() {
         });
         await addToHistory(user.uid, id);
         // Create feed activity
+        if (!useAppStore.getState().isOnline) useAppStore.getState().incrementOfflineQueue();
         await createActivity(user.uid, "TOP9_UPDATE", id, `Hat ${work?.title?.romaji || 'ein Werk'} zur Bibliothek hinzugefügt.`);
 
         // --- Prequel Auto-Erkennung ---
@@ -287,6 +290,7 @@ export default function WorkDetailPage() {
       
       // Create Feed Activity for High Ratings
       if (currentScore >= 7) {
+        if (!useAppStore.getState().isOnline) useAppStore.getState().incrementOfflineQueue();
         await createActivity(user.uid, "RATING", id, `Hat ${work?.title?.romaji} mit ${currentScore.toFixed(1)}/10 bewertet!`);
       }
 
@@ -324,7 +328,25 @@ export default function WorkDetailPage() {
   };
 
   if (isLoading) {
-    return <div className="p-8 text-center text-gray-400 animate-pulse">Lade Werk Details...</div>;
+    return (
+      <div className="flex flex-col pb-12 animate-pulse">
+        <div className="h-48 w-full bg-gray-800"></div>
+        <div className="relative -mt-16 px-4">
+          <div className="flex gap-4">
+            <div className="h-40 w-28 rounded-lg bg-gray-700 shrink-0"></div>
+            <div className="flex flex-col justify-end pt-16 gap-2 w-full">
+              <div className="h-6 w-3/4 bg-gray-700 rounded"></div>
+              <div className="h-4 w-1/2 bg-gray-700 rounded"></div>
+            </div>
+          </div>
+          <div className="mt-6 flex gap-2">
+            <div className="h-6 w-16 bg-gray-700 rounded"></div>
+            <div className="h-6 w-16 bg-gray-700 rounded"></div>
+          </div>
+          <div className="mt-6 h-24 w-full bg-gray-700 rounded"></div>
+        </div>
+      </div>
+    );
   }
 
   if (!work) {
@@ -336,7 +358,7 @@ export default function WorkDetailPage() {
       {/* Banner & Cover */}
       <div className="relative h-48 w-full bg-gray-800">
         {work.bannerImage && (
-          <img src={work.bannerImage} alt="Banner" className="h-full w-full object-cover opacity-60" />
+          <Image src={work.bannerImage} alt="Banner" fill priority className="object-cover opacity-60" />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-[#0f1115] to-transparent" />
         <button onClick={() => router.back()} className="absolute left-4 top-4 rounded-full bg-black/50 p-2 text-white backdrop-blur-md">
@@ -346,11 +368,15 @@ export default function WorkDetailPage() {
 
       <div className="relative -mt-16 px-4">
         <div className="flex gap-4">
-          <img 
-            src={work.coverImage?.extraLarge || work.coverImage?.large} 
-            alt="Cover" 
-            className="h-40 w-28 rounded-lg shadow-xl border border-gray-800 object-cover" 
-          />
+          <div className="relative h-40 w-28 shrink-0">
+            <Image 
+              src={work.coverImage?.extraLarge || work.coverImage?.large} 
+              alt="Cover" 
+              fill
+              priority
+              className="rounded-lg shadow-xl border border-gray-800 object-cover" 
+            />
+          </div>
           <div className="flex flex-col justify-end pt-16">
             <h1 className="text-xl font-bold leading-tight line-clamp-3">{work.title?.english || work.title?.romaji}</h1>
             <div className="mt-2 flex items-center gap-2 text-sm text-gray-300">

@@ -8,6 +8,9 @@ interface AppState {
   toggleContentType: () => void;
   isOnline: boolean;
   setIsOnline: (online: boolean) => void;
+  offlineQueueCount: number;
+  incrementOfflineQueue: () => void;
+  clearOfflineQueue: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -19,4 +22,7 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   isOnline: true,
   setIsOnline: (online) => set({ isOnline: online }),
+  offlineQueueCount: 0,
+  incrementOfflineQueue: () => set((state) => ({ offlineQueueCount: state.offlineQueueCount + 1 })),
+  clearOfflineQueue: () => set({ offlineQueueCount: 0 }),
 }));

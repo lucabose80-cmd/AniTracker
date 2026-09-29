@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { auth } from "@/lib/firebase";
 import { ActivityFeed } from "@/types/database";
-import { getGlobalFeed, createActivity } from "@/lib/db/feed";
+import { getGlobalFeedPaginated, createActivity } from "@/lib/db/feed";
 import { getUserProfile } from "@/lib/db/users";
 import { fetchAniList, GET_WORKS_BATCH } from "@/lib/anilist";
 import { MessageCircle, Star, Sparkles, Send, Activity, BookmarkPlus, Bell, X } from "lucide-react";
@@ -12,7 +12,7 @@ import { formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
 import { deleteActivity, getActivityComments, addActivityComment, deleteActivityComment, getInAppNotifications, markNotificationRead } from "@/lib/db/feed";
 import { ActivityComment, InAppNotification } from "@/types/database";
-import { SpoilerProtectedThread, CommentSection } from "@/components/ui/SocialComponents";
+import { SpoilerProtectedThread, CommentSection, SpoilerText } from "@/components/ui/SocialComponents";
 import { groupFeedItems, StackedThreadBlock, FeedGroup } from "@/components/ui/FeedGrouping";
 import { getAllUserWorks } from "@/lib/db/works";
 import { useAppStore } from "@/lib/store";
@@ -33,6 +33,10 @@ export default function FeedPage() {
   const [currentUserWorks, setCurrentUserWorks] = useState<Record<string, number>>({});
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
@@ -55,13 +59,7 @@ export default function FeedPage() {
     return () => unsubscribe();
   }, []);
 
-  const loadFeed = async () => {
-    setIsLoading(true);
-    try {
-      const activities = await getGlobalFeed(30);
-      setFeed(activities);
-
-      // Extract unique work IDs to fetch covers
+  const fetchRelatedData = async (activities: ActivityFeed[]) => {
       const workIds = new Set<string>();
       activities.forEach(a => {
          if (a.work_id) workIds.add(a.work_id);
@@ -69,7 +67,10 @@ export default function FeedPage() {
             a.details.split(",").forEach(id => workIds.add(id));
          }
       });
-      const uniqueWorkIds = Array.from(workIds).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+      const uniqueWorkIds = Array.from(workIds)
+         .filter(id => !workDetails[id])
+         .map(id => parseInt(id, 10))
+         .filter(id => !isNaN(id));
 
       if (uniqueWorkIds.length > 0) {
         const data = await fetchAniList(GET_WORKS_BATCH, { ids: uniqueWorkIds });
@@ -77,24 +78,72 @@ export default function FeedPage() {
         data.Page.media.forEach((m: any) => {
           map[m.id.toString()] = m;
         });
-        setWorkDetails(map);
+        setWorkDetails(prev => ({...prev, ...map}));
       }
 
-      // Fetch User profiles
       const userIds = [...new Set(activities.map(a => a.user_id).filter(Boolean))] as string[];
-      const uMap: Record<string, any> = {};
-      for (const uid of userIds) {
-        const p = await getUserProfile(uid);
-        if (p) uMap[uid] = p;
+      const missingUserIds = userIds.filter(id => !userProfiles[id]);
+      if (missingUserIds.length > 0) {
+        const uMap: Record<string, any> = {};
+        for (const uid of missingUserIds) {
+          const p = await getUserProfile(uid);
+          if (p) uMap[uid] = p;
+        }
+        setUserProfiles(prev => ({...prev, ...uMap}));
       }
-      setUserProfiles(uMap);
+  };
 
+  const loadFeed = async () => {
+    setIsLoading(true);
+    try {
+      const activities = await getGlobalFeedPaginated(30);
+      setFeed(activities);
+      if (activities.length < 30) setHasMore(false);
+      await fetchRelatedData(activities);
     } catch (e) {
       console.error(e);
     } finally {
       setIsLoading(false);
     }
   };
+
+  const loadMoreFeed = useCallback(async () => {
+    if (isLoadingMore || !hasMore || feed.length === 0) return;
+    setIsLoadingMore(true);
+    try {
+      const lastDoc = feed[feed.length - 1];
+      const activities = await getGlobalFeedPaginated(30, lastDoc.timestamp);
+      
+      if (activities.length === 0) {
+        setHasMore(false);
+        return;
+      }
+      if (activities.length < 30) {
+        setHasMore(false);
+      }
+      
+      setFeed(prev => [...prev, ...activities]);
+      await fetchRelatedData(activities);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [isLoadingMore, hasMore, feed, workDetails, userProfiles]);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !isLoadingMore && hasMore) {
+          loadMoreFeed();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    if (loadMoreRef.current) observer.observe(loadMoreRef.current);
+    
+    return () => observer.disconnect();
+  }, [loadMoreFeed, isLoadingMore, hasMore]);
 
   useEffect(() => {
     loadFeed();
@@ -106,6 +155,7 @@ export default function FeedPage() {
 
     setIsPosting(true);
     try {
+      if (!useAppStore.getState().isOnline) useAppStore.getState().incrementOfflineQueue();
       const newActivity = await createActivity(
         auth.currentUser.uid,
         "MANUAL_POST",
@@ -340,9 +390,6 @@ export default function FeedPage() {
               const timeAgo = formatDistanceToNow(new Date(activity.timestamp), { addSuffix: true, locale: de });
               
               if (activity.action_type === "EPISODE_THREAD") {
-                const userCurrentEp = currentUserWorks[activity.work_id!] || 0;
-                const isSpoiler = (activity.episode_num || 0) > userCurrentEp;
-                
                 return (
                   <div id={`activity_${activity.activity_id}`} key={activity.activity_id}>
                     <SpoilerProtectedThread 
@@ -351,7 +398,6 @@ export default function FeedPage() {
                       user={user}
                       timeAgo={timeAgo}
                       currentUserUid={currentUserUid}
-                      isSpoiler={isSpoiler}
                       userProfiles={userProfiles}
                       userWorkIds={userWorkIdSet}
                     />
@@ -451,7 +497,7 @@ export default function FeedPage() {
                           <h3 className="font-bold text-gray-100 line-clamp-1">{work.title?.english || work.title?.romaji}</h3>
                         )}
                         
-                        <p className="text-sm text-gray-300 mt-2 break-words whitespace-pre-wrap leading-relaxed">{activity.text || activity.details}</p>
+                        <p className="text-sm text-gray-300 mt-2 break-words whitespace-pre-wrap leading-relaxed"><SpoilerText text={activity.text || activity.details} /></p>
                       </div>
                     </div>
                   </div>
@@ -475,6 +521,11 @@ export default function FeedPage() {
               return renderActivity(group.items[0]);
             });
           })()}</>
+        )}
+        {hasMore && !isLoading && (
+          <div ref={loadMoreRef} className="py-8 text-center text-gray-500">
+            {isLoadingMore && "Lade mehr..."}
+          </div>
         )}
       </div>
     </div>

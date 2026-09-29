@@ -9,6 +9,35 @@ import { de } from "date-fns/locale";
 import Link from "next/link";
 import { getUserProfile } from "@/lib/db/users";
 
+export function SpoilerText({ text }: { text?: string }) {
+  if (!text) return null;
+  const parts = text.split(/(\|\|.*?\|\|)/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith('||') && part.endsWith('||')) {
+          const content = part.slice(2, -2);
+          return <InlineSpoiler key={i} content={content} />;
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+function InlineSpoiler({ content }: { content: string }) {
+  const [revealed, setRevealed] = useState(false);
+  return (
+    <span 
+      onClick={(e) => { e.stopPropagation(); setRevealed(!revealed); }} 
+      className={`cursor-pointer transition-colors duration-200 px-1 rounded ${revealed ? 'bg-gray-800 text-white' : 'bg-black text-black select-none'}`}
+      title={revealed ? "" : "Klicken zum Aufdecken"}
+    >
+      {content}
+    </span>
+  );
+}
+
 export function CommentSection({ activityId, userProfiles, currentUserUid, commentCount: initialCount = 0 }: { activityId: string, userProfiles: Record<string, any>, currentUserUid?: string, commentCount?: number }) {
   const [comments, setComments] = useState<ActivityComment[]>([]);
   const [isOpen, setIsOpen] = useState(false);
@@ -154,7 +183,7 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
           
           {!collapsed && (
             <>
-              <p className="text-gray-300 mt-0.5 break-words leading-relaxed">{node.text}</p>
+              <p className="text-gray-300 mt-0.5 break-words leading-relaxed"><SpoilerText text={node.text} /></p>
               
               <div className="flex items-center gap-3 mt-1">
                 {currentUserUid && (
@@ -249,27 +278,7 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
   );
 }
 
-export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentUserUid, isSpoiler, userProfiles, userWorkIds }: any) {
-  const [showAnyway, setShowAnyway] = useState(false);
-  
-  if (isSpoiler && !showAnyway) {
-    return (
-      <div className="rounded-xl border border-red-900/50 bg-[#1a1d24] p-6 text-center shadow-lg relative overflow-hidden flex flex-col items-center justify-center min-h-[160px]">
-        <div className="absolute inset-0 bg-red-900/10" />
-        <p className="text-red-400 font-bold mb-2 relative z-10 flex items-center gap-2">
-          SPOILER WARNUNG
-        </p>
-        <p className="text-sm text-gray-400 mb-4 relative z-10">{work?.title?.english || work?.title?.romaji} - {work?.type === "MANGA" ? "Kapitel" : "Folge"} {activity.episode_num}</p>
-        <button 
-          onClick={(e) => { e.stopPropagation(); setShowAnyway(true); }} 
-          className="bg-red-900/50 hover:bg-red-900 text-white text-xs font-bold px-4 py-2 rounded-lg transition relative z-10 shadow-lg"
-        >
-          Trotzdem anzeigen
-        </button>
-      </div>
-    );
-  }
-
+export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentUserUid, userProfiles, userWorkIds }: any) {
   return (
     <div className="rounded-xl border-2 border-blue-900/50 bg-[#141a29] p-4 shadow-lg relative overflow-hidden group">
       <div className="flex gap-4">
@@ -292,6 +301,7 @@ export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentU
             </div>
             <h3 className="font-bold text-gray-100 line-clamp-1">{work?.title?.english || work?.title?.romaji || "Unbekanntes Werk"}</h3>
             <p className="text-sm font-semibold text-blue-400 mt-0.5">Folge / Kapitel {activity.episode_num}</p>
+            {activity.text && <p className="text-sm text-gray-300 mt-2 break-words whitespace-pre-wrap leading-relaxed"><SpoilerText text={activity.text} /></p>}
           </div>
 
           <div className="flex gap-2 mt-3">

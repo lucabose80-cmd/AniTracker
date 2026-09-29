@@ -1,5 +1,5 @@
 import { db } from "@/lib/firebase";
-import { collection, doc, setDoc, getDocs, query, orderBy, limit, deleteDoc, updateDoc, increment, getDoc, where } from "firebase/firestore";
+import { collection, doc, setDoc, getDocs, query, orderBy, limit, deleteDoc, updateDoc, increment, getDoc, where, startAfter } from "firebase/firestore";
 import { ActivityFeed, ActivityComment, InAppNotification } from "@/types/database";
 import { getUserProfile } from "@/lib/db/users";
 
@@ -98,6 +98,36 @@ export async function getGlobalFeed(limitCount: number = 50): Promise<ActivityFe
     orderBy("timestamp", "desc"),
     limit(limitCount)
   );
+  
+  const snapshot = await getDocs(q);
+  const activities: ActivityFeed[] = [];
+  snapshot.forEach((doc) => {
+    activities.push(doc.data() as ActivityFeed);
+  });
+  
+  return activities;
+}
+
+export async function getGlobalFeedPaginated(limitCount: number = 50, lastDocTimestamp?: string): Promise<ActivityFeed[]> {
+  if (!db) return [];
+  
+  const feedRef = collection(db, "activity_feed");
+  let q;
+  
+  if (lastDocTimestamp) {
+    q = query(
+      feedRef, 
+      orderBy("timestamp", "desc"),
+      startAfter(lastDocTimestamp),
+      limit(limitCount)
+    );
+  } else {
+    q = query(
+      feedRef, 
+      orderBy("timestamp", "desc"),
+      limit(limitCount)
+    );
+  }
   
   const snapshot = await getDocs(q);
   const activities: ActivityFeed[] = [];

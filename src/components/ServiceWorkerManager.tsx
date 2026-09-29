@@ -5,6 +5,7 @@ import { useAppStore } from "@/lib/store";
 
 export function ServiceWorkerManager() {
   const setIsOnline = useAppStore(state => state.setIsOnline);
+  const clearOfflineQueue = useAppStore(state => state.clearOfflineQueue);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -24,6 +25,7 @@ export function ServiceWorkerManager() {
     // Online/Offline Detection
     const handleOnline = () => {
       setIsOnline(true);
+      clearOfflineQueue();
       console.log('[WeebCheck] Back online - Firestore will auto-sync queued writes');
     };
     
@@ -40,7 +42,7 @@ export function ServiceWorkerManager() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [setIsOnline]);
+  }, [setIsOnline, clearOfflineQueue]);
 
   return null;
 }

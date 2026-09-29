@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { Library as LibraryIcon, Search, LayoutGrid } from "lucide-react";
 import {
   DndContext,
@@ -108,10 +109,10 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
         </button>
       ) : workDetails ? (
         <Link href={`/work/${id}`} className="absolute inset-0 block h-full w-full">
-          <img src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" className={`h-full w-full object-cover pointer-events-none ${isEligible === false ? 'opacity-60' : ''}`} />
+          <Image src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" fill sizes="(max-width: 768px) 33vw, 20vw" className={`object-cover pointer-events-none ${isEligible === false ? 'opacity-60' : ''}`} />
         </Link>
       ) : (
-        <span className="text-xs text-center p-2 text-white line-clamp-3 pointer-events-none">Lade...</span>
+        <div className="absolute inset-0 w-full h-full animate-pulse bg-gray-800" />
       )}
       {!id.startsWith("empty") && (
         <button 
@@ -500,8 +501,10 @@ export default function LibraryPage() {
           </div>
           
           {isLoading ? (
-            <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-8 text-center text-gray-500 animate-pulse">
-              Lade Bibliothek...
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+              {Array(10).fill(0).map((_, i) => (
+                <div key={i} className="aspect-[3/4] rounded-xl border border-gray-800 bg-gray-800/50 animate-pulse" />
+              ))}
             </div>
           ) : filteredWorks.filter(w => w.status === activeTab).length === 0 ? (
             <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-8 text-center text-gray-500">
@@ -579,9 +582,9 @@ export default function LibraryPage() {
                     }}
                   >
                     {details ? (
-                      <img src={details.coverImage?.extraLarge || details.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition duration-300 group-hover:scale-105 pointer-events-none" />
+                      <Image src={details.coverImage?.extraLarge || details.coverImage?.large} alt="Cover" fill sizes="(max-width: 768px) 33vw, 20vw" className="object-cover transition duration-300 group-hover:scale-105 pointer-events-none" />
                     ) : (
-                      <div className="flex h-full items-center justify-center p-2 text-xs text-gray-500 text-center">Lade...</div>
+                      <div className="w-full h-full animate-pulse bg-gray-800/50" />
                     )}
                     {behindCount > 0 && (
                       <div className="absolute top-1 right-1 flex items-center justify-center rounded-full bg-red-600 text-[10px] px-1.5 py-0.5 font-bold text-white shadow-md z-10 pointer-events-none">
@@ -645,7 +648,7 @@ export default function LibraryPage() {
                   onClick={() => handleSelectWorkForSlot(w.work_id)}
                   className="relative aspect-[3/4] rounded-lg overflow-hidden border border-gray-800 hover:border-blue-500 text-left transition focus:outline-none"
                 >
-                  <img src={aniListDetails[w.work_id]?.coverImage?.large} className="w-full h-full object-cover" />
+                  <Image src={aniListDetails[w.work_id]?.coverImage?.large} alt="Cover" fill sizes="(max-width: 768px) 33vw, 25vw" className="object-cover" />
                   <div className="absolute bottom-0 w-full bg-black/80 p-2 text-[10px] font-bold text-white line-clamp-2">
                     {aniListDetails[w.work_id]?.title?.english || aniListDetails[w.work_id]?.title?.romaji}
                   </div>

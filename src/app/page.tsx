@@ -211,6 +211,7 @@ export default function Home() {
       const exists = recent.some(a => a.action_type === "EPISODE_THREAD" && a.work_id === workId && a.episode_num === nextEp);
       
       if (!exists) {
+        if (!useAppStore.getState().isOnline) useAppStore.getState().incrementOfflineQueue();
         const text = workType === "MANGA" ? `Thread für Kapitel ${nextEp}` : `Thread für Folge ${nextEp}`;
         await createActivity(auth.currentUser.uid, "EPISODE_THREAD", workId, text, undefined, nextEp);
       }
