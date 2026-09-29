@@ -95,8 +95,7 @@ export async function getGlobalFeed(limitCount: number = 50): Promise<ActivityFe
   const feedRef = collection(db, "activity_feed");
   const q = query(
     feedRef, 
-    // Usually orderBy timestamp desc, but we'll sort on client if index is missing.
-    // For now we just get them and sort.
+    orderBy("timestamp", "desc"),
     limit(limitCount)
   );
   
@@ -106,8 +105,7 @@ export async function getGlobalFeed(limitCount: number = 50): Promise<ActivityFe
     activities.push(doc.data() as ActivityFeed);
   });
   
-  // Sort descending by timestamp
-  return activities.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  return activities;
 }
 
 export async function deleteActivity(activityId: string): Promise<void> {

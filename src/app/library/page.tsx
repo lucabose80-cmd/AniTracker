@@ -101,7 +101,7 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
       )}
       {id.startsWith("empty") ? (
         <button 
-          onPointerDown={(e) => { e.stopPropagation(); onClick && onClick(); }}
+          onClick={(e) => { e.stopPropagation(); onClick && onClick(); }}
           className="absolute inset-0 w-full h-full flex items-center justify-center text-gray-700 text-4xl font-light hover:text-gray-500 transition-colors bg-[#1a1d24]"
         >
           +
@@ -115,7 +115,8 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
       )}
       {!id.startsWith("empty") && (
         <button 
-          onPointerDown={(e) => { e.stopPropagation(); onRemove(id); }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onRemove(id); }}
           className="absolute top-1 right-1 bg-red-600/80 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] hover:bg-red-500 z-20 shadow-md"
         >
           X
