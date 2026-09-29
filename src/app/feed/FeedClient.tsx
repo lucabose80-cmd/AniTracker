@@ -73,11 +73,23 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
          .filter(id => !isNaN(id));
 
       if (uniqueWorkIds.length > 0) {
-        const data = await fetchAniList(GET_WORKS_BATCH, { ids: uniqueWorkIds });
-        const map: Record<string, any> = {};
-        data.Page.media.forEach((m: any) => {
-          map[m.id.toString()] = m;
-        });
+        let map: Record<string, any> = {};
+        try {
+          if (!useAppStore.getState().isOnline) throw new Error("Offline");
+          const data = await fetchAniList(GET_WORKS_BATCH, { ids: uniqueWorkIds });
+          data.Page.media.forEach((m: any) => {
+            map[m.id.toString()] = m;
+          });
+          useAppStore.getState().setWorkDetailsCache({ ...useAppStore.getState().workDetailsCache, ...map });
+        } catch (e) {
+          console.warn("AniList fetch failed or offline", e);
+          const cache = useAppStore.getState().workDetailsCache || {};
+          uniqueWorkIds.forEach(id => {
+            if (cache[id.toString()]) {
+              map[id.toString()] = cache[id.toString()];
+            }
+          });
+        }
         setWorkDetails(prev => ({...prev, ...map}));
       }
 

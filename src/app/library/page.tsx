@@ -25,7 +25,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { auth } from "@/lib/firebase";
-import { getUserProfile, updateTop9List } from "@/lib/db/users";
+import { getUserProfile, updateTop9List, getLastMonday } from "@/lib/db/users";
 import { fetchAniListBatch } from "@/lib/anilist";
 import { UserWork } from "@/types/database";
 import { getAllUserWorks } from "@/lib/db/works";
@@ -251,26 +251,16 @@ export default function LibraryPage() {
     const rankingData = contentType === "ANIME" ? userProfile.weekly_ranking_anime : userProfile.weekly_ranking_manga;
     let currentRanking = rankingData?.current ? [...rankingData.current] : [];
     
-    // Filter works of current content type
-    const worksOfType = allWorks.filter(w => aniListDetails[w.work_id]?.type === contentType);
-    
-    // Auto-populate with "CURRENT" works if the ranking has empty slots
-    const currentWorks = worksOfType.filter(w => w.status === "CURRENT");
-    const worksInRanking = currentRanking.filter(id => !id.startsWith("empty"));
-    const worksNotYetRanked = currentWorks.filter(w => !worksInRanking.includes(w.work_id));
+    // Auto-Reset at the start of the week
+    if (rankingData?.last_active && rankingData.last_active < getLastMonday()) {
+      currentRanking = [];
+    }
 
     // Remove duplicates or old deleted works
     let validRanking = currentRanking.filter(id => id.startsWith("empty") || allWorks.some(w => w.work_id === id));
     
     while(validRanking.length < 9) {
       validRanking.push(`empty-${validRanking.length}`);
-    }
-
-    for (let i = 0; i < 9; i++) {
-      if (validRanking[i].startsWith("empty") && worksNotYetRanked.length > 0) {
-        const nextWork = worksNotYetRanked.shift();
-        if (nextWork) validRanking[i] = nextWork.work_id;
-      }
     }
 
     setItems(validRanking.slice(0, 9));
@@ -292,6 +282,7 @@ export default function LibraryPage() {
       const details = aniListDetails[workId];
       if (uWork && details) {
         if (!isEligibleForWeeklyRanking(uWork, details, globalOverrides[workId])) {
+          alert("Dieses Werk ist noch nicht für die aktuelle Woche qualifiziert! Du musst erst eine neue Folge/Kapitel gesehen haben.");
           return; // Abbrechen, da nicht qualifiziert
         }
       }

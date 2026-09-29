@@ -16,18 +16,33 @@ interface AppState {
   searchHistory: string[];
   addSearchHistory: (term: string) => void;
   clearSearchHistory: () => void;
+  workDetailsCache: Record<string, any>;
+  setWorkDetailsCache: (cache: Record<string, any>) => void;
 }
 
 const idbStorage = {
   getItem: async (name: string): Promise<string | null> => {
-    const value = await get(name);
-    return value !== undefined ? value : null;
+    try {
+      const value = await get(name);
+      return value !== undefined ? value : null;
+    } catch (e) {
+      console.warn('IDB fail', e);
+      return null;
+    }
   },
   setItem: async (name: string, value: string): Promise<void> => {
-    await set(name, value);
+    try {
+      await set(name, value);
+    } catch (e) {
+      console.warn('IDB fail', e);
+    }
   },
   removeItem: async (name: string): Promise<void> => {
-    await del(name);
+    try {
+      await del(name);
+    } catch (e) {
+      console.warn('IDB fail', e);
+    }
   },
 };
 
@@ -51,6 +66,8 @@ export const useAppStore = create<AppState>()(
         return { searchHistory: newHistory };
       }),
       clearSearchHistory: () => set({ searchHistory: [] }),
+      workDetailsCache: {},
+      setWorkDetailsCache: (cache) => set({ workDetailsCache: cache }),
     }),
     {
       name: 'anitracker-store',
