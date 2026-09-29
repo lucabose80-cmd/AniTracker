@@ -37,7 +37,7 @@ import { isEligibleForWeeklyRanking, hasNewReleaseThisWeek, hasUserCheckedLatest
 
 // Simple Sortable Item Component
 function SortableItem({ id, index, workDetails, userWork, previousRank, globalOverride, isEligible, onRemove, onClick }: { id: string, index: number, workDetails?: any, userWork?: any, previousRank?: number, globalOverride?: any, isEligible?: boolean, onRemove: (id: string) => void, onClick?: () => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: isEligible === false });
   
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -250,11 +250,6 @@ export default function LibraryPage() {
 
     const rankingData = contentType === "ANIME" ? userProfile.weekly_ranking_anime : userProfile.weekly_ranking_manga;
     let currentRanking = rankingData?.current ? [...rankingData.current] : [];
-    
-    // Auto-Reset at the start of the week
-    if (rankingData?.last_active && rankingData.last_active < getLastMonday()) {
-      currentRanking = [];
-    }
 
     // Remove duplicates or old deleted works
     let validRanking = currentRanking.filter(id => id.startsWith("empty") || allWorks.some(w => w.work_id === id));
@@ -370,10 +365,20 @@ export default function LibraryPage() {
       const { saveWeeklyRankingSnapshot } = await import("@/lib/db/users");
       await saveWeeklyRankingSnapshot(auth.currentUser.uid, contentType as "ANIME" | "MANGA", items);
       
-      const validItems = items.filter(id => !id.startsWith("empty"));
-      // Post to Social Feed
-      await createActivity(auth.currentUser.uid, "WEEKLY_RANKING", validItems[0], `Wochen-Ranking für ${contentType} veröffentlicht!`, validItems.join(","));
-      
+      const eligibleItemsForFeed = items.filter(id => {
+        if (id.startsWith('empty')) return false;
+        const uWork = allWorks.find(w => w.work_id === id);
+        const details = aniListDetails[id];
+        if (uWork && details) {
+          return isEligibleForWeeklyRanking(uWork, details, globalOverrides[id]);
+        }
+        return false;
+      });
+
+      if (eligibleItemsForFeed.length > 0) {
+        // Post to Social Feed
+        await createActivity(auth.currentUser.uid, "WEEKLY_RANKING", eligibleItemsForFeed[0], `Wochen-Ranking für ${contentType} veröffentlicht!`, eligibleItemsForFeed.join(","));
+      }
       // Update local profile state to reflect arrows resetting
       setUserProfile((prev: any) => ({
         ...prev,
