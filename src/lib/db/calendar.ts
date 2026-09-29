@@ -10,6 +10,12 @@ export interface CalendarOverride {
   manualMaxEpisode?: number; // Global override for missing episode counts
   manualAvailableEps?: number; // Global override for currently released chapters
   lastIncrementedAt?: number; // Unix timestamp
+  startDate?: string;           // ISO date string - when the release schedule started
+  rhythmType?: 'strict' | 'flexible'; // strict = exact weekday, flexible = range
+  flexibleDayRange?: {
+    minDay: number;             // e.g. 4 (Thursday)
+    maxDay: number;             // e.g. 0 (Sunday)
+  };
 }
 
 export async function getCalendarOverrides(): Promise<Record<string, CalendarOverride>> {
@@ -35,7 +41,10 @@ export async function setCalendarOverride(
   manualMaxEpisode?: number,
   releaseFrequency?: number,
   manualAvailableEps?: number,
-  lastIncrementedAt?: number
+  lastIncrementedAt?: number,
+  startDate?: string,
+  rhythmType?: 'strict' | 'flexible',
+  flexibleDayRange?: { minDay: number; maxDay: number }
 ): Promise<void> {
   if (!db) return;
   
@@ -86,6 +95,33 @@ export async function setCalendarOverride(
   }
 
   if (lastIncrementedAt !== undefined && (lastIncrementedAt as any) !== null) data.lastIncrementedAt = lastIncrementedAt;
+
+  if (startDate !== undefined) {
+    if ((startDate as any) === null) {
+      const { deleteField } = await import("firebase/firestore");
+      data.startDate = deleteField();
+    } else {
+      data.startDate = startDate;
+    }
+  }
+
+  if (rhythmType !== undefined) {
+    if ((rhythmType as any) === null) {
+      const { deleteField } = await import("firebase/firestore");
+      data.rhythmType = deleteField();
+    } else {
+      data.rhythmType = rhythmType;
+    }
+  }
+
+  if (flexibleDayRange !== undefined) {
+    if ((flexibleDayRange as any) === null) {
+      const { deleteField } = await import("firebase/firestore");
+      data.flexibleDayRange = deleteField();
+    } else {
+      data.flexibleDayRange = flexibleDayRange;
+    }
+  }
 
   await setDoc(overrideRef, data, { merge: true });
 }

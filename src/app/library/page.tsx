@@ -32,9 +32,10 @@ import { getCalendarOverrides } from "@/lib/db/calendar";
 import Link from "next/link";
 import { ArrowUp, ArrowDown, Minus, Save, Share, Play, Check, Bookmark, Star } from "lucide-react";
 import { createActivity } from "@/lib/db/feed";
+import { isEligibleForWeeklyRanking, hasNewReleaseThisWeek, hasUserCheckedLatestEpisode } from '@/lib/weeklyValidation';
 
 // Simple Sortable Item Component
-function SortableItem({ id, index, workDetails, userWork, previousRank, globalOverride, onRemove, onClick }: { id: string, index: number, workDetails?: any, userWork?: any, previousRank?: number, globalOverride?: any, onRemove: (id: string) => void, onClick?: () => void }) {
+function SortableItem({ id, index, workDetails, userWork, previousRank, globalOverride, isEligible, onRemove, onClick }: { id: string, index: number, workDetails?: any, userWork?: any, previousRank?: number, globalOverride?: any, isEligible?: boolean, onRemove: (id: string) => void, onClick?: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   
   const style = {
@@ -107,7 +108,7 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
         </button>
       ) : workDetails ? (
         <Link href={`/work/${id}`} className="absolute inset-0 block h-full w-full">
-          <img src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" className="h-full w-full object-cover pointer-events-none" />
+          <img src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" className={`h-full w-full object-cover pointer-events-none ${isEligible === false ? 'opacity-60' : ''}`} />
         </Link>
       ) : (
         <span className="text-xs text-center p-2 text-white line-clamp-3 pointer-events-none">Lade...</span>
@@ -119,6 +120,11 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
         >
           X
         </button>
+      )}
+      {!id.startsWith("empty") && isEligible === false && (
+        <div className="absolute bottom-1 left-1 bg-orange-600/90 text-[9px] font-bold text-white px-1.5 py-0.5 rounded z-10">
+          ⚠ Nicht qualifiziert
+        </div>
       )}
     </div>
   );
@@ -329,6 +335,21 @@ export default function LibraryPage() {
 
   const handleSaveSnapshot = async () => {
     if (!auth.currentUser) return;
+
+    const hasIneligible = items.some(id => {
+      if (id.startsWith('empty')) return false;
+      const uWork = allWorks.find(w => w.work_id === id);
+      const details = aniListDetails[id];
+      if (uWork && details) {
+        return !isEligibleForWeeklyRanking(uWork, details, globalOverrides[id]);
+      }
+      return false;
+    });
+
+    if (hasIneligible) {
+      alert("Hinweis: Einige Werke in deinem Ranking sind nicht qualifiziert (keine neue Folge oder nicht aktuell).");
+    }
+
     try {
       const { saveWeeklyRankingSnapshot } = await import("@/lib/db/users");
       await saveWeeklyRankingSnapshot(auth.currentUser.uid, contentType as "ANIME" | "MANGA", items);
@@ -414,6 +435,8 @@ export default function LibraryPage() {
                 const uWork = allWorks.find(w => w.work_id === id);
                 const prevRanking = contentType === "ANIME" ? userProfile?.weekly_ranking_anime?.previous : userProfile?.weekly_ranking_manga?.previous;
                 const prevRank = prevRanking ? prevRanking.indexOf(id) : undefined;
+                const isEligible = id.startsWith('empty') ? undefined : 
+                  (uWork && aniListDetails[id]) ? isEligibleForWeeklyRanking(uWork, aniListDetails[id], globalOverrides[id]) : undefined;
                 return (
                   <SortableItem 
                     key={id} 
@@ -423,6 +446,7 @@ export default function LibraryPage() {
                     userWork={uWork} 
                     previousRank={prevRank} 
                     globalOverride={globalOverrides[id]} 
+                    isEligible={isEligible}
                     onRemove={handleRemoveFromRanking} 
                     onClick={() => handleEmptySlotClick(index)}
                   />
@@ -580,7 +604,10 @@ export default function LibraryPage() {
                   </div>
                 );
 
-                return work.status === "CURRENT" ? (
+                const isEligibleForRanking = work.status === "CURRENT" && 
+                  (details ? isEligibleForWeeklyRanking(work, details, globalOverride) : true);
+
+                return isEligibleForRanking ? (
                   <DraggableLibraryItem key={work.work_id} id={work.work_id}>
                     {content}
                   </DraggableLibraryItem>
@@ -606,6 +633,11 @@ export default function LibraryPage() {
             <div className="overflow-y-auto flex-1 grid grid-cols-3 sm:grid-cols-4 gap-3 pr-2 scrollbar-thin">
               {filteredWorks
                 .filter(w => !items.includes(w.work_id) && w.status === "CURRENT")
+                .filter(w => {
+                  const details = aniListDetails[w.work_id];
+                  if (!details) return true;
+                  return isEligibleForWeeklyRanking(w, details, globalOverrides[w.work_id]);
+                })
                 .map(w => (
                 <button 
                   key={w.work_id} 
@@ -618,7 +650,11 @@ export default function LibraryPage() {
                   </div>
                 </button>
               ))}
-              {filteredWorks.filter(w => !items.includes(w.work_id) && w.status === "CURRENT").length === 0 && (
+              {filteredWorks.filter(w => !items.includes(w.work_id) && w.status === "CURRENT").filter(w => {
+                  const details = aniListDetails[w.work_id];
+                  if (!details) return true;
+                  return isEligibleForWeeklyRanking(w, details, globalOverrides[w.work_id]);
+                }).length === 0 && (
                 <div className="col-span-full text-center text-gray-500 py-8">
                   Keine verfügbaren Werke in "Aktiv" gefunden.
                 </div>

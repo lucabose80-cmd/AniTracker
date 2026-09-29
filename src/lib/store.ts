@@ -6,6 +6,8 @@ interface AppState {
   contentType: ContentType;
   setContentType: (type: ContentType) => void;
   toggleContentType: () => void;
+  isOnline: boolean;
+  setIsOnline: (online: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -15,4 +17,6 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => ({
       contentType: state.contentType === 'ANIME' ? 'MANGA' : 'ANIME',
     })),
+  isOnline: true,
+  setIsOnline: (online) => set({ isOnline: online }),
 }));

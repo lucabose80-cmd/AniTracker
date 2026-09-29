@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { fetchAniList, GET_WORK_DETAILS } from "@/lib/anilist";
 import { calculateOverallScore } from "@/lib/scoring";
 import { UserWork, EmotionalImpact, WatchMode } from "@/types/database";
@@ -16,6 +16,7 @@ import { createActivity } from "@/lib/db/feed";
 
 export default function WorkDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const id = params?.id as string;
   
   const [work, setWork] = useState<any>(null);
@@ -338,9 +339,9 @@ export default function WorkDetailPage() {
           <img src={work.bannerImage} alt="Banner" className="h-full w-full object-cover opacity-60" />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-[#0f1115] to-transparent" />
-        <Link href="/" className="absolute left-4 top-4 rounded-full bg-black/50 p-2 text-white backdrop-blur-md">
+        <button onClick={() => router.back()} className="absolute left-4 top-4 rounded-full bg-black/50 p-2 text-white backdrop-blur-md">
           <ChevronLeft size={24} />
-        </Link>
+        </button>
       </div>
 
       <div className="relative -mt-16 px-4">

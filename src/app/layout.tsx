@@ -5,7 +5,7 @@ import { Header } from "@/components/layout/Header";
 import { BottomNav } from "@/components/layout/BottomNav";
 import { SplashScreen } from "@/components/ui/SplashScreen";
 import { ServiceWorkerManager } from "@/components/ServiceWorkerManager";
-
+import { OfflineBanner } from "@/components/ui/OfflineBanner";
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -43,6 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-full flex flex-col bg-[#0f1115] text-white overflow-x-hidden selection:bg-blue-600/30">
         <SplashScreen>
           <Header />
+          <OfflineBanner />
           <main className="flex-1 pb-20">
             {children}
           </main>

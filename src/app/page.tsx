@@ -73,8 +73,8 @@ export default function Home() {
         const nextSeasonArgs = contentType === "ANIME" ? { season: getNextSeason().season, seasonYear: getNextSeason().year } : {};
         
         const [trendingData, upcomingData] = await Promise.all([
-          fetchAniList(GET_TRENDING_WORKS, { type: typeArg, page: 1, perPage: 20, ...seasonArgs }),
-          fetchAniList(GET_UPCOMING_WORKS, { type: typeArg, page: 1, perPage: 10, ...nextSeasonArgs })
+          fetchAniList(GET_TRENDING_WORKS, { type: typeArg, page: 1, perPage: 30, ...seasonArgs }),
+          fetchAniList(GET_UPCOMING_WORKS, { type: typeArg, page: 1, perPage: 30, ...nextSeasonArgs })
         ]);
 
         setTrendingWorks(trendingData.Page.media);
@@ -215,7 +215,7 @@ export default function Home() {
         await createActivity(auth.currentUser.uid, "EPISODE_THREAD", workId, text, undefined, nextEp);
       }
 
-      router.push(`/social`);
+      router.push(`/feed`);
     } catch(e) {
       console.error(e);
       alert("Fehler beim Check-in");
@@ -448,7 +448,7 @@ export default function Home() {
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-              {trendingWorks.filter(w => !userWorks.some(uw => uw.work_id === w.id.toString() && uw.status === "CURRENT")).slice(0, 10).map((work) => {
+              {trendingWorks.filter(w => !userWorks.some(uw => uw.work_id === w.id.toString())).slice(0, 30).map((work) => {
                 const isUnreleased = work.status === "NOT_YET_RELEASED";
                 const isSequel = work.relations?.edges?.some((edge: any) => {
                   return (edge.relationType === "PREQUEL" || edge.relationType === "PARENT") &&

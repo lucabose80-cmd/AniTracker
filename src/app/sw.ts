@@ -1,6 +1,6 @@
 import { defaultCache } from "@serwist/next/worker";
 import type { PrecacheEntry, SerwistGlobalConfig } from "serwist";
-import { Serwist } from "serwist";
+import { Serwist, CacheFirst, NetworkFirst, StaleWhileRevalidate, ExpirationPlugin } from "serwist";
 
 declare global {
   interface WorkerGlobalScope extends SerwistGlobalConfig {
@@ -15,7 +15,36 @@ const serwist = new Serwist({
   skipWaiting: true,
   clientsClaim: true,
   navigationPreload: true,
-  runtimeCaching: defaultCache,
+  runtimeCaching: [
+    ...defaultCache,
+    // Cache AniList cover images (CacheFirst - they rarely change)
+    {
+      matcher: /^https:\/\/s4\.anilist\.co\/.*/i,
+      handler: new CacheFirst({
+        cacheName: 'anilist-images',
+        plugins: [
+          new ExpirationPlugin({
+            maxEntries: 500,
+            maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
+          }),
+        ],
+      }),
+    },
+    // Cache AniList API responses (NetworkFirst with cache fallback)
+    {
+      matcher: /^https:\/\/graphql\.anilist\.co/i,
+      handler: new NetworkFirst({
+        cacheName: 'anilist-api',
+        plugins: [
+          new ExpirationPlugin({
+            maxEntries: 50,
+            maxAgeSeconds: 60 * 60, // 1 hour
+          }),
+        ],
+        networkTimeoutSeconds: 10,
+      }),
+    },
+  ],
 });
 
 serwist.addEventListeners();
