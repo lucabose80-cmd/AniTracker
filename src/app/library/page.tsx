@@ -74,7 +74,7 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
   return (
     <div 
       ref={setNodeRef} 
-      style={style} 
+      style={{ touchAction: 'none', ...style }} 
       {...attributes} 
       {...listeners}
       className={`w-full aspect-[3/4] relative cursor-grab active:cursor-grabbing rounded-xl bg-[#1a1d24] border ${isDragging ? 'border-blue-500 shadow-2xl scale-105' : 'border-gray-800'} flex items-center justify-center font-bold text-gray-500 overflow-hidden`}
@@ -112,12 +112,19 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
           +
         </button>
       ) : workDetails ? (
-        <Link href={`/work/${id}`} className="absolute inset-0 block h-full w-full">
+        <div 
+          onClick={(e) => {
+            if (!isDragging) {
+              window.location.href = `/work/${id}`;
+            }
+          }}
+          className="absolute inset-0 block h-full w-full cursor-pointer"
+        >
           <Image src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" fill sizes="(max-width: 768px) 33vw, 20vw" className={`object-cover pointer-events-none ${isEligible === false ? 'opacity-60' : ''}`} />
           <div className="absolute bottom-0 left-0 w-full h-1 bg-[#1a1d24]/80">
             <div className="h-full bg-blue-500" style={{ width: `${progressPercentage}%` }} />
           </div>
-        </Link>
+        </div>
       ) : (
         <div className="absolute inset-0 w-full h-full animate-pulse bg-gray-800" />
       )}
@@ -280,6 +287,15 @@ export default function LibraryPage() {
     // Drag from library into Ranking
     if (activeIdStr.startsWith("library-")) {
       const workId = activeIdStr.replace("library-", "");
+
+      const uWork = allWorks.find(w => w.work_id === workId);
+      const details = aniListDetails[workId];
+      if (uWork && details) {
+        if (!isEligibleForWeeklyRanking(uWork, details, globalOverrides[workId])) {
+          return; // Abbrechen, da nicht qualifiziert
+        }
+      }
+
       if (newItems.includes(workId)) return; // Already in ranking
       
       const overIndex = newItems.indexOf(overIdStr);
@@ -430,12 +446,33 @@ export default function LibraryPage() {
               </h3>
               <p className="text-xs text-gray-400">Sortiere deine aktuellen Favoriten dieser Woche.</p>
             </div>
-            <button 
-              onClick={handleSaveSnapshot}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-lg"
-            >
-              <Share size={14} /> Speichern & Teilen
-            </button>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={async () => {
+                  if(confirm("Möchtest du das Ranking wirklich auf 9 leere Plätze zurücksetzen?")) {
+                    const emptyItems = Array(9).fill("").map((_, i) => `empty-${i}`);
+                    setItems(emptyItems);
+                    if (auth.currentUser) {
+                      try {
+                        const { updateWeeklyRanking } = await import("@/lib/db/users");
+                        await updateWeeklyRanking(auth.currentUser.uid, contentType as "ANIME" | "MANGA", emptyItems);
+                      } catch(e) {
+                        console.error(e);
+                      }
+                    }
+                  }
+                }}
+                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-lg"
+              >
+                Reset
+              </button>
+              <button 
+                onClick={handleSaveSnapshot}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-lg"
+              >
+                <Share size={14} /> Speichern & Teilen
+              </button>
+            </div>
           </div>
           
           <SortableContext items={items} strategy={rectSortingStrategy}>
