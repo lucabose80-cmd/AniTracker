@@ -154,7 +154,8 @@ function DraggableLibraryItem({ id, children }: { id: string, children: React.Re
     transform: CSS.Translate.toString(transform),
     zIndex: isDragging ? 50 : 1,
     opacity: isDragging ? 0.8 : 1,
-  } : undefined;
+    touchAction: 'none',
+  } : { touchAction: 'none' };
 
   return (
     <div ref={setNodeRef} style={style} {...listeners} {...attributes} className="cursor-grab active:cursor-grabbing">
@@ -261,6 +262,17 @@ export default function LibraryPage() {
 
     const rankingData = contentType === "ANIME" ? userProfile.weekly_ranking_anime : userProfile.weekly_ranking_manga;
     let currentRanking = rankingData?.current ? [...rankingData.current] : [];
+
+    const lastActive = rankingData?.last_active || 0;
+    const d = new Date();
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    const monday = new Date(d.setDate(diff));
+    monday.setHours(0, 0, 0, 0);
+
+    if (lastActive > 0 && lastActive < monday.getTime()) {
+      currentRanking = [];
+    }
 
     // Remove duplicates or old deleted works
     let validRanking = currentRanking.filter(id => id.startsWith("empty") || allWorks.some(w => w.work_id === id));
@@ -455,29 +467,10 @@ export default function LibraryPage() {
             </div>
             <div className="flex items-center gap-2">
               <button 
-                onClick={async () => {
-                  if(confirm("Möchtest du das Ranking wirklich auf 9 leere Plätze zurücksetzen?")) {
-                    const emptyItems = Array(9).fill("").map((_, i) => `empty-${i}`);
-                    setItems(emptyItems);
-                    if (auth.currentUser) {
-                      try {
-                        const { updateWeeklyRanking } = await import("@/lib/db/users");
-                        await updateWeeklyRanking(auth.currentUser.uid, contentType as "ANIME" | "MANGA", emptyItems);
-                      } catch(e) {
-                        console.error(e);
-                      }
-                    }
-                  }
-                }}
-                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-lg"
-              >
-                Reset
-              </button>
-              <button 
                 onClick={handleSaveSnapshot}
                 className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-lg"
               >
-                <Share size={14} /> Speichern & Teilen
+                <Share size={14} /> Im Feed teilen
               </button>
             </div>
           </div>
@@ -487,7 +480,10 @@ export default function LibraryPage() {
               {items.map((id, index) => {
                 const uWork = allWorks.find(w => w.work_id === id);
                 const prevRanking = contentType === "ANIME" ? userProfile?.weekly_ranking_anime?.previous : userProfile?.weekly_ranking_manga?.previous;
-                const prevRank = prevRanking ? prevRanking.indexOf(id) : undefined;
+                let prevRank = prevRanking ? prevRanking.indexOf(id) : -1;
+                if (prevRank === -1 && uWork && uWork.top9_rank) {
+                  prevRank = uWork.top9_rank - 1;
+                }
                 const isEligible = id.startsWith('empty') ? undefined : 
                   (uWork && aniListDetails[id]) ? isEligibleForWeeklyRanking(uWork, aniListDetails[id], globalOverrides[id]) : undefined;
                 return (
@@ -613,6 +609,9 @@ export default function LibraryPage() {
                   behindCount = Math.max(0, maxAiredEp - currentEp);
                 }
 
+                const isEligibleForRanking = work.status === "CURRENT" && 
+                  (details ? isEligibleForWeeklyRanking(work, details, globalOverride) : true);
+
                 const content = (
                   <div 
                     className={`block group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500 hover:shadow-lg ${work.status === "CURRENT" ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${work.auto_added ? "opacity-50 grayscale hover:grayscale-0 hover:opacity-100" : ""}`}
@@ -643,8 +642,13 @@ export default function LibraryPage() {
                       </div>
                     )}
                     {sortBy === "SCORE" && work.evaluation?.overallScore !== undefined && work.evaluation.overallScore > 0 && (
-                      <div className="absolute top-1 left-1 flex items-center justify-center rounded-full border border-yellow-400 bg-yellow-600/90 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-md z-10 pointer-events-none gap-1">
+                      <div className="absolute top-1 left-8 flex items-center justify-center rounded-full border border-yellow-400 bg-yellow-600/90 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-md z-10 pointer-events-none gap-1">
                         <Star size={10} className="fill-white" /> {work.evaluation.overallScore.toFixed(1)}
+                      </div>
+                    )}
+                    {isEligibleForRanking && (
+                      <div className="absolute top-1 left-1 flex items-center justify-center rounded-full bg-blue-600/90 p-1 shadow-md z-10 pointer-events-none" title="Bereit fürs Wochen-Ranking!">
+                        <Star size={12} className="fill-white text-white" />
                       </div>
                     )}
                     {work.auto_added && (
@@ -658,9 +662,6 @@ export default function LibraryPage() {
                     </div>
                   </div>
                 );
-
-                const isEligibleForRanking = work.status === "CURRENT" && 
-                  (details ? isEligibleForWeeklyRanking(work, details, globalOverride) : true);
 
                 return isEligibleForRanking ? (
                   <DraggableLibraryItem key={work.work_id} id={work.work_id}>

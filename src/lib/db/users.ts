@@ -92,17 +92,29 @@ export async function updateWeeklyRanking(uid: string, type: "ANIME" | "MANGA", 
 
 export async function saveWeeklyRankingSnapshot(uid: string, type: "ANIME" | "MANGA", currentList: string[]) {
   if (!db) return;
-  const docRef = doc(db, "users", uid);
+  const { writeBatch } = await import("firebase/firestore");
+  const batch = writeBatch(db);
+  
+  const userDocRef = doc(db, "users", uid);
   const fieldName = type === "ANIME" ? "weekly_ranking_anime" : "weekly_ranking_manga";
   
-  await setDoc(docRef, {
+  batch.set(userDocRef, {
     [fieldName]: {
       current: currentList,
-      previous: currentList, // snapshot sets previous to current
+      previous: currentList,
       last_updated: new Date().toISOString(),
       last_active: Date.now()
     }
   }, { merge: true });
+  
+  currentList.forEach((workId, idx) => {
+    if (!workId.startsWith("empty")) {
+      const workRef = doc(db, "users", uid, "works", workId);
+      batch.set(workRef, { top9_rank: idx + 1 }, { merge: true });
+    }
+  });
+  
+  await batch.commit();
 }
 
 export function getLastMonday() {

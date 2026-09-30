@@ -44,11 +44,11 @@ export default function PublicProfilePage({ params }: { params: Promise<{ id: st
         if (p) {
           setProfile(p);
           
-          const works = await getAllUserWorks(userId);
-          const top9 = works.filter((w: any) => w.top9_rank).sort((a: any, b: any) => a.top9_rank! - b.top9_rank!);
-          setFavItems(Array.from({ length: 9 }).map((_, i) => top9.find((w: any) => w.top9_rank === i + 1) || null));
+          const rankingIds = p.weekly_ranking_anime?.current || Array(9).fill("");
+          const top9 = rankingIds.map((id: string) => id.startsWith("empty") || !id ? null : { work_id: id });
+          setFavItems(top9);
           
-          const idsToFetch = top9.map(w => parseInt(w.work_id, 10));
+          const idsToFetch = top9.filter(w => w !== null).map(w => parseInt(w.work_id, 10));
           if (idsToFetch.length > 0) {
             const mediaList = await fetchAniListBatch(idsToFetch);
             const map: Record<string, any> = {};
