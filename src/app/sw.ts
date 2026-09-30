@@ -30,20 +30,6 @@ const serwist = new Serwist({
         ],
       }),
     },
-    // Cache AniList API responses (NetworkFirst with cache fallback)
-    {
-      matcher: /^https:\/\/graphql\.anilist\.co/i,
-      handler: new NetworkFirst({
-        cacheName: 'anilist-api',
-        plugins: [
-          new ExpirationPlugin({
-            maxEntries: 50,
-            maxAgeSeconds: 60 * 60, // 1 hour
-          }),
-        ],
-        networkTimeoutSeconds: 10,
-      }),
-    },
   ],
 });
 
