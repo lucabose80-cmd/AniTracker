@@ -21,7 +21,9 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
   const { contentType, setContentType } = useAppStore();
   const [feed, setFeed] = useState<ActivityFeed[]>(initialActivities || []);
   const [feedFilter, setFeedFilter] = useState<'focus' | 'all'>('all');
-  const [workDetails, setWorkDetails] = useState<Record<string, any>>({});
+  const [workDetails, setWorkDetails] = useState<Record<string, any>>(() => {
+    return useAppStore.getState().workDetailsCache || {};
+  });
   const [isLoading, setIsLoading] = useState(false);
   
   const [newPostText, setNewPostText] = useState("");
@@ -172,7 +174,10 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
 
     setIsPosting(true);
     try {
-      if (!useAppStore.getState().isOnline) useAppStore.getState().incrementOfflineQueue();
+      if (!useAppStore.getState().isOnline) {
+        useAppStore.getState().incrementOfflineQueue();
+        alert("Du bist offline! Dein Beitrag wird gesendet, sobald du wieder online bist.");
+      }
       const newActivity = await createActivity(
         auth.currentUser.uid,
         "MANUAL_POST",

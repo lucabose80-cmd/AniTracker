@@ -42,6 +42,7 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
   const [comments, setComments] = useState<ActivityComment[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [newText, setNewText] = useState("");
+  const [isSpoiler, setIsSpoiler] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [seenCount, setSeenCount] = useState(0);
   const [commentCount, setCommentCount] = useState(initialCount);
@@ -87,8 +88,13 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
     e.preventDefault();
     if (!newText.trim() || !currentUserUid) return;
     
-    const prevText = newText.trim();
+    let prevText = newText.trim();
+    if (isSpoiler && !prevText.startsWith('||')) {
+      prevText = `||${prevText}||`;
+    }
+    
     setNewText("");
+    setIsSpoiler(false);
     setIsSubmitting(true);
     
     const tempId = `temp-${Date.now()}`;
@@ -106,6 +112,11 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
     setSeenCount(prev => prev + 1);
 
     try {
+      const { useAppStore } = await import('@/lib/store');
+      if (!useAppStore.getState().isOnline) {
+        useAppStore.getState().incrementOfflineQueue();
+        alert("Du bist offline! Dein Kommentar wird gesendet, sobald du wieder online bist.");
+      }
       const added = await addActivityComment(activityId, currentUserUid, prevText);
       if (added) {
         setComments(prev => prev.map(c => c.comment_id === tempId ? added : c));
@@ -115,7 +126,7 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
       setComments(prev => prev.filter(c => c.comment_id !== tempId));
       setCommentCount(prev => prev - 1);
       setSeenCount(prev => prev - 1);
-      setNewText(prevText);
+      setNewText(newText); // Restore original text
     } finally {
       setIsSubmitting(false);
     }
@@ -292,7 +303,7 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
           {comments.length === 0 && <p className="text-xs text-gray-500 italic mt-2">Noch keine Kommentare. Sei der erste!</p>}
 
           {currentUserUid ? (
-            <form onSubmit={handleSubmit} className="flex gap-2 mt-1">
+            <form onSubmit={handleSubmit} className="flex gap-2 mt-1 items-center">
               <input 
                 type="text" 
                 value={newText}
@@ -301,6 +312,10 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
                 className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500 text-white"
                 disabled={isSubmitting}
               />
+              <label className="flex items-center gap-1 text-xs text-gray-400 cursor-pointer hover:text-gray-300">
+                <input type="checkbox" checked={isSpoiler} onChange={e => setIsSpoiler(e.target.checked)} className="rounded border-gray-700 bg-gray-800 text-blue-500 focus:ring-blue-500" />
+                Spoiler
+              </label>
               <button 
                 type="submit" 
                 disabled={!newText.trim() || isSubmitting}

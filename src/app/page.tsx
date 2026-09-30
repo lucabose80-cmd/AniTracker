@@ -38,12 +38,24 @@ export default function Home() {
   const [isLoadingCommunity, setIsLoadingCommunity] = useState(true);
 
   // Home Screen Tab State
-  const [activeHomeTab, setActiveHomeTab] = useState<"COMMUNITY" | "UPNEXT" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS">("UPNEXT");
+  const [activeHomeTab, setActiveHomeTab] = useState<"UPNEXT" | "COMMUNITY" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS">("UPNEXT");
   const [authLoaded, setAuthLoaded] = useState(false);
 
   useEffect(() => {
+    const saved = sessionStorage.getItem('homeTab');
+    if (saved) {
+      setActiveHomeTab(saved as any);
+    }
+  }, []);
+
+  const setTab = (tab: any) => {
+    setActiveHomeTab(tab);
+    sessionStorage.setItem('homeTab', tab);
+  };
+
+  useEffect(() => {
     if (authLoaded && !isLoggedIn && activeHomeTab === "UPNEXT") {
-      setActiveHomeTab("COMMUNITY");
+      setTab("COMMUNITY");
     }
   }, [authLoaded, isLoggedIn]);
 
@@ -161,6 +173,7 @@ export default function Home() {
                 });
               }
             });
+            useAppStore.getState().setWorkDetailsCache({ ...useAppStore.getState().workDetailsCache, ...map });
             setUserAniListDetails(map);
             
             // Find Top Genre
@@ -186,6 +199,24 @@ export default function Home() {
             }
           } catch(e) {
             console.error("Failed to load user works batch", e);
+            const cache = useAppStore.getState().workDetailsCache || {};
+            setUserAniListDetails(cache);
+            // We can still try to derive genre from cache
+            let topGenre = "Action";
+            let maxCount = 0;
+            const genreCounts: Record<string, number> = {};
+            Object.values(cache).forEach((m: any) => {
+              if (m.genres) {
+                m.genres.forEach((g: string) => {
+                  genreCounts[g] = (genreCounts[g] || 0) + 1;
+                  if (genreCounts[g] > maxCount && GENRES.includes(g)) {
+                    topGenre = g;
+                    maxCount = genreCounts[g];
+                  }
+                });
+              }
+            });
+            setSelectedGenre(topGenre);
           }
         }
       } else {
@@ -297,17 +328,9 @@ export default function Home() {
     <div className="flex flex-col gap-6 px-4 pt-6 pb-24">
       {/* HOME TABS */}
       <div className="flex gap-2 overflow-x-auto pb-2 snap-x scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-        <button
-          onClick={() => setActiveHomeTab("COMMUNITY")}
-          className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
-            activeHomeTab === "COMMUNITY" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
-          }`}
-        >
-          Community Ranking
-        </button>
         {isLoggedIn && (
           <button
-            onClick={() => setActiveHomeTab("UPNEXT")}
+            onClick={() => setTab("UPNEXT")}
             className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
               activeHomeTab === "UPNEXT" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
             }`}
@@ -316,7 +339,15 @@ export default function Home() {
           </button>
         )}
         <button
-          onClick={() => setActiveHomeTab("TRENDING")}
+          onClick={() => setTab("COMMUNITY")}
+          className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
+            activeHomeTab === "COMMUNITY" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
+          }`}
+        >
+          Community Ranking
+        </button>
+        <button
+          onClick={() => setTab("TRENDING")}
           className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
             activeHomeTab === "TRENDING" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
           }`}
@@ -324,7 +355,7 @@ export default function Home() {
           Trending
         </button>
         <button
-          onClick={() => setActiveHomeTab("UPCOMING")}
+          onClick={() => setTab("UPCOMING")}
           className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
             activeHomeTab === "UPCOMING" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
           }`}
@@ -332,7 +363,7 @@ export default function Home() {
           Nächste Season
         </button>
         <button
-          onClick={() => setActiveHomeTab("RECOMMENDATIONS")}
+          onClick={() => setTab("RECOMMENDATIONS")}
           className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
             activeHomeTab === "RECOMMENDATIONS" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
           }`}

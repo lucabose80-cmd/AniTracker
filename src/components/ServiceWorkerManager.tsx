@@ -37,6 +37,10 @@ export function ServiceWorkerManager() {
     // Online/Offline Detection
     const handleOnline = () => {
       setIsOnline(true);
+      const queueCount = useAppStore.getState().offlineQueueCount;
+      if (queueCount > 0) {
+        alert(`Verbindung wiederhergestellt! ${queueCount} wartende(r) Beitrag/Beiträge wurden synchronisiert.`);
+      }
       clearOfflineQueue();
       console.log('[WeebCheck] Back online - Firestore will auto-sync queued writes');
     };

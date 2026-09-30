@@ -37,7 +37,7 @@ import { isEligibleForWeeklyRanking, hasNewReleaseThisWeek, hasUserCheckedLatest
 
 // Simple Sortable Item Component
 function SortableItem({ id, index, workDetails, userWork, previousRank, globalOverride, isEligible, onRemove, onClick }: { id: string, index: number, workDetails?: any, userWork?: any, previousRank?: number, globalOverride?: any, isEligible?: boolean, onRemove: (id: string) => void, onClick?: () => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: isEligible === false });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -218,18 +218,29 @@ export default function LibraryPage() {
 
           const allIdsToFetch = works.map((w: UserWork) => parseInt(w.work_id, 10));
           if (allIdsToFetch.length > 0) {
-            const [mediaList, overrides] = await Promise.all([
-              fetchAniListBatch(allIdsToFetch),
-              getCalendarOverrides()
-            ]);
+            let mediaList: any[] = [];
+            let overrides: Record<string, any> = {};
+            
+            try {
+              [mediaList, overrides] = await Promise.all([
+                fetchAniListBatch(allIdsToFetch),
+                getCalendarOverrides()
+              ]);
+              
+              const map: Record<string, any> = {};
+              mediaList.forEach((m: any) => {
+                map[m.id.toString()] = m;
+              });
+              useAppStore.getState().setWorkDetailsCache({ ...useAppStore.getState().workDetailsCache, ...map });
+              setAniListDetails(map);
+            } catch (e) {
+              console.warn("Offline or AniList Error, using cache", e);
+              const cache = useAppStore.getState().workDetailsCache || {};
+              setAniListDetails(cache);
+              overrides = await getCalendarOverrides(); // might be cached by Firestore
+            }
             
             setGlobalOverrides(overrides);
-            
-            const map: Record<string, any> = {};
-            mediaList.forEach((m: any) => {
-              map[m.id.toString()] = m;
-            });
-            setAniListDetails(map);
           }
         } catch (error) {
           console.error("Fehler beim Laden der Bibliothek:", error);

@@ -12,6 +12,12 @@ import { fetchAniListBatch } from "@/lib/anilist";
 export function SplashScreen({ children }: { children: React.ReactNode }) {
   const [showSplash, setShowSplash] = useState(true);
   const [animateOut, setAnimateOut] = useState(false);
+
+  useEffect(() => {
+    if (sessionStorage.getItem('splashDismissed') === 'true') {
+      setShowSplash(false);
+    }
+  }, []);
   const [user, setUser] = useState<User | null>(null);
   const [authLoaded, setAuthLoaded] = useState(false);
   const router = useRouter();
@@ -72,6 +78,7 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
   
   const handleStart = () => {
     setAnimateOut(true);
+    sessionStorage.setItem('splashDismissed', 'true');
     setTimeout(() => {
       setShowSplash(false);
     }, 600); // Wait for animation to finish
