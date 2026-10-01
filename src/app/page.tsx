@@ -176,6 +176,31 @@ export default function Home() {
             useAppStore.getState().setWorkDetailsCache({ ...useAppStore.getState().workDetailsCache, ...map });
             setUserAniListDetails(map);
             
+            // Check for newly released wishlist items
+            works.forEach(async (uWork) => {
+              if (uWork.status === "PLANNING") {
+                const aniListInfo = map[uWork.work_id];
+                if (aniListInfo && (aniListInfo.status === "RELEASING" || aniListInfo.status === "FINISHED")) {
+                  try {
+                    const { saveUserWork } = await import("@/lib/db/works");
+                    await saveUserWork(user.uid, uWork.work_id, { status: "CURRENT" });
+                    
+                    if (useAppStore.getState().isOnline) {
+                      const { createActivity } = await import("@/lib/db/feed");
+                      const title = aniListInfo.title?.english || aniListInfo.title?.romaji || "Ein Werk";
+                      await createActivity(user.uid, "TOP9_UPDATE", uWork.work_id, `${title} aus der Wunschliste ist jetzt verfügbar und wurde zu 'Aktiv' verschoben!`);
+                    }
+                    
+                    if ("Notification" in window && Notification.permission === "granted") {
+                      new Notification(`Wunschliste Update!`, { body: `${aniListInfo.title?.romaji || 'Ein Werk'} ist jetzt verfügbar!` });
+                    }
+                  } catch (e) {
+                    console.error("Failed to auto-update released wishlist item", e);
+                  }
+                }
+              }
+            });
+
             // Find Top Genre
             let topGenre = "Action";
             let maxCount = 0;

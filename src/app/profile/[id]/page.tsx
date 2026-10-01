@@ -43,12 +43,16 @@ export default function PublicProfilePage({ params }: { params: Promise<{ id: st
         const p = await getUserProfile(userId);
         if (p) {
           setProfile(p);
+          const works = await getAllUserWorks(userId);
           
-          const rankingIds = p.weekly_ranking_anime?.current || Array(9).fill("");
-          const top9 = rankingIds.map((id: string) => id.startsWith("empty") || !id ? null : { work_id: id });
-          setFavItems(top9);
+          const topAnime = works
+            .filter((w: any) => (w.evaluation?.overallScore || 0) > 0)
+            .sort((a: any, b: any) => (b.evaluation?.overallScore || 0) - (a.evaluation?.overallScore || 0))
+            .slice(0, 9);
+            
+          setFavItems(topAnime);
           
-          const idsToFetch = top9.filter(w => w !== null).map(w => parseInt(w.work_id, 10));
+          const idsToFetch = topAnime.map(w => parseInt(w.work_id, 10));
           if (idsToFetch.length > 0) {
             const mediaList = await fetchAniListBatch(idsToFetch);
             const map: Record<string, any> = {};
@@ -76,6 +80,9 @@ export default function PublicProfilePage({ params }: { params: Promise<{ id: st
   return (
     <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-lg mx-auto">
       <div className="flex items-center gap-4 bg-[#1a1d24] p-4 rounded-xl border border-gray-800 shadow-lg">
+        <button onClick={() => window.history.back()} className="text-gray-400 hover:text-white p-2 shrink-0">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
         <div className="h-20 w-20 rounded-full bg-gray-700 flex items-center justify-center overflow-hidden border-2 border-blue-500 shrink-0">
           {profile.avatar_url ? (
             <img src={profile.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
@@ -89,14 +96,14 @@ export default function PublicProfilePage({ params }: { params: Promise<{ id: st
       </div>
       
       <div className="bg-[#1a1d24] border border-gray-800 rounded-xl p-4 shadow-lg">
-        <h3 className="font-bold text-lg mb-4 text-blue-400">Top 9</h3>
+        <h3 className="font-bold text-lg mb-4 text-blue-400">All-Time Top 9</h3>
         <div className="grid grid-cols-3 gap-2">
           {favItems.map((item, i) => (
             <FavoriteItem 
               key={i} 
               id={item?.work_id} 
               index={i} 
-              workDetails={item ? aniListDetails[item.work_id] : null} 
+              workDetails={item ? { ...aniListDetails[item.work_id], userScore: item.evaluation?.overallScore } : null} 
             />
           ))}
         </div>

@@ -175,7 +175,8 @@ export default function WorkDetailPage() {
         await addToHistory(user.uid, id);
         // Create feed activity
         if (!useAppStore.getState().isOnline) useAppStore.getState().incrementOfflineQueue();
-        await createActivity(user.uid, "TOP9_UPDATE", id, `Hat ${work?.title?.romaji || 'ein Werk'} zur Bibliothek hinzugefügt.`);
+        const title = work?.title?.english || work?.title?.romaji || 'ein Werk';
+        await createActivity(user.uid, "TOP9_UPDATE", id, `Hat ${title} zur Bibliothek hinzugefügt.`);
 
         // --- Prequel Auto-Erkennung ---
         const prequels = work?.relations?.edges?.filter((edge: any) => edge.relationType === "PREQUEL") || [];
@@ -622,24 +623,28 @@ export default function WorkDetailPage() {
         {/* ACTION BUTTONS */}
         <div className="mt-6 flex flex-col gap-3">
           <div className="grid grid-cols-3 gap-2">
-            <button 
-              onClick={() => handleQuickAdd("CURRENT")}
-              disabled={isSaving}
-              className={`flex flex-col items-center justify-center gap-1 rounded-xl py-3 font-bold transition shadow-lg ${userWorkStatus === "CURRENT" ? "bg-blue-600 text-white" : "bg-blue-600/20 text-blue-400 border border-blue-600/50 hover:bg-blue-600/40"}`}
-            >
-              <PlayCircle size={20} /> <span className="text-xs">Aktiv</span>
-            </button>
-            <button 
-              onClick={() => handleQuickAdd("COMPLETED")}
-              disabled={isSaving}
-              className={`flex flex-col items-center justify-center gap-1 rounded-xl py-3 font-bold transition shadow-lg ${userWorkStatus === "COMPLETED" ? "bg-green-600 text-white" : "bg-green-600/20 text-green-400 border border-green-600/50 hover:bg-green-600/40"}`}
-            >
-              <CheckCircle size={20} /> <span className="text-xs">Fertig</span>
-            </button>
+            {work.status !== "NOT_YET_RELEASED" && (
+              <>
+                <button 
+                  onClick={() => handleQuickAdd("CURRENT")}
+                  disabled={isSaving}
+                  className={`flex flex-col items-center justify-center gap-1 rounded-xl py-3 font-bold transition shadow-lg ${userWorkStatus === "CURRENT" ? "bg-blue-600 text-white" : "bg-blue-600/20 text-blue-400 border border-blue-600/50 hover:bg-blue-600/40"}`}
+                >
+                  <PlayCircle size={20} /> <span className="text-xs">Aktiv</span>
+                </button>
+                <button 
+                  onClick={() => handleQuickAdd("COMPLETED")}
+                  disabled={isSaving}
+                  className={`flex flex-col items-center justify-center gap-1 rounded-xl py-3 font-bold transition shadow-lg ${userWorkStatus === "COMPLETED" ? "bg-green-600 text-white" : "bg-green-600/20 text-green-400 border border-green-600/50 hover:bg-green-600/40"}`}
+                >
+                  <CheckCircle size={20} /> <span className="text-xs">Fertig</span>
+                </button>
+              </>
+            )}
             <button 
               onClick={() => handleQuickAdd("PLANNING")}
               disabled={isSaving}
-              className={`flex flex-col items-center justify-center gap-1 rounded-xl py-3 font-bold transition shadow-lg ${userWorkStatus === "PLANNING" ? "bg-purple-600 text-white" : "bg-purple-600/20 text-purple-400 border border-purple-600/50 hover:bg-purple-600/40"}`}
+              className={`flex flex-col items-center justify-center gap-1 rounded-xl py-3 font-bold transition shadow-lg ${work.status === "NOT_YET_RELEASED" ? "col-span-3" : ""} ${userWorkStatus === "PLANNING" ? "bg-purple-600 text-white" : "bg-purple-600/20 text-purple-400 border border-purple-600/50 hover:bg-purple-600/40"}`}
             >
               <Bookmark size={20} /> <span className="text-xs">Wunsch</span>
             </button>
@@ -684,6 +689,25 @@ export default function WorkDetailPage() {
           </div>
 
           <div className="space-y-6">
+            <div className="bg-[#141a29] p-4 rounded-xl border border-gray-800">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="text-gray-300 font-bold flex items-center gap-2">
+                  <Star size={14} className="text-yellow-500" />
+                  Manuelle Gesamtwertung
+                </span>
+                <span className="font-bold text-white">{evaluation.manualScore || 'Matrix'}</span>
+              </div>
+              <input 
+                type="range" min="0" max="10" step="0.5" 
+                value={evaluation.manualScore || 0}
+                onChange={(e) => handleSlider("manualScore", e.target.value)}
+                className="w-full accent-yellow-500"
+              />
+              <p className="text-[10px] text-gray-500 mt-1">
+                Wenn hier ein Wert über 0 gesetzt wird, überschreibt dieser die berechnete Bewertungsmatrix (z.B. für schnelle Imports).
+              </p>
+            </div>
+
             {/* Standard Metrics */}
             {[
               { label: "Story & Handlung (x2.0)", field: "plotAndStory" },

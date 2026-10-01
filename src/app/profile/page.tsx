@@ -178,7 +178,7 @@ export default function ProfilePage() {
     const topWorks = allWorks
       .filter(w => aniListDetails[w.work_id]?.type === contentType && w.status !== "PLANNING" && (w.evaluation?.overallScore || 0) > 0)
       .sort((a, b) => (b.evaluation?.overallScore || 0) - (a.evaluation?.overallScore || 0))
-      .slice(0, 10)
+      .slice(0, 9)
       .map(w => ({
         id: w.work_id,
         details: {

@@ -37,18 +37,26 @@ export async function getUserWork(userId: string, workId: string): Promise<UserW
   const docId = `${userId}_${workId}`;
   const docRef = doc(db, "user_works", docId);
   
-  try {
-    const docSnap = await Promise.race([
-      getDoc(docRef),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore Timeout")), 3000))
-    ]) as any;
+    let docSnap;
+    try {
+      const { useAppStore } = await import("@/lib/store");
+      if (!useAppStore.getState().isOnline) {
+        const { getDocFromCache } = await import("firebase/firestore");
+        docSnap = await getDocFromCache(docRef);
+      } else {
+        docSnap = await Promise.race([
+          getDoc(docRef),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore Timeout")), 3000))
+        ]) as any;
+      }
+    } catch (e) {
+      const { getDocFromCache } = await import("firebase/firestore");
+      docSnap = await getDocFromCache(docRef);
+    }
 
     if (docSnap.exists()) {
       return docSnap.data() as UserWork;
     }
-  } catch (error) {
-    console.error("Fehler beim Laden der UserWork (möglicherweise blockiert/Timeout):", error);
-  }
   
   return null;
 }
@@ -60,7 +68,20 @@ export async function getAllUserWorks(userId: string): Promise<UserWork[]> {
   try {
     const worksRef = collection(db, "user_works");
     const q = query(worksRef, where("user_id", "==", userId));
-    const querySnapshot = await getDocs(q);
+    
+    let querySnapshot;
+    try {
+      const { useAppStore } = await import("@/lib/store");
+      if (!useAppStore.getState().isOnline) {
+        const { getDocsFromCache } = await import("firebase/firestore");
+        querySnapshot = await getDocsFromCache(q);
+      } else {
+        querySnapshot = await getDocs(q);
+      }
+    } catch (e) {
+      const { getDocsFromCache } = await import("firebase/firestore");
+      querySnapshot = await getDocsFromCache(q);
+    }
     
     const works: UserWork[] = [];
     querySnapshot.forEach((doc) => {

@@ -196,8 +196,10 @@ export default function CalendarPage() {
                 if (dayAnimeList.length === 0) return null;
                 
                 return (
-                  <div key={day.label} className="flex flex-col gap-4">
-                    <h3 className="text-lg font-bold text-white border-b border-gray-800 pb-2">{day.label}</h3>
+                  <div key={day.label} className={`flex flex-col gap-4 ${new Date().getDay() === day.value ? 'bg-blue-900/10 -mx-4 px-4 py-4 rounded-xl border border-blue-900/50' : ''}`}>
+                    <h3 className={`text-lg font-bold pb-2 ${new Date().getDay() === day.value ? 'text-blue-400 border-b border-blue-900/50' : 'text-white border-b border-gray-800'}`}>
+                      {day.label} {new Date().getDay() === day.value ? '(Heute)' : ''}
+                    </h3>
                     <div className="flex flex-col gap-4">
                       {dayAnimeList.map(anime => {
                         const date = new Date(anime.nextAiringEpisode.airingAt * 1000);

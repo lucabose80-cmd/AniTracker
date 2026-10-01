@@ -15,6 +15,10 @@ export function calculateOverallScore({
   isAnime,
   watchMode,
 }: ScoringParams): number {
+  if (evaluation.manualScore && evaluation.manualScore > 0) {
+    return evaluation.manualScore;
+  }
+
   let totalWeightedScore = 0;
   let totalWeights = 0;
 

@@ -92,6 +92,7 @@ export interface UserWork {
     emotionalImpact: EmotionalImpact;
     comments: string;
     overallScore: number;
+    manualScore?: number;
   };
 }
 
