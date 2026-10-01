@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { adminDb, adminMessaging } from "@/lib/firebase-admin";
 
-export const maxDuration = 60; // 1 minute timeout
 export const dynamic = 'force-dynamic';
 
 const GET_RECENT_RELEASES = `
@@ -265,6 +264,11 @@ export async function GET(req: Request) {
     });
   } catch (error: any) {
     console.error("Cron Error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ 
+      error: error?.message || "Unknown error", 
+      stack: error?.stack,
+      name: error?.name,
+      raw: String(error)
+    }, { status: 500 });
   }
 }
