@@ -269,6 +269,6 @@ export async function GET(req: Request) {
       stack: error?.stack,
       name: error?.name,
       raw: String(error)
-    }, { status: 400 });
+    }, { status: 500 });
   }
 }
