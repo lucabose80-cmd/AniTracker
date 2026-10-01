@@ -10,14 +10,11 @@ interface AppState {
   toggleContentType: () => void;
   isOnline: boolean;
   setIsOnline: (online: boolean) => void;
-  offlineQueueCount: number;
-  incrementOfflineQueue: () => void;
-  clearOfflineQueue: () => void;
+
   searchHistory: string[];
   addSearchHistory: (term: string) => void;
   clearSearchHistory: () => void;
-  workDetailsCache: Record<string, any>;
-  setWorkDetailsCache: (cache: Record<string, any>) => void;
+
   rateLimited: boolean;
   setRateLimited: (limited: boolean) => void;
   reloadTrigger: number;
@@ -61,17 +58,14 @@ export const useAppStore = create<AppState>()(
         })),
       isOnline: true,
       setIsOnline: (online) => set({ isOnline: online }),
-      offlineQueueCount: 0,
-      incrementOfflineQueue: () => set((state) => ({ offlineQueueCount: state.offlineQueueCount + 1 })),
-      clearOfflineQueue: () => set({ offlineQueueCount: 0 }),
+
       searchHistory: [],
       addSearchHistory: (term) => set((state) => {
         const newHistory = [term, ...state.searchHistory.filter((t) => t !== term)].slice(0, 5);
         return { searchHistory: newHistory };
       }),
       clearSearchHistory: () => set({ searchHistory: [] }),
-      workDetailsCache: {},
-      setWorkDetailsCache: (cache) => set({ workDetailsCache: cache }),
+
       rateLimited: false,
       setRateLimited: (limited) => set({ rateLimited: limited }),
       reloadTrigger: 0,

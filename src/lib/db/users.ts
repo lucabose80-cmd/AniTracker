@@ -27,26 +27,7 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   if (!db) return null;
   const docRef = doc(db, "users", uid);
   
-  let docSnap;
-  try {
-    const { useAppStore } = await import("@/lib/store");
-    if (!useAppStore.getState().isOnline) {
-      const { getDocFromCache } = await import("firebase/firestore");
-      docSnap = await getDocFromCache(docRef);
-    } else {
-      docSnap = await Promise.race([
-        getDoc(docRef),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore Timeout")), 3000))
-      ]) as any;
-    }
-  } catch (e) {
-    const { getDocFromCache } = await import("firebase/firestore");
-    try {
-      docSnap = await getDocFromCache(docRef);
-    } catch(e2) {
-      return null;
-    }
-  }
+  const docSnap = await getDoc(docRef);
 
   if (docSnap && docSnap.exists()) {
     return docSnap.data() as UserProfile;

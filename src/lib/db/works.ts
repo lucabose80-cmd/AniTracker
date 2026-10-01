@@ -37,22 +37,7 @@ export async function getUserWork(userId: string, workId: string): Promise<UserW
   const docId = `${userId}_${workId}`;
   const docRef = doc(db, "user_works", docId);
   
-    let docSnap;
-    try {
-      const { useAppStore } = await import("@/lib/store");
-      if (!useAppStore.getState().isOnline) {
-        const { getDocFromCache } = await import("firebase/firestore");
-        docSnap = await getDocFromCache(docRef);
-      } else {
-        docSnap = await Promise.race([
-          getDoc(docRef),
-          new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore Timeout")), 3000))
-        ]) as any;
-      }
-    } catch (e) {
-      const { getDocFromCache } = await import("firebase/firestore");
-      docSnap = await getDocFromCache(docRef);
-    }
+    const docSnap = await getDoc(docRef);
 
     if (docSnap.exists()) {
       return docSnap.data() as UserWork;
@@ -69,19 +54,7 @@ export async function getAllUserWorks(userId: string): Promise<UserWork[]> {
     const worksRef = collection(db, "user_works");
     const q = query(worksRef, where("user_id", "==", userId));
     
-    let querySnapshot;
-    try {
-      const { useAppStore } = await import("@/lib/store");
-      if (!useAppStore.getState().isOnline) {
-        const { getDocsFromCache } = await import("firebase/firestore");
-        querySnapshot = await getDocsFromCache(q);
-      } else {
-        querySnapshot = await getDocs(q);
-      }
-    } catch (e) {
-      const { getDocsFromCache } = await import("firebase/firestore");
-      querySnapshot = await getDocsFromCache(q);
-    }
+    const querySnapshot = await getDocs(q);
     
     const works: UserWork[] = [];
     querySnapshot.forEach((doc) => {

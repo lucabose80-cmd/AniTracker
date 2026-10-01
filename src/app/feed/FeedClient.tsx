@@ -22,9 +22,7 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
   const reloadTrigger = useAppStore(state => state.reloadTrigger);
   const [feed, setFeed] = useState<ActivityFeed[]>(initialActivities || []);
   const [feedFilter, setFeedFilter] = useState<'focus' | 'all'>('all');
-  const [workDetails, setWorkDetails] = useState<Record<string, any>>(() => {
-    return useAppStore.getState().workDetailsCache || {};
-  });
+  const [workDetails, setWorkDetails] = useState<Record<string, any>>({});
   const [isLoading, setIsLoading] = useState(false);
   
   const [newPostText, setNewPostText] = useState("");
@@ -76,26 +74,13 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
          .filter(id => !isNaN(id));
 
       if (uniqueWorkIds.length > 0) {
-        // Optimistically set cache immediately so the UI doesn't hang
-        const cache = useAppStore.getState().workDetailsCache || {};
-        let map: Record<string, any> = {};
-        uniqueWorkIds.forEach(id => {
-          if (cache[id.toString()]) {
-            map[id.toString()] = cache[id.toString()];
-          }
-        });
-        if (Object.keys(map).length > 0) {
-          setWorkDetails(prev => ({...prev, ...map}));
-        }
-
         try {
-          if (!useAppStore.getState().isOnline) throw new Error("Offline");
           const data = await fetchAniList(GET_WORKS_BATCH, { ids: uniqueWorkIds });
           const newMap: Record<string, any> = {};
           data.Page.media.forEach((m: any) => {
             newMap[m.id.toString()] = m;
           });
-          useAppStore.getState().setWorkDetailsCache({ ...useAppStore.getState().workDetailsCache, ...newMap });
+
           setWorkDetails(prev => ({...prev, ...newMap}));
         } catch (e) {
           console.warn("AniList fetch failed or offline", e);
@@ -171,9 +156,7 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
       fetchRelatedData(initialActivities);
       if (initialActivities.length < 30) setHasMore(false);
       
-      if (!useAppStore.getState().isOnline) {
-        loadFeed(); // Refetch from local cache to get pending writes
-      }
+
     } else {
       loadFeed();
     }
@@ -192,10 +175,7 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
 
     setIsPosting(true);
     try {
-      if (!useAppStore.getState().isOnline) {
-        useAppStore.getState().incrementOfflineQueue();
-        alert("Du bist offline! Dein Beitrag wird gesendet, sobald du wieder online bist.");
-      }
+
       const newActivity = await createActivity(
         auth.currentUser.uid,
         "MANUAL_POST",

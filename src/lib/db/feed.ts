@@ -99,26 +99,7 @@ export async function getGlobalFeed(limitCount: number = 50): Promise<ActivityFe
     limit(limitCount)
   );
   
-  let snapshot;
-  try {
-    const { useAppStore } = await import("@/lib/store");
-    if (!useAppStore.getState().isOnline) {
-      const { getDocsFromCache } = await import("firebase/firestore");
-      snapshot = await getDocsFromCache(q);
-    } else {
-      snapshot = await Promise.race([
-        getDocs(q),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore Timeout")), 3000))
-      ]) as any;
-    }
-  } catch (e) {
-    const { getDocsFromCache } = await import("firebase/firestore");
-    try {
-      snapshot = await getDocsFromCache(q);
-    } catch(e2) {
-      return [];
-    }
-  }
+  const snapshot = await getDocs(q);
   const activities: ActivityFeed[] = [];
   if (snapshot && typeof snapshot.forEach === 'function') {
     snapshot.forEach((doc: any) => {
@@ -150,26 +131,7 @@ export async function getGlobalFeedPaginated(limitCount: number = 50, lastDocTim
     );
   }
   
-  let snapshot;
-  try {
-    const { useAppStore } = await import("@/lib/store");
-    if (!useAppStore.getState().isOnline) {
-      const { getDocsFromCache } = await import("firebase/firestore");
-      snapshot = await getDocsFromCache(q);
-    } else {
-      snapshot = await Promise.race([
-        getDocs(q),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore Timeout")), 3000))
-      ]) as any;
-    }
-  } catch (e) {
-    const { getDocsFromCache } = await import("firebase/firestore");
-    try {
-      snapshot = await getDocsFromCache(q);
-    } catch(e2) {
-      return [];
-    }
-  }
+  const snapshot = await getDocs(q);
   const activities: ActivityFeed[] = [];
   if (snapshot && typeof snapshot.forEach === 'function') {
     snapshot.forEach((doc: any) => {
@@ -210,10 +172,8 @@ export async function addActivityComment(activityId: string, userId: string, tex
     await updateDoc(activityRef, { comments_count: increment(1) });
     
     // Notification Logic
-    const { useAppStore } = await import("@/lib/store");
-    if (useAppStore.getState().isOnline) {
-      const activitySnap = await getDoc(activityRef);
-      if (activitySnap.exists()) {
+    const activitySnap = await getDoc(activityRef);
+    if (activitySnap.exists()) {
       const activityData = activitySnap.data() as ActivityFeed;
       const actorProfile = await getUserProfile(userId);
       const actorName = actorProfile?.username || "Unbekannt";
@@ -287,10 +247,9 @@ export async function addActivityComment(activityId: string, userId: string, tex
             title: `${actorName} hat deinen Beitrag kommentiert`,
             body: text,
             type: "replies",
-              link: "/feed"
-            })
-          }).catch(console.error);
-        }
+            link: "/feed"
+          })
+        }).catch(console.error);
       }
     }
   } catch (e) {

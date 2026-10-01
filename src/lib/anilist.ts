@@ -14,28 +14,7 @@ export async function fetchAniList(query: string, variables: any = {}, retries =
     return cached.data;
   }
   
-  // Check online status
-  let isOnline = true;
-  try {
-    const { useAppStore } = await import("@/lib/store");
-    isOnline = useAppStore.getState().isOnline;
-  } catch(e) {}
-  
-  if (!isOnline) {
-    if (cached) return cached.data;
-    
-    // Fallback to Zustand persistent cache for single work details
-    if (variables.id) {
-      try {
-        const { useAppStore } = await import("@/lib/store");
-        const zCache = useAppStore.getState().workDetailsCache || {};
-        const hit = zCache[variables.id.toString()];
-        if (hit) return { Media: hit }; // GET_WORK_DETAILS returns { Media: { ... } }
-      } catch (e) {}
-    }
-    
-    throw new Error("Offline and no cache available");
-  }
+
   
   // 2. Return in-flight promise if currently fetching
   if (IN_FLIGHT_REQUESTS.has(cacheKey)) {
@@ -94,20 +73,11 @@ export async function fetchAniList(query: string, variables: any = {}, retries =
       // If we completely exhausted retries due to timeout or network error
       try {
         const { useAppStore } = await import("@/lib/store");
-        if (useAppStore.getState().isOnline) {
-          useAppStore.getState().setRateLimited(true);
-          setTimeout(() => {
-            useAppStore.getState().setRateLimited(false);
-            useAppStore.getState().triggerReload();
-          }, 60000);
-        }
-        
-        // Fallback to Zustand cache
-        if (variables.id) {
-          const zCache = useAppStore.getState().workDetailsCache || {};
-          const hit = zCache[variables.id.toString()];
-          if (hit) return { Media: hit };
-        }
+        useAppStore.getState().setRateLimited(true);
+        setTimeout(() => {
+          useAppStore.getState().setRateLimited(false);
+          useAppStore.getState().triggerReload();
+        }, 60000);
       } catch (e) {}
       
       throw err;
@@ -136,24 +106,7 @@ export async function fetchAniListBatch(ids: number[]) {
     }
   }
 
-  // If rate limited, pull missing IDs from Zustand persistent cache
-  let zustandCache: Record<string, any> = {};
-  try {
-    const { useAppStore } = await import("@/lib/store");
-    zustandCache = useAppStore.getState().workDetailsCache || {};
-    // Seed BATCH_CACHE from Zustand so repeated calls are instant
-    if (Object.keys(zustandCache).length > 0) {
-      for (let i = idsToFetch.length - 1; i >= 0; i--) {
-        const id = idsToFetch[i];
-        const hit = zustandCache[id.toString()];
-        if (hit) {
-          BATCH_CACHE.set(id, { data: hit, timestamp: Date.now() });
-          results.push(hit);
-          idsToFetch.splice(i, 1); // Remove from fetch list
-        }
-      }
-    }
-  } catch(e) {}
+
 
   // Fetch remaining IDs from AniList
   for (let i = 0; i < idsToFetch.length; i += 50) {
@@ -169,13 +122,7 @@ export async function fetchAniListBatch(ids: number[]) {
         });
       }
     } catch (err: any) {
-      // If rate limited or error: try Zustand cache for remaining chunk items
-      chunk.forEach(id => {
-        const hit = zustandCache[id.toString()];
-        if (hit && !results.find((r: any) => r.id === id)) {
-          results.push(hit);
-        }
-      });
+      console.warn("AniList batch fetch error", err);
     }
   }
 

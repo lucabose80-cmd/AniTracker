@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { adminDb, adminMessaging } from "@/lib/firebase-admin";
 
+export const maxDuration = 60; // 1 minute timeout
+export const dynamic = 'force-dynamic';
+
 const GET_RECENT_RELEASES = `
   query($greater: Int, $lesser: Int) {
     Page(page: 1, perPage: 50) {
@@ -40,7 +43,7 @@ const GET_MEDIA_STATUS_BATCH = `
 export async function GET(req: Request) {
   try {
     const authHeader = req.headers.get("authorization");
-    if (authHeader !== `Bearer anitracker123`) {
+    if (authHeader !== `Bearer anitracker123` && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -115,35 +118,48 @@ export async function GET(req: Request) {
     let notificationsSent = 0;
 
     if (schedules.length > 0) {
-      const usersSnap = await adminDb.collection("users").get();
-      
-      for (const userDoc of usersSnap.docs) {
-        const userData = userDoc.data();
-        const settings = userData.notification_settings || { releases: true };
-        const tokens = userData.fcm_tokens || [];
-
-        if (settings.releases && tokens.length > 0) {
-          const querySnap = await adminDb.collection("user_works").where("user_id", "==", userDoc.id).get();
-          const userLibraryIds = querySnap.docs.map((d: any) => d.data().work_id);
-          
-          for (const schedule of schedules) {
-            if (userLibraryIds.includes(schedule.mediaId.toString())) {
-              const payload = {
-                notification: {
-                  title: schedule.type === "MANGA" ? "Neues Kapitel verfügbar!" : "Neue Folge verfügbar!",
-                  body: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${schedule.media.title.english || schedule.media.title.native || schedule.media.title.romaji} ist jetzt online.`,
-                },
-                data: { link: `/work/${schedule.mediaId}`, type: "releases" },
-                webpush: {
-                  headers: { Urgency: "high" },
-                  notification: { icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png" },
-                  fcmOptions: { link: `/work/${schedule.mediaId}` }
-                },
-                tokens,
-              };
-              await adminMessaging.sendEachForMulticast(payload);
-              notificationsSent++;
+      for (const schedule of schedules) {
+        const workIdStr = schedule.mediaId.toString();
+        const querySnap = await adminDb.collection("user_works").where("work_id", "==", workIdStr).get();
+        if (querySnap.empty) continue;
+        
+        const userIds = [...new Set(querySnap.docs.map((d: any) => d.data().user_id))];
+        if (userIds.length === 0) continue;
+        
+        const tokensToNotify: string[] = [];
+        
+        // Fetch users in chunks of 10 to avoid limits, though here we just fetch them individually since there might be few
+        for (const uid of userIds) {
+          const userDoc = await adminDb.collection("users").doc(uid as string).get();
+          if (userDoc.exists) {
+            const userData = userDoc.data()!;
+            const settings = userData.notification_settings || { releases: true };
+            const tokens = userData.fcm_tokens || [];
+            if (settings.releases && tokens.length > 0) {
+              tokensToNotify.push(...tokens);
             }
+          }
+        }
+        
+        if (tokensToNotify.length > 0) {
+          const payload = {
+            notification: {
+              title: schedule.type === "MANGA" ? "Neues Kapitel verfügbar!" : "Neue Folge verfügbar!",
+              body: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${schedule.media.title.english || schedule.media.title.native || schedule.media.title.romaji} ist jetzt online.`,
+            },
+            data: { link: `/work/${schedule.mediaId}`, type: "releases" },
+            webpush: {
+              headers: { Urgency: "high" },
+              notification: { icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png" },
+              fcmOptions: { link: `/work/${schedule.mediaId}` }
+            },
+            tokens: tokensToNotify,
+          };
+          try {
+            await adminMessaging.sendEachForMulticast(payload);
+            notificationsSent++;
+          } catch (pushErr) {
+            console.error("FCM Send Error:", pushErr);
           }
         }
       }
@@ -226,8 +242,12 @@ export async function GET(req: Request) {
                   },
                   tokens,
                 };
-                await adminMessaging.sendEachForMulticast(payload);
-                wishlistNotificationsSent++;
+                try {
+                  await adminMessaging.sendEachForMulticast(payload);
+                  wishlistNotificationsSent++;
+                } catch (pushErr) {
+                  console.error("FCM Wishlist Send Error:", pushErr);
+                }
               }
             }
           }
