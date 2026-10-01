@@ -1,1 +1,0 @@
-import { GET } from './src/app/api/cron/releases/route'; async function test() { const req = new Request('http://localhost', { headers: { authorization: 'Bearer anitracker123' } }); const res = await GET(req); console.log(res.status, await res.text()); } test();  
