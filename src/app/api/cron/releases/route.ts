@@ -47,6 +47,19 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // Sync app version to Firestore so clients can detect updates
+    try {
+      const { CURRENT_APP_VERSION } = await import('@/lib/version');
+      const versionRef = adminDb.collection('app_config').doc('version');
+      const versionSnap = await versionRef.get();
+      if (!versionSnap.exists() || versionSnap.data()?.version !== CURRENT_APP_VERSION) {
+        await versionRef.set({ version: CURRENT_APP_VERSION });
+        console.log('App version synced to Firestore:', CURRENT_APP_VERSION);
+      }
+    } catch (vErr) {
+      console.error('Version sync error:', vErr);
+    }
+
     // ─── PART 1: Neue Folgen/Kapitel ─────────────────────────────────────────
     const now = Math.floor(Date.now() / 1000);
     const oneHourAgo = now - 3600;

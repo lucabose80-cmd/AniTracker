@@ -219,6 +219,20 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const handleNotificationClick = async (notif: InAppNotification) => {
+    // For APP_UPDATE: unregister SW and reload to get fresh version
+    if (notif.type === 'APP_UPDATE') {
+      if (!notif.read) {
+        await markNotificationRead(notif.notification_id);
+        setNotifications(prev => prev.map(n => n.notification_id === notif.notification_id ? { ...n, read: true } : n));
+      }
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map(r => r.unregister()));
+      }
+      window.location.reload();
+      return;
+    }
+
     if (!notif.read) {
       await markNotificationRead(notif.notification_id);
       setNotifications(prev => prev.map(n => n.notification_id === notif.notification_id ? { ...n, read: true } : n));
