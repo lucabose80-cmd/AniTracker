@@ -10,6 +10,7 @@ import { auth } from "@/lib/firebase";
 import { getAllUserWorks } from "@/lib/db/works";
 import { getAllUserProfiles } from "@/lib/db/users";
 import { UserWork } from "@/types/database";
+import { pauseWorkThisWeek, getPausedWorkIds } from "@/lib/db/pauses";
 
 const GENRES = ["Action", "Adventure", "Comedy", "Drama", "Fantasy", "Horror", "Mystery", "Psychological", "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller"];
 
@@ -42,6 +43,7 @@ export default function Home() {
   // Home Screen Tab State
   const [activeHomeTab, setActiveHomeTab] = useState<"UPNEXT" | "COMMUNITY" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS">("UPNEXT");
   const [authLoaded, setAuthLoaded] = useState(false);
+  const [pausedWorkIds, setPausedWorkIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const saved = sessionStorage.getItem('homeTab');
@@ -155,6 +157,9 @@ export default function Home() {
         setIsLoggedIn(true);
         const works = await getAllUserWorks(user.uid);
         setUserWorks(works);
+
+        // Load globally paused works
+        getPausedWorkIds().then(setPausedWorkIds).catch(console.error);
 
         const { getCalendarOverrides } = await import("@/lib/db/calendar");
         const overrides = await getCalendarOverrides();
@@ -290,6 +295,13 @@ export default function Home() {
     }
   };
 
+  const handlePauseWork = async (workId: string) => {
+    const user = auth.currentUser;
+    if (!user) return;
+    await pauseWorkThisWeek(workId, user.uid);
+    setPausedWorkIds(prev => new Set([...prev, workId]));
+  };
+
   // 3. Load Recommendations when Genre changes
   useEffect(() => {
     async function loadRecs() {
@@ -355,6 +367,7 @@ export default function Home() {
       return behindCount > 0 ? { ...w, details, behindCount, nextEpToWatch: current + 1 } : null;
     })
     .filter(w => w !== null)
+    .filter(w => !pausedWorkIds.has(w!.work_id))
     .sort((a, b) => b!.behindCount - a!.behindCount);
 
   // We need to know if we are still loading details
@@ -487,12 +500,21 @@ export default function Home() {
                     <h3 className="font-bold text-white text-sm line-clamp-1">{work.details?.title?.english || work.details?.title?.romaji}</h3>
                     <p className="text-xs text-gray-400 mt-1">Als nächstes: {work.details?.type === "MANGA" ? "Kapitel" : "Folge"} {work.nextEpToWatch}</p>
                   </div>
-                  <button 
-                    onClick={() => handleCheckIn(work.work_id, work.nextEpToWatch, work.details?.type || "ANIME")}
-                    className="mt-4 w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded-lg text-center transition shadow-lg"
-                  >
-                    Check in & Kommentieren
-                  </button>
+                  <div className="mt-4 flex gap-2">
+                    <button 
+                      onClick={() => handleCheckIn(work.work_id, work.nextEpToWatch, work.details?.type || "ANIME")}
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded-lg text-center transition shadow-lg"
+                    >
+                      ✓ Check in
+                    </button>
+                    <button 
+                      onClick={() => handlePauseWork(work.work_id)}
+                      title="Diese Woche kein Release – aus Up Next ausblenden"
+                      className="bg-gray-700 hover:bg-yellow-600/80 text-gray-300 hover:text-white text-xs font-bold py-2 px-3 rounded-lg transition shadow-lg"
+                    >
+                      ⏸
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
