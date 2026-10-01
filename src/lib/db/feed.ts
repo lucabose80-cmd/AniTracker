@@ -120,9 +120,11 @@ export async function getGlobalFeed(limitCount: number = 50): Promise<ActivityFe
     }
   }
   const activities: ActivityFeed[] = [];
-  snapshot.forEach((doc) => {
-    activities.push(doc.data() as ActivityFeed);
-  });
+  if (snapshot && typeof snapshot.forEach === 'function') {
+    snapshot.forEach((doc: any) => {
+      activities.push(doc.data() as ActivityFeed);
+    });
+  }
   
   return activities;
 }
@@ -169,9 +171,11 @@ export async function getGlobalFeedPaginated(limitCount: number = 50, lastDocTim
     }
   }
   const activities: ActivityFeed[] = [];
-  snapshot.forEach((doc) => {
-    activities.push(doc.data() as ActivityFeed);
-  });
+  if (snapshot && typeof snapshot.forEach === 'function') {
+    snapshot.forEach((doc: any) => {
+      activities.push(doc.data() as ActivityFeed);
+    });
+  }
   
   return activities;
 }
