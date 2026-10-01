@@ -279,10 +279,18 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-xs text-gray-300">
-                            <span className="font-bold text-gray-200">{n.actor_name}</span> 
-                            {n.type === "REPLY_TO_COMMENT" ? " hat auf deinen Kommentar geantwortet:" : " hat kommentiert:"}
+                            {n.type === "APP_UPDATE" ? (
+                              <span className="font-bold text-blue-400">System Update</span>
+                            ) : (
+                              <>
+                                <span className="font-bold text-gray-200">{n.actor_name}</span> 
+                                {n.type === "REPLY_TO_COMMENT" ? " hat auf deinen Kommentar geantwortet:" : " hat kommentiert:"}
+                              </>
+                            )}
                           </p>
-                          <p className="text-sm text-gray-400 truncate mt-0.5 italic">"{n.text}"</p>
+                          <p className={`text-sm text-gray-400 truncate mt-0.5 ${n.type !== "APP_UPDATE" ? "italic" : ""}`}>
+                            {n.type === "APP_UPDATE" ? n.text : `"${n.text}"`}
+                          </p>
                           <p className="text-[10px] text-gray-500 mt-1">{formatDistanceToNow(new Date(n.timestamp), { addSuffix: true, locale: de })}</p>
                         </div>
                         {!n.read && <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0 mt-1" />}
