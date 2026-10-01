@@ -109,7 +109,8 @@ export async function updateEpisodeProgress(userId: string, workId: string, curr
   const docId = `${userId}_${workId}`;
   const docRef = doc(db, "user_works", docId);
   
-  await updateDoc(docRef, { current_episode, auto_added: false });
+  const { setDoc } = await import("firebase/firestore");
+  await setDoc(docRef, { current_episode, auto_added: false }, { merge: true });
 }
 
 export async function updateUserWorkStatus(userId: string, workId: string, status: UserWork["status"]): Promise<void> {
@@ -117,5 +118,6 @@ export async function updateUserWorkStatus(userId: string, workId: string, statu
   const docId = `${userId}_${workId}`;
   const docRef = doc(db, "user_works", docId);
   
-  await updateDoc(docRef, { status, auto_added: false });
+  const { setDoc } = await import("firebase/firestore");
+  await setDoc(docRef, { status, auto_added: false }, { merge: true });
 }
