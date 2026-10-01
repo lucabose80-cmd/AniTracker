@@ -292,9 +292,10 @@ export async function addActivityComment(activityId: string, userId: string, tex
           }).catch(console.error);
         }
       }
-    } catch (e) {
-      console.error("Failed to update comments_count or send notification", e);
     }
+  } catch (e) {
+    console.error("Failed to update comments_count or send notification", e);
+  }
 
   return comment;
 }
