@@ -1,3 +1,4 @@
+// v1.1 - Benachrichtigungen verbessert & AniList-Limit Banner entfernt
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
