@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useAppStore } from "@/lib/store";
 import { fetchAniList, GET_TRENDING_WORKS } from "@/lib/anilist";
+import { auth, db } from "@/lib/firebase";
 
 export function ServiceWorkerManager() {
   const setIsOnline = useAppStore(state => state.setIsOnline);
@@ -30,6 +31,38 @@ export function ServiceWorkerManager() {
           }
         }
       });
+    }
+
+    // Build Change Detection: Compare stored SHA with current build SHA
+    if (typeof window !== 'undefined') {
+      const BUILD_SHA = process.env.NEXT_PUBLIC_BUILD_SHA;
+      if (BUILD_SHA) {
+        const storedSha = localStorage.getItem('anitracker_build_sha');
+        if (storedSha && storedSha !== BUILD_SHA) {
+          // New build detected - add in-app notification to Firestore for this user
+          const user = auth.currentUser;
+          if (user && db) {
+            import('@/lib/firebase').then(({ db }) => {
+              import('firebase/firestore').then(({ collection, doc, setDoc }) => {
+                const notifRef = doc(collection(db!, 'notifications'));
+                setDoc(notifRef, {
+                  notification_id: notifRef.id,
+                  user_id: user.uid,
+                  actor_id: 'SYSTEM',
+                  actor_name: 'System Update',
+                  actor_avatar: '/weebcheck-192x192.png',
+                  type: 'APP_UPDATE',
+                  text: 'Neues Update installiert! Die App wurde aktualisiert.',
+                  timestamp: new Date().toISOString(),
+                  read: false,
+                }).catch(console.error);
+              });
+            });
+          }
+        }
+        // Always update stored SHA
+        localStorage.setItem('anitracker_build_sha', BUILD_SHA);
+      }
     }
 
     // Online/Offline Detection

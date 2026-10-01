@@ -47,87 +47,6 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // --- PART 0: AUTO APP UPDATE DETECTION ---
-    let appUpdateTriggered = false;
-    let inAppNotificationsCount = 0;
-    let pushSentCount = 0;
-    
-    const currentSha = process.env.BUILD_SHA;
-    const currentMessage = process.env.BUILD_MESSAGE || "Neues App Update verfügbar!";
-    
-    if (currentSha) {
-      try {
-        const systemMetaRef = adminDb.collection("system").doc("meta");
-        const systemMetaDoc = await systemMetaRef.get();
-        const lastSha = systemMetaDoc.data()?.last_announced_sha;
-        
-        if (lastSha !== currentSha) {
-          const nowIso = new Date().toISOString();
-          const usersSnap = await adminDb.collection("users").get();
-          let tokensToNotify: string[] = [];
-          
-          const allUsers: any[] = [];
-          usersSnap.forEach((d: any) => allUsers.push({ id: d.id, data: d.data() }));
-
-          const batchSize = 400; // < 500
-          for (let i = 0; i < allUsers.length; i += batchSize) {
-            const chunk = allUsers.slice(i, i + batchSize);
-            const batch = adminDb.batch();
-
-            chunk.forEach(({ id, data }) => {
-              const notifRef = adminDb.collection("notifications").doc();
-              batch.set(notifRef, {
-                notification_id: notifRef.id,
-                user_id: id,
-                actor_id: "SYSTEM",
-                actor_name: "System Update",
-                actor_avatar: "/weebcheck-192x192.png",
-                type: "APP_UPDATE",
-                text: `Update verfügbar: ${currentMessage}`,
-                timestamp: nowIso,
-                read: false,
-              });
-              inAppNotificationsCount++;
-
-              const settings = data?.notification_settings || { releases: true, social: true };
-              if (settings.social !== false && data.fcm_tokens) {
-                tokensToNotify.push(...data.fcm_tokens);
-              }
-            });
-            await batch.commit();
-          }
-
-          if (tokensToNotify.length > 0) {
-            const chunkSize = 500;
-            for (let i = 0; i < tokensToNotify.length; i += chunkSize) {
-              const chunk = tokensToNotify.slice(i, i + chunkSize);
-              try {
-                const response = await adminMessaging.sendEachForMulticast({
-                  notification: { title: "App Update!", body: currentMessage },
-                  data: { link: "/", type: "social" },
-                  webpush: {
-                    headers: { Urgency: "high" },
-                    notification: { icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png" },
-                    fcmOptions: { link: "/" }
-                  },
-                  tokens: chunk,
-                });
-                pushSentCount += response.successCount;
-              } catch (pushErr) {
-                console.error("FCM Update Send Error:", pushErr);
-              }
-            }
-          }
-          
-          await systemMetaRef.set({ last_announced_sha: currentSha }, { merge: true });
-          appUpdateTriggered = true;
-          console.log("App Update notification triggered for SHA:", currentSha);
-        }
-      } catch (updateErr) {
-        console.error("App Update Auto-Trigger Error:", updateErr);
-      }
-    }
-
     // ─── PART 1: Neue Folgen/Kapitel ─────────────────────────────────────────
     const now = Math.floor(Date.now() / 1000);
     const oneHourAgo = now - 3600;
@@ -340,9 +259,6 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ 
       success: true,
-      appUpdateTriggered,
-      inAppNotificationsCount,
-      pushSentCount,
       notificationsSent,
       wishlistMoved,
       wishlistNotificationsSent,

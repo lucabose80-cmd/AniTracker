@@ -20,6 +20,7 @@ const nextConfig: NextConfig = {
     // Bake the git SHA at build-time so it's available in serverless API routes at runtime
     BUILD_SHA: process.env.VERCEL_GIT_COMMIT_SHA || `local-${Date.now()}`,
     BUILD_MESSAGE: process.env.VERCEL_GIT_COMMIT_MESSAGE || "Lokaler Build",
+    NEXT_PUBLIC_BUILD_SHA: process.env.VERCEL_GIT_COMMIT_SHA || `local-${Date.now()}`,
   },
 };
 
