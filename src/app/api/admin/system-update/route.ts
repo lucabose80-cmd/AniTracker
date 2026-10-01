@@ -23,7 +23,6 @@ export async function POST(req: Request) {
     let inAppNotificationsCount = 0;
 
     const nowIso = new Date().toISOString();
-    const systemActivityRef = adminDb.collection("activity_feed").doc();
     
     // Store all users in an array to chunk them safely
     const allUsers: any[] = [];
@@ -33,17 +32,6 @@ export async function POST(req: Request) {
     for (let i = 0; i < allUsers.length; i += batchSize) {
       const chunk = allUsers.slice(i, i + batchSize);
       const batch = adminDb.batch();
-
-      // Ensure systemActivityRef is created only once on the first chunk
-      if (i === 0) {
-        batch.set(systemActivityRef, {
-          activity_id: systemActivityRef.id,
-          user_id: "SYSTEM", // Pseudo-user
-          action_type: "MANUAL_POST",
-          text: `${version ? `Version ${version}: ` : ''}${title}\n\n${message}`,
-          timestamp: nowIso,
-        });
-      }
 
       chunk.forEach(({ id, data }) => {
         // 1. Add In-App Notification (Bell icon)
@@ -55,7 +43,6 @@ export async function POST(req: Request) {
           actor_name: "System Update",
           actor_avatar: "/weebcheck-192x192.png",
           type: "APP_UPDATE",
-          activity_id: systemActivityRef.id, // link to the system feed post
           text: `Update verfügbar: ${title}`,
           timestamp: nowIso,
           read: false,

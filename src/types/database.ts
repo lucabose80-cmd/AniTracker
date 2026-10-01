@@ -141,7 +141,7 @@ export interface InAppNotification {
   actor_name: string;
   actor_avatar: string;
   type: "REPLY_TO_COMMENT" | "COMMENT_ON_THREAD" | "NEW_EPISODE_THREAD" | "APP_UPDATE" | "SYSTEM";
-  activity_id: string;
+  activity_id?: string;
   work_id?: string;
   comment_id?: string;
   text: string;
