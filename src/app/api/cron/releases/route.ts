@@ -52,8 +52,8 @@ export async function GET(req: Request) {
     let inAppNotificationsCount = 0;
     let pushSentCount = 0;
     
-    const currentSha = process.env.VERCEL_GIT_COMMIT_SHA;
-    const currentMessage = process.env.VERCEL_GIT_COMMIT_MESSAGE || "Neues App Update verfügbar!";
+    const currentSha = process.env.BUILD_SHA;
+    const currentMessage = process.env.BUILD_MESSAGE || "Neues App Update verfügbar!";
     
     if (currentSha) {
       try {
