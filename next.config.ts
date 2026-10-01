@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "avatars.githubusercontent.com" },
     ],
   },
+  serverExternalPackages: ["firebase-admin"],
 };
 
 export default withSerwist(nextConfig);
