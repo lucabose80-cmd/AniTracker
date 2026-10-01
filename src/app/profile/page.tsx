@@ -11,6 +11,7 @@ import { requestForToken } from "@/lib/fcm";
 import { getAllUserWorks } from "@/lib/db/works";
 import { fetchAniListBatch } from "@/lib/anilist";
 import { useAppStore } from "@/lib/store";
+import { ProfileStats } from "@/components/ui/ProfileStats";
 
 function FavoriteItem({ id, index, workDetails }: { id: string, index: number, workDetails?: any }) {
   return (
@@ -249,6 +250,8 @@ export default function ProfilePage() {
           </Link>
         )}
       </div>
+
+      <ProfileStats allWorks={allWorks} aniListDetails={aniListDetails} />
 
       {user && (
         <section className="bg-[#1a1d24] border border-gray-800 rounded-2xl p-5 shadow-lg">

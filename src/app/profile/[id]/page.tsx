@@ -6,6 +6,7 @@ import { getAllUserWorks } from "@/lib/db/works";
 import { fetchAniListBatch } from "@/lib/anilist";
 import Link from "next/link";
 import { User as UserIcon } from "lucide-react";
+import { ProfileStats } from "@/components/ui/ProfileStats";
 
 function FavoriteItem({ id, index, workDetails }: { id: string, index: number, workDetails?: any }) {
   return (
@@ -35,6 +36,7 @@ export default function PublicProfilePage({ params }: { params: Promise<{ id: st
   const [isLoading, setIsLoading] = useState(true);
   const [favItems, setFavItems] = useState<any[]>([]);
   const [aniListDetails, setAniListDetails] = useState<Record<string, any>>({});
+  const [allWorks, setAllWorks] = useState<any[]>([]);
 
   useEffect(() => {
     async function load() {
@@ -44,6 +46,7 @@ export default function PublicProfilePage({ params }: { params: Promise<{ id: st
         if (p) {
           setProfile(p);
           const works = await getAllUserWorks(userId);
+          setAllWorks(works);
           
           const topAnime = works
             .filter((w: any) => (w.evaluation?.overallScore || 0) > 0)
@@ -52,7 +55,7 @@ export default function PublicProfilePage({ params }: { params: Promise<{ id: st
             
           setFavItems(topAnime);
           
-          const idsToFetch = topAnime.map(w => parseInt(w.work_id, 10));
+          const idsToFetch = works.map(w => parseInt(w.work_id, 10));
           if (idsToFetch.length > 0) {
             const mediaList = await fetchAniListBatch(idsToFetch);
             const map: Record<string, any> = {};
@@ -95,6 +98,8 @@ export default function PublicProfilePage({ params }: { params: Promise<{ id: st
         </div>
       </div>
       
+      <ProfileStats allWorks={allWorks} aniListDetails={aniListDetails} />
+
       <div className="bg-[#1a1d24] border border-gray-800 rounded-xl p-4 shadow-lg">
         <h3 className="font-bold text-lg mb-4 text-blue-400">All-Time Top 9</h3>
         <div className="grid grid-cols-3 gap-2">

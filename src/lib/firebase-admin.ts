@@ -17,7 +17,10 @@ if (!getApps().length) {
   }
 }
 
+import { getAuth } from 'firebase-admin/auth';
+
 const adminDb = getFirestore();
 const adminMessaging = getMessaging();
+const adminAuth = getAuth();
 
-export { adminDb, adminMessaging };
+export { adminDb, adminMessaging, adminAuth };
