@@ -25,6 +25,7 @@ export default function Home() {
   
   // User State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isFetchingUserWorks, setIsFetchingUserWorks] = useState(false);
   const [userWorks, setUserWorks] = useState<UserWork[]>([]);
   const [userAniListDetails, setUserAniListDetails] = useState<Record<string, any>>({});
   const [calendarOverrides, setCalendarOverrides] = useState<Record<string, any>>({});
@@ -163,6 +164,7 @@ export default function Home() {
         const idsToFetch = works.map(w => parseInt(w.work_id, 10));
         
         if (idsToFetch.length > 0) {
+          setIsFetchingUserWorks(true);
           // Optimistically show cache immediately
           const cache = useAppStore.getState().workDetailsCache || {};
           if (Object.keys(cache).length > 0) {
@@ -251,7 +253,11 @@ export default function Home() {
               }
             });
             setSelectedGenre(topGenre);
+          } finally {
+            setIsFetchingUserWorks(false);
           }
+        } else {
+          setIsFetchingUserWorks(false);
         }
       } else {
         setIsLoggedIn(false);
@@ -356,7 +362,7 @@ export default function Home() {
     .sort((a, b) => b!.behindCount - a!.behindCount);
 
   // We need to know if we are still loading details
-  const isLoadingDetails = userWorks.length > 0 && Object.keys(userAniListDetails).length === 0;
+  const isLoadingDetails = isFetchingUserWorks && Object.keys(userAniListDetails).length === 0;
 
   return (
     <div className="flex flex-col gap-6 px-4 pt-6 pb-24">

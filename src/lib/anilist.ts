@@ -5,7 +5,7 @@ const BATCH_CACHE = new Map<number, { data: any; timestamp: number }>();
 const IN_FLIGHT_REQUESTS = new Map<string, Promise<any>>();
 const CACHE_DURATION = 1000 * 60 * 15; // 15 minutes
 
-export async function fetchAniList(query: string, variables: any = {}, retries = 2): Promise<any> {
+export async function fetchAniList(query: string, variables: any = {}, retries = 1): Promise<any> {
   const cacheKey = JSON.stringify({ query, variables });
   
   // 1. Return cached if valid
@@ -44,7 +44,7 @@ export async function fetchAniList(query: string, variables: any = {}, retries =
 
       const response = await Promise.race([
         fetchPromise,
-        new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("AniList API Timeout")), 15000))
+        new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("AniList API Timeout")), 8000))
       ]);
 
       if (!response.ok) {
@@ -80,6 +80,16 @@ export async function fetchAniList(query: string, variables: any = {}, retries =
         await new Promise(r => setTimeout(r, 2000));
         return fetchAniList(query, variables, retries - 1);
       }
+      // If we completely exhausted retries due to timeout or network error
+      try {
+        const { useAppStore } = await import("@/lib/store");
+        useAppStore.getState().setRateLimited(true);
+        setTimeout(() => {
+          useAppStore.getState().setRateLimited(false);
+          useAppStore.getState().triggerReload();
+        }, 60000);
+      } catch (e) {}
+      
       throw err;
     } finally {
       IN_FLIGHT_REQUESTS.delete(cacheKey);
