@@ -46,15 +46,12 @@ export function ServiceWorkerManager() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     setIsOnline(navigator.onLine);
-    if (navigator.onLine) {
-      clearOfflineQueue();
-    }
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [setIsOnline, clearOfflineQueue]);
+  }, [setIsOnline]);
 
   return null;
 }
