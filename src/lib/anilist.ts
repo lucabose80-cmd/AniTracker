@@ -14,6 +14,18 @@ export async function fetchAniList(query: string, variables: any = {}, retries =
     return cached.data;
   }
   
+  // Check online status
+  let isOnline = true;
+  try {
+    const { useAppStore } = await import("@/lib/store");
+    isOnline = useAppStore.getState().isOnline;
+  } catch(e) {}
+  
+  if (!isOnline) {
+    if (cached) return cached.data;
+    throw new Error("Offline and no cache available");
+  }
+  
   // 2. Return in-flight promise if currently fetching
   if (IN_FLIGHT_REQUESTS.has(cacheKey)) {
     return IN_FLIGHT_REQUESTS.get(cacheKey);
@@ -36,11 +48,14 @@ export async function fetchAniList(query: string, variables: any = {}, retries =
       ]);
 
       if (!response.ok) {
-        if (response.status === 429 && retries > 0) {
+        if (response.status === 429) {
           const retryAfter = response.headers.get("Retry-After");
           const delay = retryAfter ? parseInt(retryAfter) * 1000 : 2500;
+          if (delay > 5000 || retries <= 0) {
+            if (cached) return cached.data;
+            throw new Error(`RateLimit`); // Special message
+          }
           await new Promise(r => setTimeout(r, delay));
-          // Bypass cache check for inner retry directly
           return fetchAniList(query, variables, retries - 1);
         }
         const errorData = await response.json().catch(() => ({}));
@@ -51,6 +66,7 @@ export async function fetchAniList(query: string, variables: any = {}, retries =
       MEMORY_CACHE.set(cacheKey, { data: json.data, timestamp: Date.now() });
       return json.data;
     } catch (err: any) {
+      if (err.message === "RateLimit") throw err; // Don't retry
       if (retries > 0) {
         await new Promise(r => setTimeout(r, 2000));
         return fetchAniList(query, variables, retries - 1);

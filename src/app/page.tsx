@@ -160,9 +160,15 @@ export default function Home() {
         const idsToFetch = works.map(w => parseInt(w.work_id, 10));
         
         if (idsToFetch.length > 0) {
+          // Optimistically show cache immediately
+          const cache = useAppStore.getState().workDetailsCache || {};
+          if (Object.keys(cache).length > 0) {
+            setUserAniListDetails(cache);
+          }
+          
           try {
             const mediaList = await fetchAniListBatch(idsToFetch);
-            const map: Record<string, any> = {};
+            const map: Record<string, any> = { ...cache };
             const genreCounts: Record<string, number> = {};
             
             mediaList.forEach((m: any) => {
