@@ -27,7 +27,7 @@ const idbStorage = {
       const value = await get(name);
       return value !== undefined ? value : null;
     } catch (e) {
-      console.warn('IDB fail', e);
+      if (typeof window !== 'undefined') console.warn('IDB fail', e);
       return null;
     }
   },
@@ -35,14 +35,14 @@ const idbStorage = {
     try {
       await set(name, value);
     } catch (e) {
-      console.warn('IDB fail', e);
+      if (typeof window !== 'undefined') console.warn('IDB fail', e);
     }
   },
   removeItem: async (name: string): Promise<void> => {
     try {
       await del(name);
     } catch (e) {
-      console.warn('IDB fail', e);
+      if (typeof window !== 'undefined') console.warn('IDB fail', e);
     }
   },
 };
