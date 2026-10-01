@@ -1,5 +1,5 @@
 export type WorkType = "ANIME" | "MANGA" | "MANHWA";
-export type UserWorkStatus = "PLANNING" | "CURRENT" | "COMPLETED" | "DROPPED" | "NONE";
+export type UserWorkStatus = "PLANNING" | "CURRENT" | "COMPLETED" | "DROPPED" | "PAUSED" | "NONE";
 export type EmotionalImpact = "Leicht" | "Mitgenommen" | "Tränen nah" | "Tränen ausgelöst" | "Geweint" | "None";
 export type WatchMode = "SUB" | "DUB" | "BEIDES" | "N/A";
 
