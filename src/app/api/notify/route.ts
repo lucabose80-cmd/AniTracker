@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { adminDb, adminMessaging } from "@/lib/firebase-admin";
+
 
 export async function POST(req: Request) {
   try {
+    const { adminDb, adminMessaging } = await import("@/lib/firebase-admin");
     const { targetUserId, title, body, type, link, excludeUserId } = await req.json();
 
     if (!targetUserId || !title || !body || !type) {

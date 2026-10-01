@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { adminDb, adminMessaging } from "@/lib/firebase-admin";
+
 
 export const dynamic = 'force-dynamic';
 
@@ -41,6 +41,7 @@ const GET_MEDIA_STATUS_BATCH = `
 
 export async function GET(req: Request) {
   try {
+    const { adminDb, adminMessaging } = await import("@/lib/firebase-admin");
     const authHeader = req.headers.get("authorization");
     if (authHeader !== `Bearer anitracker123` && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
