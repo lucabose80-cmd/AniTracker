@@ -2,7 +2,7 @@ import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
 
-import { getAuth } from 'firebase-admin/auth';
+
 
 const initApp = () => {
   if (!getApps().length) {
@@ -28,7 +28,3 @@ export const adminDb = {
 export const adminMessaging = {
   get sendEachForMulticast() { initApp(); return getMessaging().sendEachForMulticast.bind(getMessaging()); }
 } as unknown as ReturnType<typeof getMessaging>;
-
-export const adminAuth = {
-  get verifyIdToken() { initApp(); return getAuth().verifyIdToken.bind(getAuth()); }
-} as unknown as ReturnType<typeof getAuth>;
