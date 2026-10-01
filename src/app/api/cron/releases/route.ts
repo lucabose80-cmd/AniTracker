@@ -52,7 +52,7 @@ export async function GET(req: Request) {
       const { CURRENT_APP_VERSION } = await import('@/lib/version');
       const versionRef = adminDb.collection('app_config').doc('version');
       const versionSnap = await versionRef.get();
-      if (!versionSnap.exists() || versionSnap.data()?.version !== CURRENT_APP_VERSION) {
+      if (!versionSnap.exists || versionSnap.data()?.version !== CURRENT_APP_VERSION) {
         await versionRef.set({ version: CURRENT_APP_VERSION });
         console.log('App version synced to Firestore:', CURRENT_APP_VERSION);
       }

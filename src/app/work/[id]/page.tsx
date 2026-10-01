@@ -149,7 +149,7 @@ export default function WorkDetailPage() {
     calculatedAvailableEps = Math.max(0, calculatedAvailableEps - synchroOffset);
   }
 
-  const handleQuickAdd = async (status: "CURRENT" | "COMPLETED" | "PLANNING") => {
+  const handleQuickAdd = async (status: "CURRENT" | "COMPLETED" | "PLANNING" | "PAUSED") => {
     const user = auth?.currentUser;
     if (!user) {
       alert("Bitte erst einloggen!");
