@@ -55,7 +55,7 @@ export async function fetchAniList(query: string, variables: any = {}, retries =
 
       const response = await Promise.race([
         fetchPromise,
-        new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("AniList API Timeout")), 8000))
+        new Promise<Response>((_, reject) => setTimeout(() => reject(new Error("AniList API Timeout")), 15000))
       ]);
 
       if (!response.ok) {
