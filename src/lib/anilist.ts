@@ -23,6 +23,17 @@ export async function fetchAniList(query: string, variables: any = {}, retries =
   
   if (!isOnline) {
     if (cached) return cached.data;
+    
+    // Fallback to Zustand persistent cache for single work details
+    if (variables.id) {
+      try {
+        const { useAppStore } = await import("@/lib/store");
+        const zCache = useAppStore.getState().workDetailsCache || {};
+        const hit = zCache[variables.id.toString()];
+        if (hit) return { Media: hit }; // GET_WORK_DETAILS returns { Media: { ... } }
+      } catch (e) {}
+    }
+    
     throw new Error("Offline and no cache available");
   }
   
@@ -88,6 +99,13 @@ export async function fetchAniList(query: string, variables: any = {}, retries =
           useAppStore.getState().setRateLimited(false);
           useAppStore.getState().triggerReload();
         }, 60000);
+        
+        // Fallback to Zustand cache
+        if (variables.id) {
+          const zCache = useAppStore.getState().workDetailsCache || {};
+          const hit = zCache[variables.id.toString()];
+          if (hit) return { Media: hit };
+        }
       } catch (e) {}
       
       throw err;

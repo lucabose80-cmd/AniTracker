@@ -99,7 +99,26 @@ export async function getGlobalFeed(limitCount: number = 50): Promise<ActivityFe
     limit(limitCount)
   );
   
-  const snapshot = await getDocs(q);
+  let snapshot;
+  try {
+    const { useAppStore } = await import("@/lib/store");
+    if (!useAppStore.getState().isOnline) {
+      const { getDocsFromCache } = await import("firebase/firestore");
+      snapshot = await getDocsFromCache(q);
+    } else {
+      snapshot = await Promise.race([
+        getDocs(q),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore Timeout")), 3000))
+      ]) as any;
+    }
+  } catch (e) {
+    const { getDocsFromCache } = await import("firebase/firestore");
+    try {
+      snapshot = await getDocsFromCache(q);
+    } catch(e2) {
+      return [];
+    }
+  }
   const activities: ActivityFeed[] = [];
   snapshot.forEach((doc) => {
     activities.push(doc.data() as ActivityFeed);
@@ -129,7 +148,26 @@ export async function getGlobalFeedPaginated(limitCount: number = 50, lastDocTim
     );
   }
   
-  const snapshot = await getDocs(q);
+  let snapshot;
+  try {
+    const { useAppStore } = await import("@/lib/store");
+    if (!useAppStore.getState().isOnline) {
+      const { getDocsFromCache } = await import("firebase/firestore");
+      snapshot = await getDocsFromCache(q);
+    } else {
+      snapshot = await Promise.race([
+        getDocs(q),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Firestore Timeout")), 3000))
+      ]) as any;
+    }
+  } catch (e) {
+    const { getDocsFromCache } = await import("firebase/firestore");
+    try {
+      snapshot = await getDocsFromCache(q);
+    } catch(e2) {
+      return [];
+    }
+  }
   const activities: ActivityFeed[] = [];
   snapshot.forEach((doc) => {
     activities.push(doc.data() as ActivityFeed);
