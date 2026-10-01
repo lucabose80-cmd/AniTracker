@@ -94,11 +94,13 @@ export async function fetchAniList(query: string, variables: any = {}, retries =
       // If we completely exhausted retries due to timeout or network error
       try {
         const { useAppStore } = await import("@/lib/store");
-        useAppStore.getState().setRateLimited(true);
-        setTimeout(() => {
-          useAppStore.getState().setRateLimited(false);
-          useAppStore.getState().triggerReload();
-        }, 60000);
+        if (useAppStore.getState().isOnline) {
+          useAppStore.getState().setRateLimited(true);
+          setTimeout(() => {
+            useAppStore.getState().setRateLimited(false);
+            useAppStore.getState().triggerReload();
+          }, 60000);
+        }
         
         // Fallback to Zustand cache
         if (variables.id) {

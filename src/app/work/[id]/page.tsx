@@ -76,6 +76,15 @@ export default function WorkDetailPage() {
 
         setWork(data.Media);
         
+        // Cache this detailed view for offline access
+        try {
+          const { useAppStore } = await import("@/lib/store");
+          useAppStore.getState().setWorkDetailsCache({
+            ...useAppStore.getState().workDetailsCache,
+            [id]: data.Media
+          });
+        } catch(e) {}
+        
         if (overrides[id]) {
           if (overrides[id].weeklyTime) {
             setHasCustomOverride(true);

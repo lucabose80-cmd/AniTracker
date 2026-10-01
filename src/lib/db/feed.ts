@@ -210,8 +210,10 @@ export async function addActivityComment(activityId: string, userId: string, tex
     await updateDoc(activityRef, { comments_count: increment(1) });
     
     // Notification Logic
-    const activitySnap = await getDoc(activityRef);
-    if (activitySnap.exists()) {
+    const { useAppStore } = await import("@/lib/store");
+    if (useAppStore.getState().isOnline) {
+      const activitySnap = await getDoc(activityRef);
+      if (activitySnap.exists()) {
       const activityData = activitySnap.data() as ActivityFeed;
       const actorProfile = await getUserProfile(userId);
       const actorName = actorProfile?.username || "Unbekannt";
@@ -285,14 +287,14 @@ export async function addActivityComment(activityId: string, userId: string, tex
             title: `${actorName} hat deinen Beitrag kommentiert`,
             body: text,
             type: "replies",
-            link: "/feed"
-          })
-        }).catch(console.error);
+              link: "/feed"
+            })
+          }).catch(console.error);
+        }
       }
+    } catch (e) {
+      console.error("Failed to update comments_count or send notification", e);
     }
-  } catch (e) {
-    console.error("Failed to update comments_count or send notification", e);
-  }
 
   return comment;
 }
