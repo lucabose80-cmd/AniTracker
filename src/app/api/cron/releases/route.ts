@@ -47,6 +47,44 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // --- PART 0: AUTO APP UPDATE DETECTION ---
+    let appUpdateTriggered = false;
+    const currentSha = process.env.VERCEL_GIT_COMMIT_SHA;
+    const currentMessage = process.env.VERCEL_GIT_COMMIT_MESSAGE || "Neues App Update verfügbar!";
+    
+    if (currentSha) {
+      try {
+        const systemMetaRef = adminDb.collection("system").doc("meta");
+        const systemMetaDoc = await systemMetaRef.get();
+        const lastSha = systemMetaDoc.data()?.last_announced_sha;
+        
+        if (lastSha !== currentSha) {
+          const host = req.headers.get("host");
+          const protocol = host?.includes("localhost") ? "http" : "https";
+          const updateUrl = `${protocol}://${host}/api/admin/system-update`;
+          
+          await fetch(updateUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${process.env.CRON_SECRET || 'anitracker123'}`,
+            },
+            body: JSON.stringify({
+              title: "App Update!",
+              message: currentMessage,
+              version: process.env.npm_package_version || "Neu",
+            }),
+          });
+          
+          await systemMetaRef.set({ last_announced_sha: currentSha }, { merge: true });
+          appUpdateTriggered = true;
+          console.log("App Update notification triggered for SHA:", currentSha);
+        }
+      } catch (updateErr) {
+        console.error("App Update Auto-Trigger Error:", updateErr);
+      }
+    }
+
     // ─── PART 1: Neue Folgen/Kapitel ─────────────────────────────────────────
     const now = Math.floor(Date.now() / 1000);
     const oneHourAgo = now - 3600;
@@ -259,6 +297,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ 
       success: true,
+      appUpdateTriggered,
       notificationsSent,
       wishlistMoved,
       wishlistNotificationsSent,
