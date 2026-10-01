@@ -26,6 +26,10 @@ export function BottomNav() {
             <Link
               key={item.name}
               href={item.href}
+              onClick={() => {
+                const { useAppStore } = require("@/lib/store");
+                useAppStore.getState().triggerReload();
+              }}
               className={`flex flex-col items-center justify-center space-y-1 ${
                 isActive ? "text-blue-600" : "text-gray-400 hover:text-gray-300"
               }`}

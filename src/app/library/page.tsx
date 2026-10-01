@@ -166,6 +166,7 @@ function DraggableLibraryItem({ id, children }: { id: string, children: React.Re
 
 export default function LibraryPage() {
   const { contentType } = useAppStore();
+  const reloadTrigger = useAppStore(state => state.reloadTrigger);
   const router = useRouter();
   
   const [items, setItems] = useState<string[]>(Array(9).fill("").map((_, i) => `empty-${i}`));
@@ -254,7 +255,7 @@ export default function LibraryPage() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [reloadTrigger]);
 
   // Sync Weekly Ranking list when contentType or aniListDetails changes
   useEffect(() => {

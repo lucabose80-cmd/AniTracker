@@ -331,23 +331,6 @@ export default function WorkDetailPage() {
     if (inLibrary) {
       try {
         await updateEpisodeProgress(user.uid, id, newEp);
-        
-        if (increment > 0) {
-          const { createActivity, getGlobalFeed } = await import("@/lib/db/feed");
-          const recent = await getGlobalFeed(200);
-          const exists = recent.some((a: any) => a.action_type === "EPISODE_THREAD" && a.work_id === id && a.episode_num === newEp);
-          
-          if (!exists) {
-            const { useAppStore } = await import("@/lib/store");
-            if (!useAppStore.getState().isOnline) useAppStore.getState().incrementOfflineQueue();
-            const text = work?.type === "MANGA" ? `Thread für Kapitel ${newEp}` : `Thread für Folge ${newEp}`;
-            await createActivity(user.uid, "EPISODE_THREAD", id, text, undefined, newEp);
-            
-            if (window.confirm("Thread wurde erfolgreich erstellt! Möchtest du zum Social Feed wechseln, um mitzudiskutieren?")) {
-              window.location.href = "/feed";
-            }
-          }
-        }
       } catch (error) {
         console.error(error);
         setCurrentEpisode(prevEp);

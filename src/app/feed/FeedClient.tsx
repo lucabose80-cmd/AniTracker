@@ -170,6 +170,10 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
     if (initialActivities && initialActivities.length > 0) {
       fetchRelatedData(initialActivities);
       if (initialActivities.length < 30) setHasMore(false);
+      
+      if (!useAppStore.getState().isOnline) {
+        loadFeed(); // Refetch from local cache to get pending writes
+      }
     } else {
       loadFeed();
     }
