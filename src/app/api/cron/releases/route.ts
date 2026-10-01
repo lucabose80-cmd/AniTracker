@@ -185,6 +185,8 @@ export async function GET(req: Request) {
           const aniListInfo = aniListStatusMap[uWork.work_id];
           if (!aniListInfo) continue;
 
+          if (uWork.added_status !== "NOT_YET_RELEASED") continue; // Nur Werke beachten, die bei Hinzufügen noch nicht raus waren
+
           if (aniListInfo.status === "RELEASING" || aniListInfo.status === "FINISHED") {
             const userId = uWork.user_id;
             const workId = uWork.work_id;

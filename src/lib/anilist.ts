@@ -55,7 +55,10 @@ export async function fetchAniList(query: string, variables: any = {}, retries =
           try {
             const { useAppStore } = await import("@/lib/store");
             useAppStore.getState().setRateLimited(true);
-            setTimeout(() => useAppStore.getState().setRateLimited(false), delay);
+            setTimeout(() => {
+              useAppStore.getState().setRateLimited(false);
+              useAppStore.getState().triggerReload(); // Signal pages to refetch
+            }, delay);
           } catch(e) {}
           if (delay > 5000 || retries <= 0) {
             if (cached) return cached.data;
@@ -93,7 +96,7 @@ export async function fetchAniListBatch(ids: number[]) {
   const results: any[] = [];
   const idsToFetch: number[] = [];
 
-  // Check cache for individual IDs
+  // Check in-memory BATCH_CACHE first
   for (const id of validIds) {
     const cached = BATCH_CACHE.get(id);
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
@@ -103,29 +106,58 @@ export async function fetchAniListBatch(ids: number[]) {
     }
   }
 
-  // Fetch missing IDs in chunks
+  // If rate limited, pull missing IDs from Zustand persistent cache
+  let zustandCache: Record<string, any> = {};
+  try {
+    const { useAppStore } = await import("@/lib/store");
+    zustandCache = useAppStore.getState().workDetailsCache || {};
+    // Seed BATCH_CACHE from Zustand so repeated calls are instant
+    if (Object.keys(zustandCache).length > 0) {
+      for (let i = idsToFetch.length - 1; i >= 0; i--) {
+        const id = idsToFetch[i];
+        const hit = zustandCache[id.toString()];
+        if (hit) {
+          BATCH_CACHE.set(id, { data: hit, timestamp: Date.now() });
+          results.push(hit);
+          idsToFetch.splice(i, 1); // Remove from fetch list
+        }
+      }
+    }
+  } catch(e) {}
+
+  // Fetch remaining IDs from AniList
   for (let i = 0; i < idsToFetch.length; i += 50) {
     const chunk = idsToFetch.slice(i, i + 50);
     if (chunk.length === 0) continue;
     
-    const data = await fetchAniList(GET_WORKS_BATCH, { ids: chunk });
-    if (data?.Page?.media) {
-      data.Page.media.forEach((m: any) => {
-        BATCH_CACHE.set(m.id, { data: m, timestamp: Date.now() });
-        results.push(m);
+    try {
+      const data = await fetchAniList(GET_WORKS_BATCH, { ids: chunk });
+      if (data?.Page?.media) {
+        data.Page.media.forEach((m: any) => {
+          BATCH_CACHE.set(m.id, { data: m, timestamp: Date.now() });
+          results.push(m);
+        });
+      }
+    } catch (err: any) {
+      // If rate limited or error: try Zustand cache for remaining chunk items
+      chunk.forEach(id => {
+        const hit = zustandCache[id.toString()];
+        if (hit && !results.find((r: any) => r.id === id)) {
+          results.push(hit);
+        }
       });
     }
   }
-  
+
   return results;
 }
 
 // -- Queries --
 
 export const GET_TRENDING_WORKS = `
-  query($type: MediaType, $season: MediaSeason, $seasonYear: Int, $page: Int = 1, $perPage: Int = 20) {
+  query($type: MediaType, $season: MediaSeason, $seasonYear: Int, $page: Int = 1, $perPage: Int = 20, $genre_in: [String]) {
     Page(page: $page, perPage: $perPage) {
-      media(type: $type, sort: TRENDING_DESC, season: $season, seasonYear: $seasonYear) {
+      media(type: $type, sort: TRENDING_DESC, season: $season, seasonYear: $seasonYear, genre_in: $genre_in) {
         id
         title {
           romaji

@@ -58,6 +58,7 @@ export interface UserWork {
   manual_max_episode?: number;
   auto_added?: boolean;
   top9_rank?: number;
+  added_status?: string;
   
   adaptationScores: {
     story: number;

@@ -21,6 +21,7 @@ export default function Home() {
   const [trendingWorks, setTrendingWorks] = useState<any[]>([]);
   const [upcomingWorks, setUpcomingWorks] = useState<any[]>([]);
   const [isLoadingTrending, setIsLoadingTrending] = useState(true);
+  const [trendingGenre, setTrendingGenre] = useState<string>("All");
   
   // User State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -75,29 +76,7 @@ export default function Home() {
     return { season: "WINTER", year: new Date().getFullYear() + 1 };
   }
 
-  // 1. Load Trending (Always)
   useEffect(() => {
-    async function loadTrending() {
-      setIsLoadingTrending(true);
-      try {
-        const typeArg = contentType === "ANIME" ? "ANIME" : "MANGA";
-        const seasonArgs = contentType === "ANIME" ? { season: getCurrentSeason(), seasonYear: new Date().getFullYear() } : {};
-        const nextSeasonArgs = contentType === "ANIME" ? { season: getNextSeason().season, seasonYear: getNextSeason().year } : {};
-        
-        const [trendingData, upcomingData] = await Promise.all([
-          fetchAniList(GET_TRENDING_WORKS, { type: typeArg, page: 1, perPage: 30, ...seasonArgs }),
-          fetchAniList(GET_UPCOMING_WORKS, { type: typeArg, page: 1, perPage: 30, ...nextSeasonArgs })
-        ]);
-
-        setTrendingWorks(trendingData.Page.media);
-        setUpcomingWorks(upcomingData.Page.media);
-      } catch (error) {
-        console.error("Failed to load trending", error);
-      } finally {
-        setIsLoadingTrending(false);
-      }
-    }
-
     async function loadCommunityRanking() {
       setIsLoadingCommunity(true);
       try {
@@ -139,9 +118,33 @@ export default function Home() {
       }
     }
 
-    loadTrending();
     loadCommunityRanking();
   }, [contentType]);
+
+  useEffect(() => {
+    async function loadTrending() {
+      setIsLoadingTrending(true);
+      try {
+        const typeArg = contentType === "ANIME" ? "ANIME" : "MANGA";
+        const seasonArgs = contentType === "ANIME" ? { season: getCurrentSeason(), seasonYear: new Date().getFullYear() } : {};
+        const nextSeasonArgs = contentType === "ANIME" ? { season: getNextSeason().season, seasonYear: getNextSeason().year } : {};
+        const genreArg = trendingGenre !== "All" ? { genre_in: [trendingGenre] } : {};
+        
+        const [trendingData, upcomingData] = await Promise.all([
+          fetchAniList(GET_TRENDING_WORKS, { type: typeArg, page: 1, perPage: 30, ...seasonArgs, ...genreArg }),
+          fetchAniList(GET_UPCOMING_WORKS, { type: typeArg, page: 1, perPage: 30, ...nextSeasonArgs })
+        ]);
+
+        setTrendingWorks(trendingData.Page.media);
+        setUpcomingWorks(upcomingData.Page.media);
+      } catch (error) {
+        console.error("Failed to load trending", error);
+      } finally {
+        setIsLoadingTrending(false);
+      }
+    }
+    loadTrending();
+  }, [contentType, trendingGenre]);
 
   // 2. Load User Profile & Favorite Genres
   useEffect(() => {
@@ -499,10 +502,28 @@ export default function Home() {
       {/* TRENDING SECTION */}
       {activeHomeTab === "TRENDING" && (
         <section className="animate-in fade-in slide-in-from-right-4 duration-300">
-          <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
-            <Flame className="text-blue-500" /> 
-            Trending {contentType === "ANIME" ? "Anime" : "Manga"}
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="flex items-center gap-2 text-xl font-bold">
+              <Flame className="text-blue-500" /> 
+              Trending {contentType === "ANIME" ? "Anime" : "Manga"}
+            </h2>
+            <select 
+              value={trendingGenre}
+              onChange={(e) => setTrendingGenre(e.target.value)}
+              className="bg-gray-800 text-white text-xs px-3 py-1.5 rounded-lg border border-gray-700 outline-none"
+            >
+              <option value="All">Alle Genres</option>
+              <option value="Action">Action</option>
+              <option value="Romance">Romance</option>
+              <option value="Comedy">Comedy</option>
+              <option value="Drama">Drama</option>
+              <option value="Fantasy">Fantasy</option>
+              <option value="Slice of Life">Slice of Life</option>
+              <option value="Sci-Fi">Sci-Fi</option>
+              <option value="Mystery">Mystery</option>
+              <option value="Sports">Sports</option>
+            </select>
+          </div>
           {isLoadingTrending ? (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
               {[1, 2, 3, 4, 5, 6].map((i) => (

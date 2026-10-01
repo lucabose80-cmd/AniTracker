@@ -19,6 +19,7 @@ import { useAppStore } from "@/lib/store";
 
 export default function FeedClient({ initialActivities }: { initialActivities: ActivityFeed[] }) {
   const { contentType, setContentType } = useAppStore();
+  const reloadTrigger = useAppStore(state => state.reloadTrigger);
   const [feed, setFeed] = useState<ActivityFeed[]>(initialActivities || []);
   const [feedFilter, setFeedFilter] = useState<'focus' | 'all'>('all');
   const [workDetails, setWorkDetails] = useState<Record<string, any>>(() => {
@@ -173,6 +174,13 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
       loadFeed();
     }
   }, [initialActivities]);
+
+  // Auto-reload when rate limit clears
+  useEffect(() => {
+    if (reloadTrigger > 0) {
+      loadFeed();
+    }
+  }, [reloadTrigger]);
 
   const handlePost = async (e: React.FormEvent) => {
     e.preventDefault();

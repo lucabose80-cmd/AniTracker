@@ -20,6 +20,8 @@ interface AppState {
   setWorkDetailsCache: (cache: Record<string, any>) => void;
   rateLimited: boolean;
   setRateLimited: (limited: boolean) => void;
+  reloadTrigger: number;
+  triggerReload: () => void;
 }
 
 const idbStorage = {
@@ -72,6 +74,8 @@ export const useAppStore = create<AppState>()(
       setWorkDetailsCache: (cache) => set({ workDetailsCache: cache }),
       rateLimited: false,
       setRateLimited: (limited) => set({ rateLimited: limited }),
+      reloadTrigger: 0,
+      triggerReload: () => set((state) => ({ reloadTrigger: state.reloadTrigger + 1 })),
     }),
     {
       name: 'anitracker-store',

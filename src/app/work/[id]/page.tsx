@@ -20,6 +20,7 @@ export default function WorkDetailPage() {
   const params = useParams();
   const router = useRouter();
   const id = params?.id as string;
+  const reloadTrigger = useAppStore(state => state.reloadTrigger);
   
   const [work, setWork] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -118,7 +119,7 @@ export default function WorkDetailPage() {
       }
     }
     loadData();
-  }, [id]);
+  }, [id, reloadTrigger]);
 
   const currentScore = calculateOverallScore({
     evaluation,
@@ -170,7 +171,8 @@ export default function WorkDetailPage() {
           status: status,
           evaluation: evaluation,
           current_episode: epsToSave,
-          mal_rated: malRated
+          mal_rated: malRated,
+          added_status: work?.status
         });
         await addToHistory(user.uid, id);
         // Create feed activity
