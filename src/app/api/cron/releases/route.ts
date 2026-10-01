@@ -49,6 +49,9 @@ export async function GET(req: Request) {
 
     // --- PART 0: AUTO APP UPDATE DETECTION ---
     let appUpdateTriggered = false;
+    let inAppNotificationsCount = 0;
+    let pushSentCount = 0;
+    
     const currentSha = process.env.VERCEL_GIT_COMMIT_SHA;
     const currentMessage = process.env.VERCEL_GIT_COMMIT_MESSAGE || "Neues App Update verfügbar!";
     
@@ -59,22 +62,62 @@ export async function GET(req: Request) {
         const lastSha = systemMetaDoc.data()?.last_announced_sha;
         
         if (lastSha !== currentSha) {
-          const host = req.headers.get("host");
-          const protocol = host?.includes("localhost") ? "http" : "https";
-          const updateUrl = `${protocol}://${host}/api/admin/system-update`;
+          const nowIso = new Date().toISOString();
+          const usersSnap = await adminDb.collection("users").get();
+          let tokensToNotify: string[] = [];
           
-          await fetch(updateUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${process.env.CRON_SECRET || 'anitracker123'}`,
-            },
-            body: JSON.stringify({
-              title: "App Update!",
-              message: currentMessage,
-              version: process.env.npm_package_version || "Neu",
-            }),
-          });
+          const allUsers: any[] = [];
+          usersSnap.forEach((d: any) => allUsers.push({ id: d.id, data: d.data() }));
+
+          const batchSize = 400; // < 500
+          for (let i = 0; i < allUsers.length; i += batchSize) {
+            const chunk = allUsers.slice(i, i + batchSize);
+            const batch = adminDb.batch();
+
+            chunk.forEach(({ id, data }) => {
+              const notifRef = adminDb.collection("notifications").doc();
+              batch.set(notifRef, {
+                notification_id: notifRef.id,
+                user_id: id,
+                actor_id: "SYSTEM",
+                actor_name: "System Update",
+                actor_avatar: "/weebcheck-192x192.png",
+                type: "APP_UPDATE",
+                text: `Update verfügbar: ${currentMessage}`,
+                timestamp: nowIso,
+                read: false,
+              });
+              inAppNotificationsCount++;
+
+              const settings = data?.notification_settings || { releases: true, social: true };
+              if (settings.social !== false && data.fcm_tokens) {
+                tokensToNotify.push(...data.fcm_tokens);
+              }
+            });
+            await batch.commit();
+          }
+
+          if (tokensToNotify.length > 0) {
+            const chunkSize = 500;
+            for (let i = 0; i < tokensToNotify.length; i += chunkSize) {
+              const chunk = tokensToNotify.slice(i, i + chunkSize);
+              try {
+                const response = await adminMessaging.sendEachForMulticast({
+                  notification: { title: "App Update!", body: currentMessage },
+                  data: { link: "/", type: "social" },
+                  webpush: {
+                    headers: { Urgency: "high" },
+                    notification: { icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png" },
+                    fcmOptions: { link: "/" }
+                  },
+                  tokens: chunk,
+                });
+                pushSentCount += response.successCount;
+              } catch (pushErr) {
+                console.error("FCM Update Send Error:", pushErr);
+              }
+            }
+          }
           
           await systemMetaRef.set({ last_announced_sha: currentSha }, { merge: true });
           appUpdateTriggered = true;
@@ -298,6 +341,8 @@ export async function GET(req: Request) {
     return NextResponse.json({ 
       success: true,
       appUpdateTriggered,
+      inAppNotificationsCount,
+      pushSentCount,
       notificationsSent,
       wishlistMoved,
       wishlistNotificationsSent,
