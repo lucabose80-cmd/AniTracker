@@ -342,6 +342,10 @@ export default function WorkDetailPage() {
             if (!useAppStore.getState().isOnline) useAppStore.getState().incrementOfflineQueue();
             const text = work?.type === "MANGA" ? `Thread für Kapitel ${newEp}` : `Thread für Folge ${newEp}`;
             await createActivity(user.uid, "EPISODE_THREAD", id, text, undefined, newEp);
+            
+            if (window.confirm("Thread wurde erfolgreich erstellt! Möchtest du zum Social Feed wechseln, um mitzudiskutieren?")) {
+              window.location.href = "/feed";
+            }
           }
         }
       } catch (error) {
