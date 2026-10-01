@@ -50,10 +50,16 @@ export async function fetchAniList(query: string, variables: any = {}, retries =
       if (!response.ok) {
         if (response.status === 429) {
           const retryAfter = response.headers.get("Retry-After");
-          const delay = retryAfter ? parseInt(retryAfter) * 1000 : 2500;
+          const delay = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+          // Signal the UI that we're rate limited
+          try {
+            const { useAppStore } = await import("@/lib/store");
+            useAppStore.getState().setRateLimited(true);
+            setTimeout(() => useAppStore.getState().setRateLimited(false), delay);
+          } catch(e) {}
           if (delay > 5000 || retries <= 0) {
             if (cached) return cached.data;
-            throw new Error(`RateLimit`); // Special message
+            throw new Error(`RateLimit`);
           }
           await new Promise(r => setTimeout(r, delay));
           return fetchAniList(query, variables, retries - 1);

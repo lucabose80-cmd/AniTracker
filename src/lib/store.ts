@@ -18,6 +18,8 @@ interface AppState {
   clearSearchHistory: () => void;
   workDetailsCache: Record<string, any>;
   setWorkDetailsCache: (cache: Record<string, any>) => void;
+  rateLimited: boolean;
+  setRateLimited: (limited: boolean) => void;
 }
 
 const idbStorage = {
@@ -68,6 +70,8 @@ export const useAppStore = create<AppState>()(
       clearSearchHistory: () => set({ searchHistory: [] }),
       workDetailsCache: {},
       setWorkDetailsCache: (cache) => set({ workDetailsCache: cache }),
+      rateLimited: false,
+      setRateLimited: (limited) => set({ rateLimited: limited }),
     }),
     {
       name: 'anitracker-store',
