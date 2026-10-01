@@ -1,1 +1,1 @@
-import { NextResponse } from 'next/server'; import { adminDb } from '@/lib/firebase-admin'; export const dynamic = 'force-dynamic'; export async function GET() { return NextResponse.json({ success: true, db: !!adminDb }); } 
+import { NextResponse } from 'next/server'; export const dynamic = 'force-dynamic'; export async function GET() { try { const { adminDb } = await import('@/lib/firebase-admin'); return NextResponse.json({ success: true, db: !!adminDb }); } catch (e: any) { return NextResponse.json({ error: e.message, stack: e.stack }, { status: 200 }); } } 
