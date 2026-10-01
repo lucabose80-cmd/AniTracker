@@ -6,8 +6,6 @@ import { fetchAniList, GET_TRENDING_WORKS } from "@/lib/anilist";
 
 export function ServiceWorkerManager() {
   const setIsOnline = useAppStore(state => state.setIsOnline);
-  const clearOfflineQueue = useAppStore(state => state.clearOfflineQueue);
-
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -37,12 +35,7 @@ export function ServiceWorkerManager() {
     // Online/Offline Detection
     const handleOnline = () => {
       setIsOnline(true);
-      const queueCount = useAppStore.getState().offlineQueueCount;
-      if (queueCount > 0) {
-        alert(`Verbindung wiederhergestellt! ${queueCount} wartende(r) Beitrag/Beiträge wurden synchronisiert.`);
-      }
-      clearOfflineQueue();
-      console.log('[WeebCheck] Back online - Firestore will auto-sync queued writes');
+      console.log('[WeebCheck] Back online');
     };
     
     const handleOffline = () => {

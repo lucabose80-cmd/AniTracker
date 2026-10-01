@@ -114,8 +114,8 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
     try {
       const { useAppStore } = await import('@/lib/store');
       if (!useAppStore.getState().isOnline) {
-        useAppStore.getState().incrementOfflineQueue();
-        alert("Du bist offline! Dein Kommentar wird gesendet, sobald du wieder online bist.");
+        alert("Keine Internetverbindung. Kommentar kann nicht gesendet werden.");
+        throw new Error("Offline");
       }
       const added = await addActivityComment(activityId, currentUserUid, prevText);
       if (added) {

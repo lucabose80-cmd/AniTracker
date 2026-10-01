@@ -76,14 +76,7 @@ export default function WorkDetailPage() {
 
         setWork(data.Media);
         
-        // Cache this detailed view for offline access
-        try {
-          const { useAppStore } = await import("@/lib/store");
-          useAppStore.getState().setWorkDetailsCache({
-            ...useAppStore.getState().workDetailsCache,
-            [id]: data.Media
-          });
-        } catch(e) {}
+
         
         if (overrides[id]) {
           if (overrides[id].weeklyTime) {
@@ -162,6 +155,13 @@ export default function WorkDetailPage() {
       alert("Bitte erst einloggen!");
       return;
     }
+    
+    const { useAppStore } = await import("@/lib/store");
+    if (!useAppStore.getState().isOnline) {
+      alert("Keine Internetverbindung.");
+      return;
+    }
+    
     setIsSaving(true);
     try {
       let epsToSave = currentEpisode;
@@ -185,7 +185,6 @@ export default function WorkDetailPage() {
         });
         await addToHistory(user.uid, id);
         // Create feed activity
-        if (!useAppStore.getState().isOnline) useAppStore.getState().incrementOfflineQueue();
         const title = work?.title?.english || work?.title?.romaji || 'ein Werk';
         await createActivity(user.uid, "TOP9_UPDATE", id, `Hat ${title} zur Bibliothek hinzugefügt.`);
 
@@ -302,7 +301,6 @@ export default function WorkDetailPage() {
       
       // Create Feed Activity for High Ratings
       if (currentScore >= 7) {
-        if (!useAppStore.getState().isOnline) useAppStore.getState().incrementOfflineQueue();
         await createActivity(user.uid, "RATING", id, `Hat ${work?.title?.romaji} mit ${currentScore.toFixed(1)}/10 bewertet!`);
       }
 
@@ -320,6 +318,12 @@ export default function WorkDetailPage() {
   const handleUpdateEpisode = async (increment: number) => {
     const user = auth?.currentUser;
     if (!user) return alert("Bitte einloggen");
+    
+    const { useAppStore } = await import("@/lib/store");
+    if (!useAppStore.getState().isOnline) {
+      alert("Keine Internetverbindung.");
+      return;
+    }
     
     let newEp = currentEpisode + increment;
     if (newEp < 0) newEp = 0;

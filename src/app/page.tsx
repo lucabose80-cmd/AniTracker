@@ -165,15 +165,10 @@ export default function Home() {
         
         if (idsToFetch.length > 0) {
           setIsFetchingUserWorks(true);
-          // Optimistically show cache immediately
-          const cache = useAppStore.getState().workDetailsCache || {};
-          if (Object.keys(cache).length > 0) {
-            setUserAniListDetails(cache);
-          }
           
           try {
             const mediaList = await fetchAniListBatch(idsToFetch);
-            const map: Record<string, any> = { ...cache };
+            const map: Record<string, any> = { ...userAniListDetails };
             const genreCounts: Record<string, number> = {};
             
             mediaList.forEach((m: any) => {
@@ -184,7 +179,6 @@ export default function Home() {
                 });
               }
             });
-            useAppStore.getState().setWorkDetailsCache({ ...useAppStore.getState().workDetailsCache, ...map });
             setUserAniListDetails(map);
             
             // Check for newly released wishlist items
@@ -235,13 +229,11 @@ export default function Home() {
             }
           } catch(e) {
             console.error("Failed to load user works batch", e);
-            const cache = useAppStore.getState().workDetailsCache || {};
-            setUserAniListDetails(cache);
             // We can still try to derive genre from cache
             let topGenre = "Action";
             let maxCount = 0;
             const genreCounts: Record<string, number> = {};
-            Object.values(cache).forEach((m: any) => {
+            Object.values(userAniListDetails).forEach((m: any) => {
               if (m.genres) {
                 m.genres.forEach((g: string) => {
                   genreCounts[g] = (genreCounts[g] || 0) + 1;
@@ -269,6 +261,11 @@ export default function Home() {
 
   const handleCheckIn = async (workId: string, nextEp: number, workType: string) => {
     if (!auth.currentUser) return;
+    if (!useAppStore.getState().isOnline) {
+      alert("Keine Internetverbindung. Check-In nicht möglich.");
+      return;
+    }
+    
     try {
       const { saveUserWork } = await import("@/lib/db/works");
       await saveUserWork(auth.currentUser.uid, workId, { current_episode: nextEp });
@@ -282,7 +279,6 @@ export default function Home() {
       const exists = recent.some(a => a.action_type === "EPISODE_THREAD" && a.work_id === workId && a.episode_num === nextEp);
       
       if (!exists) {
-        if (!useAppStore.getState().isOnline) useAppStore.getState().incrementOfflineQueue();
         const text = workType === "MANGA" ? `Thread für Kapitel ${nextEp}` : `Thread für Folge ${nextEp}`;
         await createActivity(auth.currentUser.uid, "EPISODE_THREAD", workId, text, undefined, nextEp);
       }

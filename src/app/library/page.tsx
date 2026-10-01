@@ -233,12 +233,10 @@ export default function LibraryPage() {
               mediaList.forEach((m: any) => {
                 map[m.id.toString()] = m;
               });
-              useAppStore.getState().setWorkDetailsCache({ ...useAppStore.getState().workDetailsCache, ...map });
               setAniListDetails(map);
             } catch (e) {
-              console.warn("Offline or AniList Error, using cache", e);
-              const cache = useAppStore.getState().workDetailsCache || {};
-              setAniListDetails(cache);
+              console.warn("AniList Error", e);
+              // keep existing state
               overrides = await getCalendarOverrides(); // might be cached by Firestore
             }
             
