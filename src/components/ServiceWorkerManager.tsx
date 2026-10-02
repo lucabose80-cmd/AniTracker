@@ -57,10 +57,10 @@ export function ServiceWorkerManager() {
               notification_id: notifRef.id,
               user_id: user.uid,
               actor_id: 'SYSTEM',
-              actor_name: 'System Update',
+              actor_name: `System Update (v${remoteVersion})`,
               actor_avatar: '/weebcheck-192x192.png',
               type: 'APP_UPDATE',
-              text: `Neues App-Update installiert! (v${remoteVersion}) Tippe hier um neu zu laden.`,
+              text: `Ein neues Update wurde installiert. Tippe hier, um die Seite neu zu laden und die neuesten Funktionen zu aktivieren.`,
               timestamp: new Date().toISOString(),
               read: false,
             }).catch(console.error);
@@ -69,11 +69,31 @@ export function ServiceWorkerManager() {
       });
     };
     
+    let unsubscribeNotifications: (() => void) | null = null;
+    
     (async () => {
       const { onAuthStateChanged } = await import('firebase/auth');
-      unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
         if (user) {
           setupVersionCheck(user);
+          
+          // Setup global unread notifications listener
+          const { collection, query, where, onSnapshot } = await import('firebase/firestore');
+          const q = query(
+            collection(db!, 'notifications'),
+            where('user_id', '==', user.uid),
+            where('read', '==', false)
+          );
+          
+          unsubscribeNotifications = onSnapshot(q, (snap) => {
+            useAppStore.getState().setUnreadNotifications(snap.docs.length);
+          });
+        } else {
+          useAppStore.getState().setUnreadNotifications(0);
+          if (unsubscribeNotifications) {
+            unsubscribeNotifications();
+            unsubscribeNotifications = null;
+          }
         }
       });
     })();
@@ -82,6 +102,7 @@ export function ServiceWorkerManager() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
       if (unsubscribeVersionListener) unsubscribeVersionListener();
+      if (unsubscribeNotifications) unsubscribeNotifications();
       if (unsubscribeAuth) unsubscribeAuth();
     };
   }, [setIsOnline]);

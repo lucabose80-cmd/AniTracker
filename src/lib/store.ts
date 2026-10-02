@@ -24,6 +24,9 @@ interface AppState {
   setHomeTab: (tab: "UPNEXT" | "COMMUNITY" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS") => void;
   trendingGenre: string;
   setTrendingGenre: (genre: string) => void;
+
+  unreadNotifications: number;
+  setUnreadNotifications: (count: number) => void;
 }
 
 const idbStorage = {
@@ -80,6 +83,9 @@ export const useAppStore = create<AppState>()(
       setHomeTab: (tab) => set({ homeTab: tab }),
       trendingGenre: "All",
       setTrendingGenre: (genre) => set({ trendingGenre: genre }),
+      
+      unreadNotifications: 0,
+      setUnreadNotifications: (count) => set({ unreadNotifications: count }),
     }),
     {
       name: 'anitracker-store',
