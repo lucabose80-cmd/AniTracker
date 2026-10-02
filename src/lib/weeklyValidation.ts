@@ -84,14 +84,18 @@ export function hasUserCheckedLatestEpisode(
   let latestReleased = 0;
 
   if (workDetails.type === 'ANIME') {
-    if (workDetails.nextAiringEpisode?.episode) {
+    if (calendarOverride?.manualMaxEpisode !== undefined && calendarOverride?.manualMaxEpisode !== null) {
+      latestReleased = calendarOverride.manualMaxEpisode;
+    } else if (workDetails.nextAiringEpisode?.episode) {
       latestReleased = workDetails.nextAiringEpisode.episode - 1;
     } else {
       latestReleased = workDetails.episodes || 0;
     }
   } else {
-    if (calendarOverride?.manualAvailableEps !== undefined) {
+    if (calendarOverride?.manualAvailableEps !== undefined && calendarOverride?.manualAvailableEps !== null) {
       latestReleased = calendarOverride.manualAvailableEps;
+    } else if (calendarOverride?.manualMaxEpisode !== undefined && calendarOverride?.manualMaxEpisode !== null) {
+      latestReleased = calendarOverride.manualMaxEpisode;
     } else if (workDetails.chapters) {
       latestReleased = workDetails.chapters;
     }

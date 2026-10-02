@@ -390,13 +390,14 @@ export default function LibraryPage() {
       const uWork = allWorks.find(w => w.work_id === id);
       const details = aniListDetails[id];
       if (uWork && details) {
+        if (pausedWorkIds.has(id)) return true; // It's paused, so it's ineligible
         return !isEligibleForWeeklyRanking(uWork, details, globalOverrides[id]);
       }
       return false;
     });
 
     if (hasIneligible) {
-      alert("Hinweis: Einige Werke in deinem Ranking sind nicht qualifiziert (keine neue Folge oder nicht aktuell).");
+      alert("Hinweis: Einige Werke in deinem Ranking sind nicht qualifiziert (keine neue Folge, nicht aktuell oder pausiert).");
     }
 
     try {
@@ -407,7 +408,7 @@ export default function LibraryPage() {
         if (id.startsWith('empty')) return false;
         const uWork = allWorks.find(w => w.work_id === id);
         const details = aniListDetails[id];
-        if (uWork && details) {
+        if (uWork && details && !pausedWorkIds.has(id)) {
           return isEligibleForWeeklyRanking(uWork, details, globalOverrides[id]);
         }
         return false;
@@ -500,7 +501,7 @@ export default function LibraryPage() {
                   prevRank = uWork.top9_rank - 1;
                 }
                 const isEligible = id.startsWith('empty') ? undefined : 
-                  (uWork && aniListDetails[id]) ? isEligibleForWeeklyRanking(uWork, aniListDetails[id], globalOverrides[id]) : undefined;
+                  (uWork && aniListDetails[id] && !pausedWorkIds.has(id)) ? isEligibleForWeeklyRanking(uWork, aniListDetails[id], globalOverrides[id]) : false;
                 return (
                   <SortableItem 
                     key={id} 
@@ -630,8 +631,8 @@ export default function LibraryPage() {
                 }
 
                 // Treat paused items as eligible if they were otherwise up to date
-                const isEligibleForRanking = work.status === "CURRENT" && 
-                  (details ? (pausedWorkIds.has(work.work_id) || isEligibleForWeeklyRanking(work, details, globalOverride)) : true);
+                const isEligibleForRanking = work.status === "CURRENT" && !pausedWorkIds.has(work.work_id) && 
+                  (details ? isEligibleForWeeklyRanking(work, details, globalOverride) : true);
 
                 const content = (
                   <div 
