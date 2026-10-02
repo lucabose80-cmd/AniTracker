@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Library as LibraryIcon, Search, LayoutGrid } from "lucide-react";
+import { Library as LibraryIcon, Search, LayoutGrid, PauseCircle } from "lucide-react";
+import { getPausedWorkIds } from "@/lib/db/pauses";
 import {
   DndContext,
   closestCenter,
@@ -36,7 +37,7 @@ import { createActivity } from "@/lib/db/feed";
 import { isEligibleForWeeklyRanking, hasNewReleaseThisWeek, hasUserCheckedLatestEpisode } from '@/lib/weeklyValidation';
 
 // Simple Sortable Item Component
-function SortableItem({ id, index, workDetails, userWork, previousRank, globalOverride, isEligible, onRemove, onClick }: { id: string, index: number, workDetails?: any, userWork?: any, previousRank?: number, globalOverride?: any, isEligible?: boolean, onRemove: (id: string) => void, onClick?: () => void }) {
+function SortableItem({ id, index, workDetails, userWork, previousRank, globalOverride, isEligible, isPaused, onRemove, onClick }: { id: string, index: number, workDetails?: any, userWork?: any, previousRank?: number, globalOverride?: any, isEligible?: boolean, isPaused?: boolean, onRemove: (id: string) => void, onClick?: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   
   const style = {
@@ -50,9 +51,7 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
   let progressPercentage = 0;
   if (workDetails && userWork) {
     const currentEp = userWork.current_episode || 0;
-    const maxEps = workDetails.episodes || workDetails.chapters || 1;
-    progressPercentage = Math.min(100, Math.max(0, (currentEp / maxEps) * 100));
-
+    
     let maxAiredEp = 0;
     if (globalOverride?.manualMaxEpisode !== undefined && globalOverride?.manualMaxEpisode !== null) {
       maxAiredEp = globalOverride.manualMaxEpisode;
@@ -68,7 +67,16 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
     }
     const offset = userWork.synchro_offset_episodes || 0;
     maxAiredEp = Math.max(0, maxAiredEp - offset);
+    
+    // If paused, we pretend they have seen everything up to maxAiredEp
+    if (isPaused) {
+      maxAiredEp = currentEp;
+    }
+    
     behindCount = Math.max(0, maxAiredEp - currentEp);
+    
+    const maxEpsToCalculateProgress = isPaused ? currentEp : (workDetails.episodes || workDetails.chapters || 1);
+    progressPercentage = Math.min(100, Math.max(0, (currentEp / maxEpsToCalculateProgress) * 100));
   }
 
   return (
@@ -121,6 +129,12 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
           className="absolute inset-0 block h-full w-full cursor-pointer"
         >
           <Image src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" fill sizes="(max-width: 768px) 33vw, 20vw" className={`object-cover pointer-events-none ${isEligible === false ? 'opacity-60' : ''}`} />
+          {isPaused && (
+            <div className="absolute inset-0 bg-yellow-600/50 flex flex-col items-center justify-center z-10">
+              <PauseCircle size={32} className="text-white drop-shadow-lg" />
+              <span className="text-white font-bold text-xs mt-1 drop-shadow-md uppercase tracking-wider">Pausiert</span>
+            </div>
+          )}
           <div className="absolute bottom-0 left-0 w-full h-1 bg-[#1a1d24]/80">
             <div className="h-full bg-blue-500" style={{ width: `${progressPercentage}%` }} />
           </div>
@@ -176,7 +190,8 @@ export default function LibraryPage() {
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [sortBy, setSortBy] = useState<"RELEASE" | "SCORE" | "PROGRESS" | "TITLE">("RELEASE");
-  const [activeTab, setActiveTab] = useState<"CURRENT" | "COMPLETED" | "PLANNING">("CURRENT");
+  const [activeTab, setActiveTab] = useState<"CURRENT" | "COMPLETED" | "PLANNING" | "PAUSED">("CURRENT");
+  const [pausedWorkIds, setPausedWorkIds] = useState<Set<string>>(new Set());
 
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
   const [selectingIndex, setSelectingIndex] = useState<number | null>(null);
@@ -217,6 +232,7 @@ export default function LibraryPage() {
           setUserProfile(profile);
           const works = await getAllUserWorks(user.uid);
           setAllWorks(works);
+          getPausedWorkIds().then(setPausedWorkIds).catch(console.error);
 
           const allIdsToFetch = works.map((w: UserWork) => parseInt(w.work_id, 10));
           if (allIdsToFetch.length > 0) {
@@ -495,6 +511,7 @@ export default function LibraryPage() {
                     previousRank={prevRank} 
                     globalOverride={globalOverrides[id]} 
                     isEligible={isEligible}
+                    isPaused={pausedWorkIds.has(id)}
                     onRemove={handleRemoveFromRanking} 
                     onClick={() => handleEmptySlotClick(index)}
                   />
@@ -605,11 +622,16 @@ export default function LibraryPage() {
                   }
                   const offset = work.synchro_offset_episodes || 0;
                   maxAiredEp = Math.max(0, maxAiredEp - offset);
+                  const isPaused = pausedWorkIds.has(work.work_id);
+                  if (isPaused) {
+                    maxAiredEp = currentEp;
+                  }
                   behindCount = Math.max(0, maxAiredEp - currentEp);
                 }
 
+                // Treat paused items as eligible if they were otherwise up to date
                 const isEligibleForRanking = work.status === "CURRENT" && 
-                  (details ? isEligibleForWeeklyRanking(work, details, globalOverride) : true);
+                  (details ? (pausedWorkIds.has(work.work_id) || isEligibleForWeeklyRanking(work, details, globalOverride)) : true);
 
                 const content = (
                   <div 
@@ -634,6 +656,13 @@ export default function LibraryPage() {
                       <Image src={details.coverImage?.extraLarge || details.coverImage?.large} alt="Cover" fill sizes="(max-width: 768px) 33vw, 20vw" className="object-cover transition duration-300 group-hover:scale-105 pointer-events-none" />
                     ) : (
                       <div className="w-full h-full animate-pulse bg-gray-800/50" />
+                    )}
+                    
+                    {pausedWorkIds.has(work.work_id) && (
+                      <div className="absolute inset-0 bg-yellow-600/50 flex flex-col items-center justify-center z-10 pointer-events-none">
+                        <PauseCircle size={32} className="text-white drop-shadow-lg" />
+                        <span className="text-white font-bold text-xs mt-1 drop-shadow-md uppercase tracking-wider">Pausiert</span>
+                      </div>
                     )}
                     {behindCount > 0 && (
                       <div className="absolute top-1 right-1 flex items-center justify-center rounded-full bg-red-600 text-[10px] px-1.5 py-0.5 font-bold text-white shadow-md z-10 pointer-events-none">

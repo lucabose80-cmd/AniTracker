@@ -624,7 +624,7 @@ export default function WorkDetailPage() {
 
         {/* ACTION BUTTONS */}
         <div className="mt-6 flex flex-col gap-3">
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             {work.status !== "NOT_YET_RELEASED" && (
               <>
                 <button 
@@ -641,19 +641,12 @@ export default function WorkDetailPage() {
                 >
                   <CheckCircle size={20} /> <span className="text-xs">Fertig</span>
                 </button>
-                <button 
-                  onClick={() => handleQuickAdd("PAUSED")}
-                  disabled={isSaving}
-                  className={`flex flex-col items-center justify-center gap-1 rounded-xl py-3 font-bold transition shadow-lg ${userWorkStatus === "PAUSED" ? "bg-yellow-600 text-white" : "bg-yellow-600/20 text-yellow-400 border border-yellow-600/50 hover:bg-yellow-600/40"}`}
-                >
-                  <PauseCircle size={20} /> <span className="text-xs">Pause</span>
-                </button>
               </>
             )}
             <button 
               onClick={() => handleQuickAdd("PLANNING")}
               disabled={isSaving}
-              className={`flex flex-col items-center justify-center gap-1 rounded-xl py-3 font-bold transition shadow-lg ${work.status === "NOT_YET_RELEASED" ? "col-span-4" : ""} ${userWorkStatus === "PLANNING" ? "bg-purple-600 text-white" : "bg-purple-600/20 text-purple-400 border border-purple-600/50 hover:bg-purple-600/40"}`}
+              className={`flex flex-col items-center justify-center gap-1 rounded-xl py-3 font-bold transition shadow-lg ${work.status === "NOT_YET_RELEASED" ? "col-span-3" : ""} ${userWorkStatus === "PLANNING" ? "bg-purple-600 text-white" : "bg-purple-600/20 text-purple-400 border border-purple-600/50 hover:bg-purple-600/40"}`}
             >
               <Bookmark size={20} /> <span className="text-xs">Wunsch</span>
             </button>

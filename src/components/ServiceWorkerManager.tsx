@@ -31,10 +31,11 @@ export function ServiceWorkerManager() {
 
     // --- APP VERSION CHECK via Firestore ---
     let unsubscribeVersionListener: (() => void) | null = null;
+    let unsubscribeAuth: (() => void) | null = null;
     
-    const setupVersionCheck = async () => {
-      const user = auth.currentUser;
+    const setupVersionCheck = async (user: any) => {
       if (!user || !db) return;
+      if (unsubscribeVersionListener) return; // already set up
       
       const { doc, onSnapshot, collection, setDoc } = await import('firebase/firestore');
       
@@ -68,15 +69,20 @@ export function ServiceWorkerManager() {
       });
     };
     
-    const authCheckTimeout = setTimeout(() => {
-      setupVersionCheck();
-    }, 2000);
+    (async () => {
+      const { onAuthStateChanged } = await import('firebase/auth');
+      unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+        if (user) {
+          setupVersionCheck(user);
+        }
+      });
+    })();
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      clearTimeout(authCheckTimeout);
       if (unsubscribeVersionListener) unsubscribeVersionListener();
+      if (unsubscribeAuth) unsubscribeAuth();
     };
   }, [setIsOnline]);
 

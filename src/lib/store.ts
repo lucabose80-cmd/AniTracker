@@ -19,6 +19,11 @@ interface AppState {
   setRateLimited: (limited: boolean) => void;
   reloadTrigger: number;
   triggerReload: () => void;
+
+  homeTab: "UPNEXT" | "COMMUNITY" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS";
+  setHomeTab: (tab: "UPNEXT" | "COMMUNITY" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS") => void;
+  trendingGenre: string;
+  setTrendingGenre: (genre: string) => void;
 }
 
 const idbStorage = {
@@ -70,6 +75,11 @@ export const useAppStore = create<AppState>()(
       setRateLimited: (limited) => set({ rateLimited: limited }),
       reloadTrigger: 0,
       triggerReload: () => set((state) => ({ reloadTrigger: state.reloadTrigger + 1 })),
+
+      homeTab: "UPNEXT",
+      setHomeTab: (tab) => set({ homeTab: tab }),
+      trendingGenre: "All",
+      setTrendingGenre: (genre) => set({ trendingGenre: genre }),
     }),
     {
       name: 'anitracker-store',

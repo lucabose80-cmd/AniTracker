@@ -15,14 +15,13 @@ import { pauseWorkThisWeek, getPausedWorkIds } from "@/lib/db/pauses";
 const GENRES = ["Action", "Adventure", "Comedy", "Drama", "Fantasy", "Horror", "Mystery", "Psychological", "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller"];
 
 export default function Home() {
-  const { contentType } = useAppStore();
+  const { contentType, homeTab: activeHomeTab, setHomeTab: setActiveHomeTab, trendingGenre, setTrendingGenre } = useAppStore();
   const router = useRouter();
   
   // Trending & Upcoming State
   const [trendingWorks, setTrendingWorks] = useState<any[]>([]);
   const [upcomingWorks, setUpcomingWorks] = useState<any[]>([]);
   const [isLoadingTrending, setIsLoadingTrending] = useState(true);
-  const [trendingGenre, setTrendingGenre] = useState<string>("All");
   
   // User State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -41,20 +40,11 @@ export default function Home() {
   const [isLoadingCommunity, setIsLoadingCommunity] = useState(true);
 
   // Home Screen Tab State
-  const [activeHomeTab, setActiveHomeTab] = useState<"UPNEXT" | "COMMUNITY" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS">("UPNEXT");
   const [authLoaded, setAuthLoaded] = useState(false);
   const [pausedWorkIds, setPausedWorkIds] = useState<Set<string>>(new Set());
 
-  useEffect(() => {
-    const saved = sessionStorage.getItem('homeTab');
-    if (saved) {
-      setActiveHomeTab(saved as any);
-    }
-  }, []);
-
-  const setTab = (tab: any) => {
+  const setTab = (tab: "UPNEXT" | "COMMUNITY" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS") => {
     setActiveHomeTab(tab);
-    sessionStorage.setItem('homeTab', tab);
   };
 
   useEffect(() => {
