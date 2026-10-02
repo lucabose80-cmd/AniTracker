@@ -22,7 +22,7 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
   const { contentType, setContentType } = useAppStore();
   const reloadTrigger = useAppStore(state => state.reloadTrigger);
   const [feed, setFeed] = useState<ActivityFeed[]>(initialActivities || []);
-  const [feedFilter, setFeedFilter] = useState<'focus' | 'all'>('all');
+  const [feedFilter, setFeedFilter] = useState<'focus' | 'all'>('focus');
   const [workDetails, setWorkDetails] = useState<Record<string, any>>({});
   const [isLoading, setIsLoading] = useState(false);
   
