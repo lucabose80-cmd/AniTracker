@@ -60,7 +60,7 @@ export function ServiceWorkerManager() {
               actor_name: `System Update (v${remoteVersion})`,
               actor_avatar: '/weebcheck-192x192.png',
               type: 'APP_UPDATE',
-              text: `Ein neues Update wurde installiert. Tippe hier, um die Seite neu zu laden und die neuesten Funktionen zu aktivieren.`,
+              text: `Neu: v${remoteVersion} ist da! Klicke hier zum Aktualisieren.`,
               timestamp: new Date().toISOString(),
               read: false,
             }).catch(console.error);
