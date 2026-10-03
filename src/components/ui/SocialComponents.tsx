@@ -2,14 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { MessageSquare, Heart } from "lucide-react";
-import { deleteActivityComment, addActivityComment, getActivityComments } from "@/lib/db/feed";
+import { deleteActivityComment, addActivityComment, getActivityComments, editActivityComment } from "@/lib/db/feed";
 import { ActivityComment } from "@/types/database";
 import { formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
 import Link from "next/link";
 import { getUserProfile } from "@/lib/db/users";
 
-export function SpoilerText({ text }: { text?: string }) {
+export function SpoilerText({ text, forceReveal }: { text?: string, forceReveal?: boolean }) {
   if (!text) return null;
   const parts = text.split(/(\|\|.*?\|\|)/g);
   return (
@@ -17,7 +17,7 @@ export function SpoilerText({ text }: { text?: string }) {
       {parts.map((part, i) => {
         if (part.startsWith('||') && part.endsWith('||')) {
           const content = part.slice(2, -2);
-          return <InlineSpoiler key={i} content={content} />;
+          return <InlineSpoiler key={i} content={content} forceReveal={forceReveal} />;
         }
         return <span key={i}>{part}</span>;
       })}
@@ -25,20 +25,21 @@ export function SpoilerText({ text }: { text?: string }) {
   );
 }
 
-function InlineSpoiler({ content }: { content: string }) {
+function InlineSpoiler({ content, forceReveal }: { content: string, forceReveal?: boolean }) {
   const [revealed, setRevealed] = useState(false);
+  const isRevealed = forceReveal || revealed;
   return (
     <span 
-      onClick={(e) => { e.stopPropagation(); setRevealed(!revealed); }} 
-      className={`cursor-pointer transition-colors duration-200 px-1 rounded ${revealed ? 'bg-gray-800 text-white' : 'bg-black text-black select-none'}`}
-      title={revealed ? "" : "Klicken zum Aufdecken"}
+      onClick={(e) => { e.stopPropagation(); if (!forceReveal) setRevealed(!revealed); }} 
+      className={`transition-colors duration-200 px-1 rounded ${isRevealed ? "bg-gray-800 text-white" : "bg-black text-black select-none cursor-pointer"}`}
+      title={isRevealed ? "" : "Klicken zum Aufdecken"}
     >
       {content}
     </span>
   );
 }
 
-export function CommentSection({ activityId, userProfiles, currentUserUid, commentCount: initialCount = 0 }: { activityId: string, userProfiles: Record<string, any>, currentUserUid?: string, commentCount?: number }) {
+export function CommentSection({ activityId, userProfiles, currentUserUid, commentCount: initialCount = 0, forceReveal }: { activityId: string, userProfiles: Record<string, any>, currentUserUid?: string, commentCount?: number, forceReveal?: boolean }) {
   const [comments, setComments] = useState<ActivityComment[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [newText, setNewText] = useState("");
@@ -132,7 +133,15 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
     }
   };
 
-  const handleDelete = async (commentId: string) => {
+      const handleEdit = async (commentId: string, newText: string) => {
+      try {
+        await editActivityComment(commentId, newText);
+        setComments(prev => prev.map(c => c.comment_id === commentId ? { ...c, text: newText } : c));
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    const handleDelete = async (commentId: string) => {
     if (!confirm("Kommentar wirklich löschen?")) return;
     try {
       await deleteActivityComment(commentId, activityId);
@@ -160,9 +169,19 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
   const commentTree = buildTree(comments);
 
   const CommentNode = ({ node, level = 0 }: { node: any, level?: number }) => {
+      const [isEditing, setIsEditing] = useState(false);
+      const [editText, setEditText] = useState(node.text.startsWith("||") && node.text.endsWith("||") ? node.text.slice(2, -2) : node.text);
+      const [editIsSpoiler, setEditIsSpoiler] = useState(node.text.startsWith("||") && node.text.endsWith("||"));
+
+      const submitEdit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const final = editIsSpoiler ? `||${editText.trim()}||` : editText.trim();
+        await handleEdit(node.comment_id, final);
+        setIsEditing(false);
+      };
     const author = localProfiles[node.user_id] || { username: "Unbekannt" };
     const [replyOpen, setReplyOpen] = useState(false);
-    const [replyText, setReplyText] = useState("");
+    const [replyText, setReplyText] = useState(""); const [replyIsSpoiler, setReplyIsSpoiler] = useState(false);
     const [isReplying, setIsReplying] = useState(false);
     const [collapsed, setCollapsed] = useState(false);
 
@@ -170,7 +189,7 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
       e.preventDefault();
       if (!replyText.trim() || !currentUserUid) return;
       
-      const prevText = replyText.trim();
+      const prevText = replyIsSpoiler ? `||${replyText.trim()}||` : replyText.trim();
       setReplyText("");
       setIsReplying(true);
       
@@ -250,7 +269,7 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
               </div>
 
               {replyOpen && (
-                <form onSubmit={handleReply} className="flex gap-2 mt-2 max-w-sm">
+                <form onSubmit={handleReply} className="flex gap-2 mt-2 max-w-sm items-center">
                   <input 
                     type="text" 
                     value={replyText}
@@ -333,7 +352,7 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
   );
 }
 
-export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentUserUid, userProfiles, userWorkIds }: any) {
+export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentUserUid, userProfiles, currentUserWorks}: any) {
   const [isLiked, setIsLiked] = useState(activity.likes?.includes(currentUserUid) || false);
   const [likesCount, setLikesCount] = useState(activity.likes?.length || 0);
 
@@ -377,12 +396,10 @@ export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentU
             </div>
             <h3 className="font-bold text-gray-100 line-clamp-1">{work?.title?.english || work?.title?.romaji || "Unbekanntes Werk"}</h3>
             <p className="text-sm font-semibold text-blue-400 mt-0.5">Folge / Kapitel {activity.episode_num}</p>
-            {activity.text && <p className="text-sm text-gray-300 mt-2 break-words whitespace-pre-wrap leading-relaxed"><SpoilerText text={activity.text} /></p>}
+            {activity.text && <p className="text-sm text-gray-300 mt-2 break-words whitespace-pre-wrap leading-relaxed"><SpoilerText text={activity.text} forceReveal={currentUserWorks && work?.id ? currentUserWorks[work.id.toString()] >= activity.episode_num : false} /></p>}
           </div>
 
-          <div className="flex gap-2 mt-3">
-            {(() => {
-              const isInLibrary = userWorkIds?.has(work?.id?.toString()) || false;
+          <div className="flex gap-2 mt-3">{(() => { const isInLibrary = currentUserWorks ? (work?.id?.toString() in currentUserWorks) : false;
               if (isInLibrary) {
                 return (
                   <button 
@@ -437,7 +454,7 @@ export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentU
           </div>
         </div>
       </div>
-      <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} commentCount={activity.comments_count || 0} />
+      <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} commentCount={activity.comments_count || 0} forceReveal={currentUserWorks && work?.id ? currentUserWorks[work.id.toString()] >= activity.episode_num : false} />
     </div>
   );
 }
