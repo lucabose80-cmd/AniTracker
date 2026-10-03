@@ -327,3 +327,20 @@ export async function toggleLike(activityId: string, userId: string): Promise<vo
   }
 }
 
+export async function editActivity(activityId: string, newText: string) {
+  const q = query(collection(db, "activities"), where("activity_id", "==", activityId));
+  const snap = await getDocs(q);
+  if (!snap.empty) {
+    const docRef = doc(db, "activities", snap.docs[0].id);
+    await updateDoc(docRef, { text: newText });
+  }
+}
+
+export async function editActivityComment(commentId: string, newText: string) {
+  const q = query(collection(db, "activity_comments"), where("comment_id", "==", commentId));
+  const snap = await getDocs(q);
+  if (!snap.empty) {
+    const docRef = doc(db, "activity_comments", snap.docs[0].id);
+    await updateDoc(docRef, { text: newText });
+  }
+}

@@ -37,7 +37,7 @@ import { createActivity } from "@/lib/db/feed";
 import { isEligibleForWeeklyRanking, hasNewReleaseThisWeek, hasUserCheckedLatestEpisode } from '@/lib/weeklyValidation';
 
 // Simple Sortable Item Component
-function SortableItem({ id, index, workDetails, userWork, previousRank, globalOverride, isEligible, isPaused, onRemove, onClick }: { id: string, index: number, workDetails?: any, userWork?: any, previousRank?: number, globalOverride?: any, isEligible?: boolean, isPaused?: boolean, onRemove: (id: string) => void, onClick?: () => void }) {
+function SortableItem({ id, index, workDetails, userWork, previousRank, globalOverride, isEligible, isPaused, isEditing, onRemove, onClick }: { id: string, index: number, workDetails?: any, userWork?: any, previousRank?: number, globalOverride?: any, isEligible?: boolean, isPaused?: boolean, isEditing?: boolean, onRemove: (id: string) => void, onClick?: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   
   const style = {
@@ -94,9 +94,7 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
     <div 
       ref={setNodeRef} 
       style={{ touchAction: 'none', ...style }} 
-      {...attributes} 
-      {...listeners}
-      className={`w-full aspect-[3/4] relative cursor-grab active:cursor-grabbing rounded-xl bg-[#1a1d24] border ${isDragging ? 'border-blue-500 shadow-2xl scale-105' : 'border-gray-800'} flex items-center justify-center font-bold text-gray-500 overflow-hidden`}
+      {...(isEditing ? attributes : {})} {...(isEditing ? listeners : {})} className={`w-full aspect-[3/4] relative rounded-xl bg-[#1a1d24] border ${isDragging ? "border-blue-500 shadow-2xl scale-105" : "border-gray-800"} flex items-center justify-center font-bold text-gray-500 overflow-hidden ${isEditing ? "cursor-grab active:cursor-grabbing" : ""}`}
     >
       <span className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white backdrop-blur-md z-10 pointer-events-none">
         {index + 1}
@@ -123,14 +121,13 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
           )}
         </div>
       )}
-      {id.startsWith("empty") ? (
+      {id.startsWith("empty") ? ( isEditing ? (
         <button 
           onClick={(e) => { e.stopPropagation(); onClick && onClick(); }}
           className="absolute inset-0 w-full h-full flex items-center justify-center text-gray-700 text-4xl font-light hover:text-gray-500 transition-colors bg-[#1a1d24]"
         >
           +
-        </button>
-      ) : workDetails ? (
+        </button> ) : null ) : workDetails ? (
         <div 
           onClick={(e) => {
             if (!isDragging) {
@@ -140,7 +137,7 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
           className="absolute inset-0 block h-full w-full cursor-pointer"
         >
           <Image src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" fill sizes="(max-width: 768px) 33vw, 20vw" className={`object-cover pointer-events-none ${isEligible === false ? 'opacity-60' : ''}`} />
-          {isPaused && (
+          {isEditing && isPaused && (
             <div className="absolute inset-0 bg-yellow-600/50 flex flex-col items-center justify-center z-10">
               <PauseCircle size={32} className="text-white drop-shadow-lg" />
               <span className="text-white font-bold text-xs mt-1 drop-shadow-md uppercase tracking-wider">Pausiert</span>
@@ -153,7 +150,7 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
       ) : (
         <div className="absolute inset-0 w-full h-full animate-pulse bg-gray-800" />
       )}
-      {!id.startsWith("empty") && (
+      {isEditing && !id.startsWith("empty") && (
         <button 
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); onRemove(id); }}
@@ -205,6 +202,7 @@ export default function LibraryPage() {
   const [pausedWorkIds, setPausedWorkIds] = useState<Set<string>>(new Set());
 
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
+  const [isEditingRanking, setIsEditingRanking] = useState(false);
   const [selectingIndex, setSelectingIndex] = useState<number | null>(null);
 
   const sensors = useSensors(
@@ -493,10 +491,7 @@ export default function LibraryPage() {
               <p className="text-xs text-gray-400">Sortiere deine aktuellen Favoriten dieser Woche.</p>
             </div>
             <div className="flex items-center gap-2">
-              <button 
-                onClick={handleSaveSnapshot}
-                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-lg"
-              >
+              <button onClick={() => setIsEditingRanking(!isEditingRanking)} className={`flex items-center gap-2 text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-lg ${isEditingRanking ? "bg-red-600 hover:bg-red-700 text-white" : "bg-gray-700 hover:bg-gray-600 text-white"}`}>{isEditingRanking ? "Fertig" : "Bearbeiten"}</button><button onClick={handleSaveSnapshot} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-lg">
                 <Share size={14} /> Im Feed teilen
               </button>
             </div>
@@ -524,6 +519,7 @@ export default function LibraryPage() {
                     globalOverride={globalOverrides[id]} 
                     isEligible={isEligible}
                     isPaused={pausedWorkIds.has(id)}
+                    isEditing={isEditingRanking}
                     onRemove={handleRemoveFromRanking} 
                     onClick={() => handleEmptySlotClick(index)}
                   />
