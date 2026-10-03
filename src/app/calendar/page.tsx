@@ -237,15 +237,36 @@ export default function CalendarPage() {
                         
                         // Calculate Behind Status
                         
-                        let episodesOut = anime.nextAiringEpisode.episode - 1;
+                                                let episodesOut = anime.nextAiringEpisode.episode - 1;
                         const override = globalOverrides[strId];
+                        let totalEps = 9999;
                         if (override?.manualMaxEpisode !== undefined && override?.manualMaxEpisode !== null) {
-                          episodesOut = override.manualMaxEpisode;
+                          totalEps = override.manualMaxEpisode;
                         } else if (uWork?.manual_max_episode !== undefined && uWork?.manual_max_episode !== null) {
-                          episodesOut = uWork.manual_max_episode;
+                          totalEps = uWork.manual_max_episode;
+                        }
+
+                        if (override?.manualAvailableEps !== undefined && override?.manualAvailableEps !== null) {
+                          episodesOut = override.manualAvailableEps;
+                        } else if ((uWork as any)?.manual_available_eps !== undefined && (uWork as any)?.manual_available_eps !== null) {
+                          episodesOut = Number((uWork as any).manual_available_eps);
+                        } else if (anime.type === "MANGA") {
+                          episodesOut = totalEps !== 9999 ? totalEps : (anime.chapters || 0);
+                        } else {
+                          if (anime.status === "RELEASING" && anime.nextAiringEpisode) {
+                            episodesOut = anime.nextAiringEpisode.episode - 1;
+                          } else if (anime.status === "RELEASING") {
+                            episodesOut = currentEp;
+                          } else if (anime.status === "FINISHED") {
+                            episodesOut = totalEps !== 9999 ? totalEps : (anime.episodes || 0);
+                          } else {
+                            episodesOut = 0;
+                          }
                         }
                         
-                        episodesOut = Math.max(0, episodesOut - offset);
+                        if (override?.manualAvailableEps == null && (uWork as any)?.manual_available_eps == null) {
+                          episodesOut = Math.max(0, episodesOut - offset);
+                        }
                         const behindCount = Math.max(0, episodesOut - currentEp);
 
                         const isEditing = editingId === strId;
