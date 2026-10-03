@@ -347,7 +347,7 @@ export default function WorkDetailPage() {
 
   const handleSaveCustomRelease = async () => {
     if (!id) return;
-    await setCalendarOverride(id, undefined, customDay, customTime);
+    await setCalendarOverride(id, null as any, customDay, customTime);
     setHasCustomOverride(true);
     alert("Wöchentlicher Release-Zeitpunkt gespeichert!");
   };
@@ -575,8 +575,8 @@ export default function WorkDetailPage() {
                       else {
                         await setCalendarOverride(
                           id, 
-                          undefined, 
-                          customDay === -1 ? (null as any) : customDay, 
+                            null as any, 
+                            customDay === -1 ? (null as any) : customDay, 
                           customDay === -1 ? (null as any) : customTime, 
                           manualMaxEpisode as number,
                           customDay === -1 ? (null as any) : releaseFrequency,
@@ -587,8 +587,8 @@ export default function WorkDetailPage() {
                       if (manualMaxEpisode === "" && (customDay !== -1 || manualAvailableEps !== "")) {
                          await setCalendarOverride(
                            id, 
-                           undefined, 
-                           customDay === -1 ? (null as any) : customDay, 
+                            null as any, 
+                            customDay === -1 ? (null as any) : customDay, 
                            customDay === -1 ? (null as any) : customTime, 
                            undefined,
                            customDay === -1 ? (null as any) : releaseFrequency,
