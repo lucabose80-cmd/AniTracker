@@ -10,6 +10,7 @@ import { Calendar as CalendarIcon, Clock, Tv, Edit2, Check, X } from "lucide-rea
 import Link from "next/link";
 import { format, formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
+import { usePathname } from "next/navigation";
 
 // Map JS getDay() (0 = Sunday, 1 = Monday) for the UI
 const DAYS = [
@@ -28,6 +29,7 @@ export default function CalendarPage() {
   const [userWorkMap, setUserWorkMap] = useState<Record<string, any>>({});
   const [globalOverrides, setGlobalOverrides] = useState<Record<string, any>>({});
   const [isLoading, setIsLoading] = useState(true);
+  const pathname = usePathname();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -148,7 +150,7 @@ export default function CalendarPage() {
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(() => loadData());
     return () => unsubscribe();
-  }, [contentType]);
+  }, [contentType, pathname]);
 
   const handleEditClick = (anime: any, e: React.MouseEvent) => {
     e.preventDefault();
