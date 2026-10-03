@@ -53,16 +53,28 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
     const currentEp = userWork.current_episode || 0;
     
     let maxAiredEp = 0;
+    let totalEps = 9999;
     if (globalOverride?.manualMaxEpisode !== undefined && globalOverride?.manualMaxEpisode !== null) {
-      maxAiredEp = globalOverride.manualMaxEpisode;
+      totalEps = globalOverride.manualMaxEpisode;
     } else if (userWork.manual_max_episode !== undefined && userWork.manual_max_episode !== null) {
-      maxAiredEp = userWork.manual_max_episode;
+      totalEps = userWork.manual_max_episode;
+    }
+    
+    if (globalOverride?.manualAvailableEps !== undefined && globalOverride?.manualAvailableEps !== null) {
+      maxAiredEp = globalOverride.manualAvailableEps;
+    } else if ((userWork as any).manual_available_eps !== undefined && (userWork as any).manual_available_eps !== null) {
+      maxAiredEp = Number((userWork as any).manual_available_eps);
     } else if (workDetails.type === "MANGA") {
-      maxAiredEp = workDetails.chapters || 0;
+      maxAiredEp = totalEps !== 9999 ? totalEps : (workDetails.chapters || 0);
+    } else {
       if (workDetails.status === "RELEASING" && workDetails.nextAiringEpisode) {
         maxAiredEp = workDetails.nextAiringEpisode.episode - 1;
+      } else if (workDetails.status === "RELEASING") {
+        maxAiredEp = currentEp; // Assume they are up to date if AniList doesn't know
       } else if (workDetails.status === "FINISHED") {
-        maxAiredEp = workDetails.episodes || 0;
+        maxAiredEp = totalEps !== 9999 ? totalEps : (workDetails.episodes || 0);
+      } else {
+        maxAiredEp = 0;
       }
     }
     const offset = userWork.synchro_offset_episodes || 0;
@@ -609,16 +621,28 @@ export default function LibraryPage() {
                 if (details) {
                   const currentEp = work.current_episode || 0;
                   let maxAiredEp = 0;
+                  let totalEps = 9999;
                   if (globalOverride?.manualMaxEpisode !== undefined && globalOverride?.manualMaxEpisode !== null) {
-                    maxAiredEp = globalOverride.manualMaxEpisode;
+                    totalEps = globalOverride.manualMaxEpisode;
                   } else if (work.manual_max_episode !== undefined && work.manual_max_episode !== null) {
-                    maxAiredEp = work.manual_max_episode;
+                    totalEps = work.manual_max_episode;
+                  }
+                  
+                  if (globalOverride?.manualAvailableEps !== undefined && globalOverride?.manualAvailableEps !== null) {
+                    maxAiredEp = globalOverride.manualAvailableEps;
+                  } else if ((work as any).manual_available_eps !== undefined && (work as any).manual_available_eps !== null) {
+                    maxAiredEp = Number((work as any).manual_available_eps);
                   } else if (details.type === "MANGA") {
-                    maxAiredEp = details.chapters || 0;
+                    maxAiredEp = totalEps !== 9999 ? totalEps : (details.chapters || 0);
+                  } else {
                     if (details.status === "RELEASING" && details.nextAiringEpisode) {
                       maxAiredEp = details.nextAiringEpisode.episode - 1;
+                    } else if (details.status === "RELEASING") {
+                      maxAiredEp = currentEp; // Assume they are up to date if AniList doesn't know
                     } else if (details.status === "FINISHED") {
-                      maxAiredEp = details.episodes || 0;
+                      maxAiredEp = totalEps !== 9999 ? totalEps : (details.episodes || 0);
+                    } else {
+                      maxAiredEp = 0;
                     }
                   }
                   const offset = work.synchro_offset_episodes || 0;

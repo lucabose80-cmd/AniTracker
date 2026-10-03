@@ -84,12 +84,15 @@ export function hasUserCheckedLatestEpisode(
   let latestReleased = 0;
 
   if (workDetails.type === 'ANIME') {
-    if (calendarOverride?.manualMaxEpisode !== undefined && calendarOverride?.manualMaxEpisode !== null) {
-      latestReleased = calendarOverride.manualMaxEpisode;
+    if (calendarOverride?.manualAvailableEps !== undefined && calendarOverride?.manualAvailableEps !== null) {
+      latestReleased = calendarOverride.manualAvailableEps;
     } else if (workDetails.nextAiringEpisode?.episode) {
       latestReleased = workDetails.nextAiringEpisode.episode - 1;
+    } else if (workDetails.status === 'RELEASING') {
+      latestReleased = 0; // Default to 0 if no schedule
     } else {
-      latestReleased = workDetails.episodes || 0;
+      const totalEps = calendarOverride?.manualMaxEpisode ?? workDetails.episodes ?? 0;
+      latestReleased = totalEps;
     }
   } else {
     if (calendarOverride?.manualAvailableEps !== undefined && calendarOverride?.manualAvailableEps !== null) {

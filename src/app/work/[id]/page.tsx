@@ -479,7 +479,7 @@ export default function WorkDetailPage() {
         {/* SETTINGS MODAL */}
         {showSettingsModal && (
           <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-            <div className="bg-[#1a1d24] border border-gray-800 rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <div className="bg-[#1a1d24] border border-gray-800 rounded-2xl p-6 w-full max-w-sm shadow-xl max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-lg font-bold">Werk Einstellungen</h3>
                 <button onClick={() => setShowSettingsModal(false)} className="text-gray-500 hover:text-white">
