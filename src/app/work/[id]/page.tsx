@@ -512,62 +512,56 @@ export default function WorkDetailPage() {
                   <p className="text-[10px] text-gray-500 mt-1">Wie viele Folgen hinkt die Synchro hinterher? Dadurch wird die maximal auswählbare Folge reduziert.</p>
                 </div>
 
-                {(work.type === "MANGA" || work.type === "MANHWA") && (
-                  <div>
-                    <label className="block text-xs font-bold text-gray-400 mb-1">Aktuell releaste Kapitel</label>
-                    <input 
-                      type="number" 
-                      min="0"
-                      value={manualAvailableEps}
-                      onChange={(e) => setManualAvailableEps(e.target.value === "" ? "" : parseInt(e.target.value))}
-                      className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                    />
-                    <p className="text-[10px] text-gray-500 mt-1">Hier eintragen, wenn AniList die aktuelle Kapitelzahl nicht kennt.</p>
-                  </div>
-                )}
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 mb-1">Bisher erschienen (Kapitel/Folgen)</label>
+                  <input 
+                    type="number" 
+                    min="0"
+                    value={manualAvailableEps}
+                    onChange={(e) => setManualAvailableEps(e.target.value === "" ? "" : parseInt(e.target.value))}
+                    className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                  />
+                  <p className="text-[10px] text-gray-500 mt-1">Hier eintragen, wenn AniList die aktuelle Kapitel-/Folgenzahl nicht kennt oder sie überschrieben werden soll.</p>
+                </div>
 
-                {(!work.nextAiringEpisode || work.type === "MANGA") && (
-                  <div className="pt-2 border-t border-gray-800">
-                    <label className="block text-xs font-bold text-gray-400 mb-2">Wöchentlicher Release (Optional)</label>
-                    <div className="flex gap-2 text-sm">
-                      <select 
-                        value={customDay} 
-                        onChange={e => setCustomDay(parseInt(e.target.value))} 
-                        className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500"
-                      >
-                        <option value={-1}>Kein Release-Tag</option>
-                        <option value={1}>Montag</option>
-                        <option value={2}>Dienstag</option>
-                        <option value={3}>Mittwoch</option>
-                        <option value={4}>Donnerstag</option>
-                        <option value={5}>Freitag</option>
-                        <option value={6}>Samstag</option>
-                        <option value={0}>Sonntag</option>
-                      </select>
-                      {work.type !== "MANGA" && (
-                        <input 
-                          type="time" 
-                          value={customTime} 
-                          onChange={e => setCustomTime(e.target.value)} 
-                          className="w-24 bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500" 
-                        />
-                      )}
-                    </div>
-                    {customDay !== -1 && (work.type === "MANGA" || work.type === "MANHWA") && (
-                      <div className="mt-2">
-                        <select
-                          value={releaseFrequency}
-                          onChange={e => setReleaseFrequency(parseInt(e.target.value))}
-                          className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500"
-                        >
-                          <option value={1}>Jede Woche</option>
-                          <option value={2}>Alle 2 Wochen</option>
-                          <option value={4}>Alle 4 Wochen (Monatlich)</option>
-                        </select>
-                      </div>
-                    )}
+                <div className="pt-2 border-t border-gray-800">
+                  <label className="block text-xs font-bold text-gray-400 mb-2">Manueller Release-Rhythmus (Optional)</label>
+                  <div className="flex gap-2 text-sm">
+                    <select 
+                      value={customDay} 
+                      onChange={e => setCustomDay(parseInt(e.target.value))} 
+                      className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500"
+                    >
+                      <option value={-1}>Kein Release-Tag</option>
+                      <option value={1}>Montag</option>
+                      <option value={2}>Dienstag</option>
+                      <option value={3}>Mittwoch</option>
+                      <option value={4}>Donnerstag</option>
+                      <option value={5}>Freitag</option>
+                      <option value={6}>Samstag</option>
+                      <option value={0}>Sonntag</option>
+                    </select>
+                    <input 
+                      type="time" 
+                      value={customTime} 
+                      onChange={e => setCustomTime(e.target.value)} 
+                      className="w-24 bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500" 
+                    />
                   </div>
-                )}
+                  {customDay !== -1 && (
+                    <div className="mt-2">
+                      <select
+                        value={releaseFrequency}
+                        onChange={e => setReleaseFrequency(parseInt(e.target.value))}
+                        className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500"
+                      >
+                        <option value={1}>Jede Woche</option>
+                        <option value={2}>Alle 2 Wochen</option>
+                        <option value={4}>Alle 4 Wochen (Monatlich)</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex justify-end mt-6">

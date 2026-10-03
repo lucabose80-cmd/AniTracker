@@ -1,4 +1,4 @@
-export default function OfflineFallback() {
+"use client";`nexport default function OfflineFallback() {
   return (
     <div className="flex h-screen flex-col items-center justify-center p-4 text-center bg-[#0f1115] text-white">
       <div className="text-6xl mb-4">??</div>
