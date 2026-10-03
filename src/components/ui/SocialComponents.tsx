@@ -253,6 +253,39 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
           
           {!collapsed && (
             <>
+                            {isEditing ? (
+                <form onSubmit={submitEdit} className="flex gap-2 mt-2 items-center flex-wrap">
+                  <input type="text" value={editText} onChange={e => setEditText(e.target.value)} className="flex-1 bg-[#1a1d24] border border-gray-700 rounded px-2 py-1 text-[10px] text-white focus:border-blue-500 outline-none" />
+                  <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer"><input type="checkbox" checked={editIsSpoiler} onChange={e => setEditIsSpoiler(e.target.checked)} className="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 w-3 h-3" /> Spoiler</label>
+                  <button type="submit" disabled={!editText.trim()} className="text-[10px] bg-blue-600 text-white px-2 py-1 rounded font-bold">Speichern</button>
+                  <button type="button" onClick={() => setIsEditing(false)} className="text-[10px] bg-gray-700 text-gray-300 px-2 py-1 rounded font-bold">Abbrechen</button>
+                </form>
+              ) : (
+                <>
+                  <p className="text-gray-300 mt-0.5 break-words leading-relaxed"><SpoilerText text={node.text} forceReveal={forceReveal} /></p>
+                  
+                  <div className="flex items-center gap-3 mt-1">
+                    {currentUserUid && (
+                      <button onClick={(e) => { e.stopPropagation(); setReplyOpen(!replyOpen); }} className="text-[10px] text-gray-500 hover:text-gray-300 transition font-bold">
+                        Antworten
+                      </button>
+                    )}
+                    {node.user_id === currentUserUid && (
+                      <>
+                        <button onClick={(e) => { e.stopPropagation(); setIsEditing(true); }} className="text-[10px] text-blue-500/50 hover:text-blue-500 transition font-bold">
+                          Bearbeiten
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); handleDelete(node.comment_id); }} className="text-[10px] text-red-500/50 hover:text-red-500 transition font-bold">
+                          L�schen
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
+          
+          {!collapsed && (
+            <>
               <p className="text-gray-300 mt-0.5 break-words leading-relaxed"><SpoilerText text={node.text} /></p>
               
               <div className="flex items-center gap-3 mt-1">
@@ -278,7 +311,7 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
                     className="flex-1 bg-black/40 border border-gray-700 rounded text-xs px-2 py-1 focus:outline-none focus:border-blue-500 text-white"
                     disabled={isReplying}
                   />
-                  <button type="submit" disabled={!replyText.trim() || isReplying} className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-[10px] font-bold px-2 py-1 rounded transition">
+                  <button <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer"><input type="checkbox" checked={replyIsSpoiler} onChange={e => setReplyIsSpoiler(e.target.checked)} className="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 w-3 h-3" /> Spoiler</label><button type="submit" disabled={!replyText.trim() || isReplying} className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-[10px] font-bold px-2 py-1 rounded transition">
                     Senden
                   </button>
                 </form>
