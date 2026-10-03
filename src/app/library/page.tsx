@@ -77,8 +77,7 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
         maxAiredEp = 0;
       }
     }
-    const offset = userWork.synchro_offset_episodes || 0;
-    maxAiredEp = Math.max(0, maxAiredEp - offset);
+    const offset = userWork.synchro_offset_episodes || 0; if (globalOverride?.manualAvailableEps == null && (userWork as any).manual_available_eps == null) { maxAiredEp = Math.max(0, maxAiredEp - offset); }
     
     // If paused, we pretend they have seen everything up to maxAiredEp
     if (isPaused) {
@@ -645,8 +644,7 @@ export default function LibraryPage() {
                       maxAiredEp = 0;
                     }
                   }
-                  const offset = work.synchro_offset_episodes || 0;
-                  maxAiredEp = Math.max(0, maxAiredEp - offset);
+                  const offset = work.synchro_offset_episodes || 0; if (globalOverride?.manualAvailableEps == null && (work as any).manual_available_eps == null) { maxAiredEp = Math.max(0, maxAiredEp - offset); }
                   const isPaused = pausedWorkIds.has(work.work_id);
                   if (isPaused) {
                     maxAiredEp = currentEp;

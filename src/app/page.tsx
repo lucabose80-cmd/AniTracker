@@ -330,28 +330,32 @@ export default function Home() {
       const details = userAniListDetails[w.work_id];
       if (!details || details.type !== contentType) return null;
       if (w.status === "COMPLETED") return null;
-      let maxAiredEp = 0;
-      if (w.manual_max_episode !== undefined && w.manual_max_episode !== null) {
-        maxAiredEp = Number(w.manual_max_episode);
-      } else if (details.type === "MANGA") {
+              let maxAiredEp = 0;
+        let totalEps = 9999;
+        if (w.manual_max_episode !== undefined && w.manual_max_episode !== null) {
+          totalEps = Number(w.manual_max_episode);
+        }
+        
         const globalManual = calendarOverrides[w.work_id]?.manualAvailableEps;
         if (globalManual !== undefined && globalManual !== null) {
           maxAiredEp = globalManual;
         } else if ((w as any).manual_available_eps !== undefined && (w as any).manual_available_eps !== null) {
           maxAiredEp = Number((w as any).manual_available_eps);
+        } else if (details.type === "MANGA") {
+          maxAiredEp = totalEps !== 9999 ? totalEps : (details.chapters || 0);
         } else {
-          maxAiredEp = details.chapters || 0;
+          if (details.status === "RELEASING" && details.nextAiringEpisode) {
+            maxAiredEp = details.nextAiringEpisode.episode - 1;
+          } else if (details.status === "RELEASING") {
+            maxAiredEp = Number(w.current_episode) || 0;
+          } else if (details.status === "FINISHED") {
+            maxAiredEp = totalEps !== 9999 ? totalEps : (details.episodes || 0);
+          } else {
+            maxAiredEp = 0;
+          }
         }
-      } else {
-        if (details.status === "RELEASING" && details.nextAiringEpisode) {
-          maxAiredEp = details.nextAiringEpisode.episode - 1;
-        } else if (details.status === "FINISHED") {
-          maxAiredEp = details.episodes || 0;
-        }
-      }
       
-      const offset = Number(w.synchro_offset_episodes) || 0;
-      maxAiredEp = Math.max(0, maxAiredEp - offset);
+      const offset = Number(w.synchro_offset_episodes) || 0; if (globalManual == null && (w as any).manual_available_eps == null) { maxAiredEp = Math.max(0, maxAiredEp - offset); }
       const current = Number(w.current_episode) || 0;
       const behindCount = Math.max(0, maxAiredEp - current);
       return behindCount > 0 ? { ...w, details, behindCount, nextEpToWatch: current + 1 } : null;

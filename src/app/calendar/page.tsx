@@ -113,10 +113,19 @@ export default function CalendarPage() {
           if (hasSchedule && computedAiringAt) {
             // Shallow clone to inject the computed time safely
             const cloned = { ...m };
+            
+            let nextEp = m.nextAiringEpisode?.episode;
+            const manualAvail = over?.manualAvailableEps ?? userWorkMap[strId]?.manual_available_eps;
+            if (manualAvail !== undefined && manualAvail !== null) {
+              nextEp = Number(manualAvail) + 1;
+            } else if (!nextEp) {
+              nextEp = (m.chapters ?? m.episodes ?? userWorkMap[strId]?.current_episode ?? 0) + 1;
+            }
+
             cloned.nextAiringEpisode = {
-              ...m.nextAiringEpisode, // keep episode num if exists
+              ...m.nextAiringEpisode,
               airingAt: computedAiringAt,
-              episode: m.nextAiringEpisode?.episode || ((over?.manualAvailableEps ?? userWorkMap[strId]?.manual_available_eps ?? m.chapters ?? m.episodes ?? userWorkMap[strId]?.current_episode ?? 0) + 1)
+              episode: nextEp
             };
             scheduled.push(cloned);
           }
