@@ -276,30 +276,13 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
                           Bearbeiten
                         </button>
                         <button onClick={(e) => { e.stopPropagation(); handleDelete(node.comment_id); }} className="text-[10px] text-red-500/50 hover:text-red-500 transition font-bold">
-                          L�schen
+                          Löschen
                         </button>
                       </>
                     )}
                   </div>
                 </>
               )}
-          
-          {!collapsed && (
-            <>
-              <p className="text-gray-300 mt-0.5 break-words leading-relaxed"><SpoilerText text={node.text} /></p>
-              
-              <div className="flex items-center gap-3 mt-1">
-                {currentUserUid && (
-                  <button onClick={(e) => { e.stopPropagation(); setReplyOpen(!replyOpen); }} className="text-[10px] text-gray-500 hover:text-gray-300 transition font-bold">
-                    Antworten
-                  </button>
-                )}
-                {node.user_id === currentUserUid && (
-                  <button onClick={(e) => { e.stopPropagation(); handleDelete(node.comment_id); }} className="text-[10px] text-red-500/50 hover:text-red-500 transition font-bold">
-                    Löschen
-                  </button>
-                )}
-              </div>
 
               {replyOpen && (
                 <form onSubmit={handleReply} className="flex gap-2 mt-2 max-w-sm items-center">
@@ -311,9 +294,8 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
                     className="flex-1 bg-black/40 border border-gray-700 rounded text-xs px-2 py-1 focus:outline-none focus:border-blue-500 text-white"
                     disabled={isReplying}
                   />
-                  <button <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer"><input type="checkbox" checked={replyIsSpoiler} onChange={e => setReplyIsSpoiler(e.target.checked)} className="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 w-3 h-3" /> Spoiler</label><button type="submit" disabled={!replyText.trim() || isReplying} className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-[10px] font-bold px-2 py-1 rounded transition">
-                    Senden
-                  </button>
+                  <label className="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer"><input type="checkbox" checked={replyIsSpoiler} onChange={e => setReplyIsSpoiler(e.target.checked)} className="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500 w-3 h-3" /> Spoiler</label>
+                  <button type="submit" disabled={!replyText.trim() || isReplying} className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 text-white text-[10px] font-bold px-2 py-1 rounded transition">Senden</button>
                 </form>
               )}
 
