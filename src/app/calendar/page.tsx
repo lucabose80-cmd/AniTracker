@@ -115,14 +115,17 @@ export default function CalendarPage() {
             const cloned = { ...m };
             
             let nextEp = m.nextAiringEpisode?.episode;
-            const manualAvail = over?.manualAvailableEps ?? userWorkMap[strId]?.manual_available_eps;
-            if (manualAvail !== undefined && manualAvail !== null) {
-              nextEp = Number(manualAvail) + 1;
-            } else if (!nextEp) {
-              nextEp = (m.chapters ?? m.episodes ?? userWorkMap[strId]?.current_episode ?? 0) + 1;
-            }
-
-            cloned.nextAiringEpisode = {
+              const manualAvail = over?.manualAvailableEps ?? userWorkMap[strId]?.manual_available_eps;
+              let isManualEpisode = false;
+              if (manualAvail !== undefined && manualAvail !== null) {
+                nextEp = Number(manualAvail) + 1;
+                isManualEpisode = true;
+              } else if (!nextEp) {
+                nextEp = (userWorkMap[strId]?.current_episode ?? 0) + 1;
+                isManualEpisode = true;
+              }
+              cloned.isManualEpisode = isManualEpisode;
+              cloned.nextAiringEpisode = {
               ...m.nextAiringEpisode,
               airingAt: computedAiringAt,
               episode: nextEp
@@ -216,23 +219,14 @@ export default function CalendarPage() {
                         const uWork = userWorkMap[strId];
                         const offset = uWork?.synchro_offset_episodes || 0;
                         
-                        // Calculate the actual German episode airing at Date D
-                        const germanEpAiring = anime.nextAiringEpisode.episode - offset;
-                        
-                        // What is the next episode the user needs to watch?
-                        const currentEp = uWork?.current_episode || 0;
-                        const targetUserEp = currentEp + 1;
-                        
-                        // If they are ahead or on track, shift the date to when THEIR next episode airs
-                        // Note: If targetUserEp <= germanEpAiring, the date will shift backwards (which is correct, it aired in the past)
-                        let displayEpisode = anime.nextAiringEpisode.episode;
-                        if (offset > 0 || currentEp > 0) {
-                          const weeksDiff = targetUserEp - germanEpAiring;
-                          date.setDate(date.getDate() + (weeksDiff * 7));
-                          displayEpisode = targetUserEp;
-                        }
-
-                        const timeString = format(date, "HH:mm");
+                                                  const currentEp = uWork?.current_episode || 0;
+                          let displayEpisode = anime.nextAiringEpisode.episode;
+                          if (!anime.isManualEpisode && offset > 0) {
+                              displayEpisode -= offset;
+                          }
+                          if (displayEpisode < 1) displayEpisode = anime.nextAiringEpisode.episode;
+                          
+                          const timeString = format(date, "HH:mm");
                         const countdown = formatDistanceToNow(date, { addSuffix: true, locale: de });
                         
                         // Calculate Behind Status
