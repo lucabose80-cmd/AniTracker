@@ -93,7 +93,7 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
   return (
     <div 
       ref={setNodeRef} 
-      style={{ touchAction: 'none', ...style }} 
+      style={{ touchAction: isEditing ? 'none' : 'auto', ...style }} 
       {...(isEditing ? attributes : {})} {...(isEditing ? listeners : {})} className={`w-full aspect-[3/4] relative rounded-xl bg-[#1a1d24] border ${isDragging ? "border-blue-500 shadow-2xl scale-105" : "border-gray-800"} flex items-center justify-center font-bold text-gray-500 overflow-hidden ${isEditing ? "cursor-grab active:cursor-grabbing" : ""}`}
     >
       <span className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white backdrop-blur-md z-10 pointer-events-none">
@@ -168,7 +168,7 @@ function SortableItem({ id, index, workDetails, userWork, previousRank, globalOv
   );
 }
 
-function DraggableLibraryItem({ id, children }: { id: string, children: React.ReactNode }) {
+function DraggableLibraryItem({ id, isEditing, children }: { id: string, isEditing?: boolean, children: React.ReactNode }) {
   const {attributes, listeners, setNodeRef, transform, isDragging} = useDraggable({
     id: `library-${id}`,
   });
@@ -176,11 +176,11 @@ function DraggableLibraryItem({ id, children }: { id: string, children: React.Re
     transform: CSS.Translate.toString(transform),
     zIndex: isDragging ? 50 : 1,
     opacity: isDragging ? 0.8 : 1,
-    touchAction: 'none',
-  } : { touchAction: 'none' };
+    touchAction: isEditing ? 'none' : 'auto',
+  } : { touchAction: isEditing ? 'none' : 'auto' };
 
   return (
-    <div ref={setNodeRef} style={style} {...listeners} {...attributes} className="cursor-grab active:cursor-grabbing">
+    <div ref={setNodeRef} style={style} {...(isEditing ? listeners : {})} {...(isEditing ? attributes : {})} className={isEditing ? "cursor-grab active:cursor-grabbing" : ""}>
       {children}
     </div>
   );
