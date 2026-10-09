@@ -2,6 +2,7 @@ import { db } from "@/lib/firebase";
 import { collection, doc, setDoc, getDocs, query, orderBy, limit, deleteDoc, updateDoc, increment, getDoc, where, startAfter, arrayRemove, arrayUnion } from "firebase/firestore";
 import { ActivityFeed, ActivityComment, InAppNotification } from "@/types/database";
 import { getUserProfile } from "@/lib/db/users";
+import { UserWork } from "@/types/database";
 
 export async function createActivity(
   user_id: string,
@@ -79,11 +80,47 @@ export async function createActivity(
         targetUserId: "ALL",
         excludeUserId: user_id,
         title: "Neuer Thread",
-        body: text || `Ein neuer Thread für Folge/Kapitel ${episode_num || ''} wurde erstellt.`,
+        body: text || `Ein neuer Thread f�r Folge/Kapitel ${episode_num || ''} wurde erstellt.`,
         type: "social",
         link: "/feed"
       })
     }).catch(console.error);
+
+    // Create InAppNotifications for followers
+    try {
+      const actorProfile = await getUserProfile(user_id);
+      const actorName = actorProfile?.username || "Unbekannt";
+      const actorAvatar = actorProfile?.avatar_url || "";
+      
+      const userWorksRef = collection(db, "user_works");
+      const q = query(userWorksRef, where("work_id", "==", work_id));
+      const snap = await getDocs(q);
+      const notificationsRef = collection(db, "notifications");
+      
+      const notifiedUsers = new Set<string>();
+      notifiedUsers.add(user_id);
+      
+      snap.forEach((docSnap) => {
+         const data = docSnap.data();
+         if (!notifiedUsers.has(data.user_id)) {
+            notifiedUsers.add(data.user_id);
+            const notifRef = doc(notificationsRef);
+            setDoc(notifRef, {
+               notification_id: notifRef.id,
+               user_id: data.user_id,
+               actor_id: user_id,
+               actor_name: actorName,
+               actor_avatar: actorAvatar,
+               type: "NEW_EPISODE_THREAD",
+               activity_id: activity_id,
+               work_id: work_id,
+               text: text || `Ein neuer Thread f�r Folge/Kapitel ${episode_num || ''} wurde erstellt.`,
+               timestamp: timestamp,
+               read: false
+            });
+         }
+      });
+    } catch (e) { console.error(e); }
   }
 
   return newActivity;
@@ -220,7 +257,49 @@ export async function addActivityComment(activityId: string, userId: string, tex
         }
       } 
       // 2. Notify Thread/Activity Author (if not reply, and not their own post)
-      else if (activityData.user_id !== userId) {
+      else if (activityData.action_type === "EPISODE_THREAD") {
+         // Notify all users tracking the work
+         const userWorksRef = collection(db, "user_works");
+         const q = query(userWorksRef, where("work_id", "==", activityData.work_id));
+         const snap = await getDocs(q);
+         const notifiedUsers = new Set<string>();
+         notifiedUsers.add(userId);
+         
+         snap.forEach((docSnap) => {
+            const data = docSnap.data();
+            if (!notifiedUsers.has(data.user_id)) {
+               notifiedUsers.add(data.user_id);
+               const notifRef = doc(notificationsRef);
+               setDoc(notifRef, {
+                  notification_id: notifRef.id,
+                  user_id: data.user_id,
+                  actor_id: userId,
+                  actor_name: actorName,
+                  actor_avatar: actorAvatar,
+                  type: "COMMENT_ON_THREAD",
+                  activity_id: activityId,
+                  work_id: activityData.work_id,
+                  comment_id: comment_id,
+                  text: text,
+                  timestamp: timestamp,
+                  read: false
+               });
+               
+               // Send Push Notification
+               fetch("/api/notify", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                     targetUserId: data.user_id,
+                     title: `${actorName} hat im Thread kommentiert`,
+                     body: text,
+                     type: "replies",
+                     link: "/feed"
+                  })
+               }).catch(console.error);
+            }
+         });
+      } else if (activityData.user_id !== userId) {
         const notifRef = doc(notificationsRef);
         const notif: InAppNotification = {
           notification_id: notifRef.id,
@@ -228,7 +307,7 @@ export async function addActivityComment(activityId: string, userId: string, tex
           actor_id: userId,
           actor_name: actorName,
           actor_avatar: actorAvatar,
-          type: activityData.action_type === "EPISODE_THREAD" ? "COMMENT_ON_THREAD" : "REPLY_TO_COMMENT", // Actually it's a comment on their post
+          type: "REPLY_TO_COMMENT", // It's a comment on their post
           activity_id: activityId,
           work_id: activityData.work_id,
           comment_id: comment_id,
@@ -252,8 +331,8 @@ export async function addActivityComment(activityId: string, userId: string, tex
         }).catch(console.error);
       }
     }
-  } catch (e) {
-    console.error("Failed to update comments_count or send notification", e);
+  } catch (err) {
+    console.error(err);
   }
 
   return comment;

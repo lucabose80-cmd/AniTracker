@@ -328,6 +328,14 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
                           <p className="text-xs text-gray-300">
                             {n.type === "APP_UPDATE" ? (
                               <span className="font-bold text-blue-400">System Update</span>
+                            ) : n.type === "NEW_EPISODE_THREAD" ? (
+                              <>
+                                <span className="font-bold text-gray-200">{n.actor_name}</span> hat einen neuen Thread er�ffnet:
+                              </>
+                            ) : n.type === "COMMENT_ON_THREAD" ? (
+                              <>
+                                <span className="font-bold text-gray-200">{n.actor_name}</span> hat im verfolgten Thread geschrieben:
+                              </>
                             ) : (
                               <>
                                 <span className="font-bold text-gray-200">{n.actor_name}</span> 
