@@ -150,20 +150,24 @@ export async function GET(req: Request) {
             const tokens = userData.fcm_tokens || [];
             
             if (settings.releases !== false) {
-              // Create InAppNotification
-              const notifRef = adminDb.collection("notifications").doc();
-              await notifRef.set({
-                notification_id: notifRef.id,
-                user_id: uid,
-                actor_id: "SYSTEM",
-                actor_name: "AniTracker",
-                actor_avatar: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
-                type: "SYSTEM",
-                work_id: String(schedule.mediaId),
-                text: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${schedule.media.title.english || schedule.media.title.native || schedule.media.title.romaji} ist jetzt online.`,
-                timestamp: new Date().toISOString(),
-                read: false
-              });
+              // Create InAppNotification with deterministic ID to prevent duplicates
+              const notifId = `release_${uid}_${schedule.mediaId}_${schedule.episode}`;
+              const notifRef = adminDb.collection("notifications").doc(notifId);
+              const notifSnap = await notifRef.get();
+              if (!notifSnap.exists) {
+                await notifRef.set({
+                  notification_id: notifId,
+                  user_id: uid,
+                  actor_id: "SYSTEM",
+                  actor_name: "AniTracker",
+                  actor_avatar: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
+                  type: "SYSTEM",
+                  work_id: String(schedule.mediaId),
+                  text: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${schedule.media.title.english || schedule.media.title.native || schedule.media.title.romaji} ist jetzt online.`,
+                  timestamp: new Date().toISOString(),
+                  read: false
+                });
+              }
               
               if (tokens.length > 0) {
                 tokensToNotify.push(...tokens);
@@ -175,7 +179,7 @@ export async function GET(req: Request) {
         if (tokensToNotify.length > 0) {
           const payload = {
             notification: {
-              title: schedule.type === "MANGA" ? "Neues Kapitel verf�gbar!" : "Neue Folge verf�gbar!",
+              title: schedule.type === "MANGA" ? "Neues Kapitel verfügbar!" : "Neue Folge verfügbar!",
               body: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${schedule.media.title.english || schedule.media.title.native || schedule.media.title.romaji} ist jetzt online.`,
             },
             data: { link: `/work/${schedule.mediaId}`, type: "releases" },
@@ -262,7 +266,7 @@ export async function GET(req: Request) {
               if (settings.releases && tokens.length > 0) {
                 const payload = {
                   notification: {
-                    title: "?? Wunschliste -> Jetzt verf�gbar!",
+                    title: 🎉 Wunschliste -> Jetzt verfügbar!",
                     body: `${title} ist jetzt erschienen und wurde in deine Aktiv-Liste verschoben!`,
                   },
                   data: { link: `/work/${workId}`, type: "releases" },

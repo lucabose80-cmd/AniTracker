@@ -289,7 +289,7 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
     
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     if (userProfile) {
-       await markAllNotificationsRead(userProfile.uid);
+       await markAllNotificationsRead(unreadIds);
     }
   };
 
