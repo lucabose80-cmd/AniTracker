@@ -102,6 +102,32 @@ export default function ProfilePage() {
     await updateNotificationSettings(user.uid, newSettings);
   };
 
+    const handleRepairPush = async () => {
+    if (!user) return;
+    setIsSaving(true);
+    try {
+      if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          await sub.unsubscribe();
+        }
+      }
+      const token = await requestForToken(user.uid);
+      if (token) {
+        setIsPushEnabled(true);
+        alert("Push-Benachrichtigungen erfolgreich repariert!");
+      } else {
+        alert("Fehler beim Reparieren der Push-Benachrichtigungen. Bitte pr�fe die Browser-Berechtigungen.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Ein Fehler ist aufgetreten.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const enablePush = async () => {
     if (!user) return;
     setIsSaving(true);
@@ -255,10 +281,21 @@ export default function ProfilePage() {
 
       {user && (
         <section className="bg-[#1a1d24] border border-gray-800 rounded-2xl p-5 shadow-lg">
-          <h3 className="mb-4 text-lg font-bold flex items-center gap-2">
-            <Bell size={20} className="text-blue-500" />
-            Push-Benachrichtigungen
-          </h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold flex items-center gap-2">
+              <Bell size={20} className="text-blue-500" />
+              Push-Benachrichtigungen
+            </h3>
+            {isPushEnabled && (
+              <button 
+                onClick={handleRepairPush}
+                disabled={isSaving}
+                className="text-[10px] bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/30 px-2 py-1 rounded transition"
+              >
+                {isSaving ? "..." : "Reparieren"}
+              </button>
+            )}
+          </div>
           
           {!isPushEnabled ? (
             <div className="text-center">

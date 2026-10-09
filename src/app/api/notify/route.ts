@@ -68,6 +68,30 @@ export async function POST(req: Request) {
     };
 
     const response = await adminMessaging.sendEachForMulticast(payload);
+    
+    // Cleanup dead tokens
+    if (response.failureCount > 0) {
+      const failedTokens: string[] = [];
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success && resp.error?.code === 'messaging/registration-token-not-registered') {
+          failedTokens.push(tokens[idx]);
+        }
+      });
+      
+      if (failedTokens.length > 0) {
+        try {
+          const FieldValue = (await import("firebase-admin/firestore")).FieldValue;
+          if (targetUserId !== "ALL") {
+            await adminDb.collection("users").doc(targetUserId).update({
+              fcm_tokens: FieldValue.arrayRemove(...failedTokens)
+            });
+          } else {
+             // For ALL, we don't know easily which token belongs to whom, but it's a minor optimization, they will be cleaned up next time they receive a direct notification, or we could query the DB. We'll skip for now.
+          }
+        } catch(e) { console.error("Cleanup error", e); }
+      }
+    }
+    
     return NextResponse.json({ success: true, successCount: response.successCount });
   } catch (error: any) {
     console.error("Error sending notification:", error);
