@@ -175,7 +175,7 @@ export async function GET(req: Request) {
         if (tokensToNotify.length > 0) {
           const payload = {
             notification: {
-              title: schedule.type === "MANGA" ? "Neues Kapitel verfügbar!" : "Neue Folge verfügbar!",
+              title: schedule.type === "MANGA" ? "Neues Kapitel verf�gbar!" : "Neue Folge verf�gbar!",
               body: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${schedule.media.title.english || schedule.media.title.native || schedule.media.title.romaji} ist jetzt online.`,
             },
             data: { link: `/work/${schedule.mediaId}`, type: "releases" },
@@ -262,7 +262,7 @@ export async function GET(req: Request) {
               if (settings.releases && tokens.length > 0) {
                 const payload = {
                   notification: {
-                    title: "🎉 Wunschliste – Jetzt verfügbar!",
+                    title: "?? Wunschliste -> Jetzt verf�gbar!",
                     body: `${title} ist jetzt erschienen und wurde in deine Aktiv-Liste verschoben!`,
                   },
                   data: { link: `/work/${workId}`, type: "releases" },

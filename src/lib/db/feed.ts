@@ -424,17 +424,22 @@ export async function editActivityComment(commentId: string, newText: string) {
   }
 }
 
-export async function markAllNotificationsRead(userId: string): Promise<void> {
-  if (!db) return;
-  const { writeBatch } = await import("firebase/firestore");
-  const batch = writeBatch(db);
-  const notifRef = collection(db, "notifications");
-  const q = query(notifRef, where("user_id", "==", userId), where("read", "==", false));
-  const snap = await getDocs(q);
+export async function markAllNotificationsRead(notificationIds: string[]): Promise<void> {
+  if (!db || notificationIds.length === 0) return;
+  const { writeBatch, doc } = await import("firebase/firestore");
   
-  snap.forEach(d => {
-    batch.update(d.ref, { read: true });
-  });
+  // Firestore batch limit is 500
+  const chunks = [];
+  for (let i = 0; i < notificationIds.length; i += 500) {
+      chunks.push(notificationIds.slice(i, i + 500));
+  }
   
-  await batch.commit();
+  for (const chunk of chunks) {
+      const batch = writeBatch(db);
+      chunk.forEach(id => {
+          const ref = doc(db, "notifications", id);
+          batch.update(ref, { read: true });
+      });
+      await batch.commit();
+  }
 }
