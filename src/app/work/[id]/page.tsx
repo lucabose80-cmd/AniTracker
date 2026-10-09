@@ -564,8 +564,35 @@ export default function WorkDetailPage() {
                         <option value={1}>Jede Woche</option>
                         <option value={2}>Alle 2 Wochen</option>
                         <option value={4}>Alle 4 Wochen (Monatlich)</option>
-                      </select>
-                    </div>
+                        </select>
+                      </div>
+                      
+                      {releaseFrequency > 1 && (
+                        <div className="flex flex-col gap-1 w-full mt-2">
+                          <label className="text-xs text-gray-400 font-semibold">Startdatum (f�r Takt-Berechnung)</label>
+                          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500 w-full" />
+                        </div>
+                      )}
+                      
+                      <div className="flex flex-col gap-1 w-full mt-2">
+                        <label className="text-xs text-gray-400 font-semibold">Rhythmus</label>
+                        <select value={rhythmType} onChange={e => setRhythmType(e.target.value as any)} className="bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500 w-full">
+                          <option value="strict">P�nktlich (Fester Tag & Zeit)</option>
+                          <option value="flexible">Flexibel (Zeitfenster)</option>
+                        </select>
+                      </div>
+                      
+                      {rhythmType === 'flexible' && (
+                        <div className="flex gap-2 items-center mt-1 w-full">
+                          <select value={flexibleMinDay} onChange={e => setFlexibleMinDay(Number(e.target.value))} className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-2 py-2 text-white outline-none focus:border-blue-500">
+                            <option value={1}>Mo</option><option value={2}>Di</option><option value={3}>Mi</option><option value={4}>Do</option><option value={5}>Fr</option><option value={6}>Sa</option><option value={0}>So</option>
+                          </select>
+                          <span className="text-gray-400 text-xs">bis</span>
+                          <select value={flexibleMaxDay} onChange={e => setFlexibleMaxDay(Number(e.target.value))} className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-2 py-2 text-white outline-none focus:border-blue-500">
+                            <option value={1}>Mo</option><option value={2}>Di</option><option value={3}>Mi</option><option value={4}>Do</option><option value={5}>Fr</option><option value={6}>Sa</option><option value={0}>So</option>
+                          </select>
+                        </div>
+                      )}
                   )}
                 </div>
               </div>

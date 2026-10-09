@@ -38,10 +38,14 @@ export const requestForToken = async (userId: string) => {
   }
 };
 
-export const onMessageListener = () =>
-  new Promise((resolve) => {
-    const messaging = getMessaging(app);
-    onMessage(messaging, (payload) => {
-      resolve(payload);
-    });
-  });
+export const setupOnMessage = (callback: (payload: any) => void) => {
+  if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+    try {
+      const messaging = getMessaging(app);
+      return onMessage(messaging, callback);
+    } catch (e) {
+      console.log("FCM messaging not supported or configured incorrectly", e);
+    }
+  }
+  return () => {};
+};
