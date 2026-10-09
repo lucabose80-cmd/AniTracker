@@ -266,7 +266,7 @@ export async function GET(req: Request) {
               if (settings.releases && tokens.length > 0) {
                 const payload = {
                   notification: {
-                    title: 🎉 Wunschliste -> Jetzt verfügbar!",
+                    title: "\uD83C\uDF89 Wunschliste -> Jetzt verf\u00FCgbar!",
                     body: `${title} ist jetzt erschienen und wurde in deine Aktiv-Liste verschoben!`,
                   },
                   data: { link: `/work/${workId}`, type: "releases" },
