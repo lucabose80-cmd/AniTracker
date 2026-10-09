@@ -354,13 +354,20 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
               <div className="absolute right-0 top-full mt-2 w-72 max-h-96 overflow-y-auto bg-[#1a1d24] border border-gray-700 rounded-xl shadow-2xl z-50 flex flex-col">
                 <div className="flex items-center justify-between p-3 border-b border-gray-800 bg-[#141a29] sticky top-0 z-10">
                   <h3 className="font-bold text-gray-200">Benachrichtigungen</h3>
-                  <button onClick={() => setShowNotifications(false)} className="text-gray-400 hover:text-white"><X size={16} /></button>
+                  <div className="flex items-center gap-3">
+                    {unreadCount > 0 && (
+                      <button onClick={(e) => { e.stopPropagation(); handleMarkAllRead(); }} className="text-xs text-blue-400 hover:text-blue-300 font-medium">
+                        Alles gelesen
+                      </button>
+                    )}
+                    <button onClick={() => setShowNotifications(false)} className="text-gray-400 hover:text-white"><X size={16} /></button>
+                  </div>
                 </div>
-                {notifications.filter(n => !n.read).length === 0 ? (
+                {groupedUnread.length === 0 ? (
                   <div className="p-4 text-center text-sm text-gray-500">Keine Neuigkeiten.</div>
                 ) : (
                   <div className="flex flex-col">
-                    {notifications.filter(n => !n.read).map(n => (
+                    {groupedUnread.map(n => (
                       <button 
                         key={n.notification_id}
                         onClick={() => handleNotificationClick(n)}
