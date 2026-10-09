@@ -148,8 +148,26 @@ export async function GET(req: Request) {
             const userData = userDoc.data()!;
             const settings = userData.notification_settings || { releases: true };
             const tokens = userData.fcm_tokens || [];
-            if (settings.releases && tokens.length > 0) {
-              tokensToNotify.push(...tokens);
+            
+            if (settings.releases !== false) {
+              // Create InAppNotification
+              const notifRef = adminDb.collection("notifications").doc();
+              await notifRef.set({
+                notification_id: notifRef.id,
+                user_id: uid,
+                actor_id: "SYSTEM",
+                actor_name: "AniTracker",
+                actor_avatar: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
+                type: "SYSTEM",
+                work_id: String(schedule.mediaId),
+                text: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${schedule.media.title.english || schedule.media.title.native || schedule.media.title.romaji} ist jetzt online.`,
+                timestamp: new Date().toISOString(),
+                read: false
+              });
+              
+              if (tokens.length > 0) {
+                tokensToNotify.push(...tokens);
+              }
             }
           }
         }
