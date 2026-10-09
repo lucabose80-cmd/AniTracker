@@ -1,7 +1,7 @@
 // v1.1 - Benachrichtigungen verbessert & AniList-Limit Banner entfernt
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { auth } from "@/lib/firebase";
 import { ActivityFeed } from "@/types/database";
 import { getGlobalFeedPaginated, createActivity } from "@/lib/db/feed";
@@ -11,7 +11,7 @@ import { MessageCircle, Star, Sparkles, Send, Activity, BookmarkPlus, Bell, X } 
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
-import { deleteActivity, getActivityComments, addActivityComment, deleteActivityComment, getInAppNotifications, markNotificationRead } from "@/lib/db/feed";
+import { deleteActivity, getActivityComments, addActivityComment, deleteActivityComment, getInAppNotifications, markNotificationRead, markAllNotificationsRead } from "@/lib/db/feed";
 import { ActivityComment, InAppNotification } from "@/types/database";
 import { SpoilerProtectedThread, CommentSection, SpoilerText } from "@/components/ui/SocialComponents";
 import { groupFeedItems, StackedThreadBlock, FeedGroup } from "@/components/ui/FeedGrouping";
@@ -250,12 +250,56 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const handleNotificationClick = async (notif: InAppNotification) => {
+  const groupedUnread = useMemo(() => {
+    const unread = notifications.filter(n => !n.read);
+    const groups = new Map<string, any>();
+    const regular: any[] = [];
+
+    unread.forEach(n => {
+       if (n.type === "COMMENT_ON_THREAD" && n.activity_id) {
+           if (groups.has(n.activity_id)) {
+               const g = groups.get(n.activity_id);
+               g.count += 1;
+               g.notification_ids.push(n.notification_id);
+               if (new Date(n.timestamp) > new Date(g.timestamp)) {
+                   g.timestamp = n.timestamp;
+               }
+               if (g.actor_id !== n.actor_id) {
+                   g.actor_name = "Mehrere Nutzer";
+                   g.actor_avatar = "";
+               }
+           } else {
+               groups.set(n.activity_id, {
+                   ...n,
+                   count: 1,
+                   notification_ids: [n.notification_id]
+               });
+           }
+       } else {
+           regular.push({ ...n, notification_ids: [n.notification_id] });
+       }
+    });
+
+    return [...regular, ...Array.from(groups.values())].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [notifications]);
+
+  const handleMarkAllRead = async () => {
+    const unreadIds = notifications.filter(n => !n.read).map(n => n.notification_id);
+    if (unreadIds.length === 0) return;
+    
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    if (userProfile) {
+       await markAllNotificationsRead(userProfile.uid);
+    }
+  };
+
+  const handleNotificationClick = async (notif: any) => {
     // For APP_UPDATE: unregister SW and reload to get fresh version
     if (notif.type === 'APP_UPDATE') {
       if (!notif.read) {
-        await markNotificationRead(notif.notification_id);
-        setNotifications(prev => prev.map(n => n.notification_id === notif.notification_id ? { ...n, read: true } : n));
+        const ids = notif.notification_ids || [notif.notification_id];
+        for (const id of ids) await markNotificationRead(id);
+        setNotifications(prev => prev.map(n => ids.includes(n.notification_id) ? { ...n, read: true } : n));
       }
       if ('serviceWorker' in navigator) {
         const registrations = await navigator.serviceWorker.getRegistrations();
@@ -266,8 +310,9 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
     }
 
     if (!notif.read) {
-      await markNotificationRead(notif.notification_id);
-      setNotifications(prev => prev.map(n => n.notification_id === notif.notification_id ? { ...n, read: true } : n));
+      const ids = notif.notification_ids || [notif.notification_id];
+        for (const id of ids) await markNotificationRead(id);
+        setNotifications(prev => prev.map(n => ids.includes(n.notification_id) ? { ...n, read: true } : n));
     }
     setShowNotifications(false);
     

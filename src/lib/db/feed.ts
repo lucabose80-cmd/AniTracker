@@ -423,3 +423,18 @@ export async function editActivityComment(commentId: string, newText: string) {
     await updateDoc(docRef, { text: newText });
   }
 }
+
+export async function markAllNotificationsRead(userId: string): Promise<void> {
+  if (!db) return;
+  const { writeBatch } = await import("firebase/firestore");
+  const batch = writeBatch(db);
+  const notifRef = collection(db, "notifications");
+  const q = query(notifRef, where("user_id", "==", userId), where("read", "==", false));
+  const snap = await getDocs(q);
+  
+  snap.forEach(d => {
+    batch.update(d.ref, { read: true });
+  });
+  
+  await batch.commit();
+}
