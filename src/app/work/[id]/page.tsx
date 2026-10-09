@@ -555,6 +555,7 @@ export default function WorkDetailPage() {
                     />
                   </div>
                   {customDay !== -1 && (
+                    <>
                     <div className="mt-2">
                       <select
                         value={releaseFrequency}
@@ -593,6 +594,7 @@ export default function WorkDetailPage() {
                           </select>
                         </div>
                       )}
+                    </>
                   )}
                 </div>
               </div>
