@@ -95,18 +95,32 @@ export default function CalendarPage() {
               computedAiringAt = Math.floor(date.getTime() / 1000);
               
               const freqWeeks = over.releaseFrequency || 1;
-              const lastInc = over.lastIncrementedAt || 0;
+              const anchor = over.startDate ? new Date(over.startDate).getTime() / 1000 : (over.lastIncrementedAt || 0);
               
-              if (lastInc > 0 && freqWeeks > 1) {
-                 // Calculate if we need to skip weeks based on frequency
-                 const weeksPassed = Math.floor((computedAiringAt - lastInc) / (7 * 24 * 3600));
-                 if (weeksPassed % freqWeeks !== 0) {
-                     const weeksToAdd = freqWeeks - (weeksPassed % freqWeeks);
-                     computedAiringAt += weeksToAdd * 7 * 24 * 3600;
+              if (anchor > 0 && freqWeeks > 1) {
+                 const startD = new Date(anchor * 1000);
+                 const diffStart = startD.getDay() === 0 ? 6 : startD.getDay() - 1;
+                 startD.setDate(startD.getDate() - diffStart);
+                 startD.setHours(0,0,0,0);
+                 
+                 const compD = new Date(computedAiringAt * 1000);
+                 const diffComp = compD.getDay() === 0 ? 6 : compD.getDay() - 1;
+                 compD.setDate(compD.getDate() - diffComp);
+                 compD.setHours(0,0,0,0);
+                 
+                 let diffWeeks = Math.round((compD.getTime() - startD.getTime()) / (7 * 24 * 3600 * 1000));
+                 let weeksToAdd = 0;
+                 if (diffWeeks < 0) {
+                     weeksToAdd = Math.abs(diffWeeks);
+                 } else {
+                     let remainder = diffWeeks % freqWeeks;
+                     if (remainder !== 0) {
+                         weeksToAdd = freqWeeks - remainder;
+                     }
                  }
+                 computedAiringAt += weeksToAdd * 7 * 24 * 3600;
               }
-              
-              hasSchedule = true;
+                            hasSchedule = true;
             }
           } else if (m.nextAiringEpisode) {
             hasSchedule = true;
@@ -128,10 +142,12 @@ export default function CalendarPage() {
               }
               cloned.isManualEpisode = isManualEpisode;
               cloned.nextAiringEpisode = {
-              ...m.nextAiringEpisode,
-              airingAt: computedAiringAt,
-              episode: nextEp
-            };
+                ...m.nextAiringEpisode,
+                airingAt: computedAiringAt,
+                episode: nextEp
+              };
+              if (over.rhythmType) cloned.rhythmType = over.rhythmType;
+              if (over.flexibleDayRange) cloned.flexibleDayRange = over.flexibleDayRange;
             scheduled.push(cloned);
           }
         });
@@ -229,7 +245,14 @@ export default function CalendarPage() {
                           if (displayEpisode < 1) displayEpisode = anime.nextAiringEpisode.episode;
                           
                           const timeString = format(date, "HH:mm");
-                        const countdown = formatDistanceToNow(date, { addSuffix: true, locale: de });
+                          const countdown = formatDistanceToNow(date, { addSuffix: true, locale: de });
+                          
+                          let displayTime = timeString;
+                          if (anime.rhythmType === 'flexible' && anime.flexibleDayRange) {
+                              const minL = DAYS.find(d => d.value === anime.flexibleDayRange.minDay)?.label;
+                              const maxL = DAYS.find(d => d.value === anime.flexibleDayRange.maxDay)?.label;
+                              displayTime = `${minL} - ${maxL}`;
+                          }
                         
                         // Calculate Behind Status
                         
@@ -318,7 +341,7 @@ export default function CalendarPage() {
                                   <div className="flex items-center gap-3">
                                     <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-gray-900 border border-gray-800">
                                       <Clock size={12} className="text-gray-400" />
-                                      <span className="text-xs font-bold text-gray-300">{timeString} Uhr</span>
+                                      <span className="text-xs font-bold text-gray-300">{displayTime}{anime.rhythmType === "flexible" ? "" : " Uhr"}</span>
                                     </div>
                                     <span className="text-[10px] font-medium text-gray-500 bg-gray-900/50 px-2 py-1 rounded">
                                       {countdown}

@@ -60,6 +60,10 @@ export default function WorkDetailPage() {
   const [customTime, setCustomTime] = useState<string>("12:00");
   const [releaseFrequency, setReleaseFrequency] = useState<number>(1);
   const [hasCustomOverride, setHasCustomOverride] = useState(false);
+  const [startDate, setStartDate] = useState<string>("");
+  const [rhythmType, setRhythmType] = useState<"strict" | "flexible">("strict");
+  const [flexibleMinDay, setFlexibleMinDay] = useState<number>(5);
+  const [flexibleMaxDay, setFlexibleMaxDay] = useState<number>(0);
 
   useEffect(() => {
     async function loadData() {
@@ -347,7 +351,7 @@ export default function WorkDetailPage() {
 
   const handleSaveCustomRelease = async () => {
     if (!id) return;
-    await setCalendarOverride(id, null as any, customDay, customTime);
+    await setCalendarOverride(id, null as any, customDay, customTime, undefined, releaseFrequency, undefined, undefined, startDate || undefined, rhythmType, rhythmType === 'flexible' ? { minDay: flexibleMinDay, maxDay: flexibleMaxDay } : undefined);
     setHasCustomOverride(true);
     alert("Wöchentlicher Release-Zeitpunkt gespeichert!");
   };
