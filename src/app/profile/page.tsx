@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { getUserProfile, updateNotificationSettings, updateTop9List, updateUserProfileData } from "@/lib/db/users";
-import { requestForToken } from "@/lib/fcm";
+import { requestForToken, repairToken } from "@/lib/fcm";
 import { getAllUserWorks } from "@/lib/db/works";
 import { fetchAniListBatch } from "@/lib/anilist";
 import { useAppStore } from "@/lib/store";
@@ -106,14 +106,7 @@ export default function ProfilePage() {
     if (!user) return;
     setIsSaving(true);
     try {
-      if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-        const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.getSubscription();
-        if (sub) {
-          await sub.unsubscribe();
-        }
-      }
-      const token = await requestForToken(user.uid);
+      const token = await repairToken(user.uid);
       if (token) {
         setIsPushEnabled(true);
         alert("Push-Benachrichtigungen erfolgreich repariert!");

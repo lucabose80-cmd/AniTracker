@@ -1,4 +1,4 @@
-import { getMessaging, getToken, onMessage } from "firebase/messaging";
+import { getMessaging, getToken, deleteToken, onMessage } from "firebase/messaging";
 import { app, db } from "./firebase";
 import { doc, updateDoc, arrayUnion } from "firebase/firestore";
 
@@ -48,4 +48,26 @@ export const setupOnMessage = (callback: (payload: any) => void) => {
     }
   }
   return () => {};
+};
+
+export const repairToken = async (userId: string) => {
+  if (typeof window !== "undefined" && "serviceWorker" in navigator) {
+    try {
+      const messaging = getMessaging(app);
+      // Clear Firebase token cache
+      try { await deleteToken(messaging); } catch(e) { console.log("deleteToken err", e); }
+      
+      // Clear browser push subscription
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        await sub.unsubscribe();
+      }
+      
+      // Get a fresh token
+      return await requestForToken(userId);
+    } catch (err) {
+      console.error("Error repairing token", err);
+    }
+  }
 };
