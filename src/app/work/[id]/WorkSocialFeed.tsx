@@ -47,6 +47,12 @@ export function WorkSocialFeed({ workId, work }: { workId: string, work: any }) 
   );
 
   const sortedFeed = [...feed].sort((a, b) => {
+    const epA = a.episode_num || 0;
+    const epB = b.episode_num || 0;
+    if (epA !== epB) {
+      return sortAsc ? epA - epB : epB - epA;
+    }
+    // Fallback zu Zeit, falls Kapitelnummer gleich oder nicht vorhanden
     const timeA = new Date(a.timestamp).getTime();
     const timeB = new Date(b.timestamp).getTime();
     return sortAsc ? timeA - timeB : timeB - timeA;
@@ -58,9 +64,9 @@ export function WorkSocialFeed({ workId, work }: { workId: string, work: any }) 
         <h3 className="text-lg font-bold text-white">Social Feed zu diesem Werk</h3>
         <button 
           onClick={() => setSortAsc(!sortAsc)}
-          className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-1.5 rounded-lg transition font-bold"
+          className="text-xs text-blue-400 hover:text-blue-300 transition"
         >
-          {sortAsc ? "Frühster bis Spätester" : "Spätester bis Frühster"}
+          {sortAsc ? "Kapitel aufsteigend" : "Kapitel absteigend"}
         </button>
       </div>
       {sortedFeed.map(activity => {
