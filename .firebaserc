@@ -1,5 +1,6 @@
 {
   "projects": {
-    "default": "anitracker-dev-e7be6"
+    "default": "anitracker-e6364",
+    "dev": "anitracker-dev-e7be6"
   }
 }
