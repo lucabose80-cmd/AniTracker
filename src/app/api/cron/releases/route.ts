@@ -172,10 +172,10 @@ export async function GET(req: Request) {
                   timestamp: new Date().toISOString(),
                   read: false
                 });
-              }
-              
-              if (tokens.length > 0) {
-                tokensToNotify.push(...tokens);
+
+                if (tokens.length > 0) {
+                  tokensToNotify.push(...tokens);
+                }
               }
             }
           }

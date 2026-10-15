@@ -90,6 +90,12 @@ export const useAppStore = create<AppState>()(
     {
       name: 'anitracker-store',
       storage: createJSONStorage(() => idbStorage),
+      partialize: (state) => ({
+        contentType: state.contentType,
+        searchHistory: state.searchHistory,
+        homeTab: state.homeTab,
+        trendingGenre: state.trendingGenre,
+      }),
     }
   )
 );

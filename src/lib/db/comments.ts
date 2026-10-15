@@ -47,14 +47,14 @@ export async function addComment(
       if (parentData.author_uid !== author_uid) {
         const { getWorkTitleAndType } = await import("@/lib/anilist");
         const workInfo = await getWorkTitleAndType(work_id);
-        const workTitle = workInfo?.title ? ` (${workInfo.title})` : "";
+        const unit = workInfo?.type === "MANGA" ? "Kapitel" : "Folge";
         fetch("/api/notify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             targetUserId: parentData.author_uid,
-            title: `Neue Antwort${workTitle}`,
-            body: `${author_name} hat geantwortet: "${text}"`,
+            title: `${author_name} in ${workInfo?.title || "Werk"}${episode_num ? ` (${unit} ${episode_num})` : ''}`,
+            body: text,
             type: "replies",
             link: `/work/${work_id}?episode=${episode_num || ''}`
           })
@@ -96,7 +96,7 @@ export async function addComment(
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               targetUserId: uid,
-              title: `Neuer Raum: ${workTitle}`,
+              title: `Neuer Thread in ${workTitle}${episode_num ? ` (${unit} ${episode_num})` : ''}`,
               body: `${author_name} hat eine Diskussion zu ${unit} ${episode_num} gestartet.`,
               type: "social",
               link: `/work/${work_id}?episode=${episode_num}`

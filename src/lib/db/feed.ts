@@ -73,16 +73,32 @@ export async function createActivity(
       })
     }).catch(console.error);
   } else if (action_type === "EPISODE_THREAD") {
+    let workTitle = "";
+    let mediaType: "ANIME" | "MANGA" = "ANIME";
+    if (work_id) {
+      try {
+        const { getWorkTitleAndType } = await import("@/lib/anilist");
+        const info = await getWorkTitleAndType(work_id);
+        if (info) {
+          workTitle = info.title;
+          mediaType = info.type;
+        }
+      } catch(e) {}
+    }
+    const unit = mediaType === "MANGA" ? "Kapitel" : "Folge";
+    const epContext = episode_num ? ` (${unit} ${episode_num})` : "";
+    const targetTitle = `Neuer Thread in ${workTitle || "Werk"}${epContext}`;
+
     fetch("/api/notify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         targetUserId: "ALL",
         excludeUserId: user_id,
-        title: "Neuer Thread",
-        body: text || `Ein neuer Thread f�r Folge/Kapitel ${episode_num || ''} wurde erstellt.`,
+        title: targetTitle,
+        body: text || `Ein neuer Thread für ${unit} ${episode_num || ''} wurde erstellt.`,
         type: "social",
-        link: "/feed"
+        link: work_id ? `/work/${work_id}?episode=${episode_num || ''}` : "/feed"
       })
     }).catch(console.error);
 
@@ -114,7 +130,10 @@ export async function createActivity(
                type: "NEW_EPISODE_THREAD",
                activity_id: activity_id,
                work_id: work_id,
-               text: text || `Ein neuer Thread f�r Folge/Kapitel ${episode_num || ''} wurde erstellt.`,
+               work_title: workTitle,
+               media_type: mediaType,
+               episode_num: episode_num,
+               text: text || `Ein neuer Thread für ${unit} ${episode_num || ''} wurde erstellt.`,
                timestamp: timestamp,
                read: false
             });
@@ -266,8 +285,8 @@ export async function addActivityComment(activityId: string, userId: string, tex
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 targetUserId: parentData.user_id,
-                title: `${actorName} hat geantwortet${workContext}`,
-                body: `${epPrefix}${text}`,
+                title: `${actorName} in ${workTitle || "Thread"}${activityData.episode_num ? ` (${unit} ${activityData.episode_num})` : ''}`,
+                body: text,
                 type: "replies",
                 link: activityData.work_id ? `/work/${activityData.work_id}?episode=${activityData.episode_num || ''}` : "/feed"
               })
@@ -348,7 +367,7 @@ export async function addActivityComment(activityId: string, userId: string, tex
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             targetUserId: activityData.user_id,
-            title: `${actorName} hat deinen Beitrag kommentiert${workContext}`,
+            title: `${actorName} in ${workTitle || "Beitrag"}${activityData.episode_num ? ` (${unit} ${activityData.episode_num})` : ''}`,
             body: text,
             type: "replies",
             link: "/feed"
