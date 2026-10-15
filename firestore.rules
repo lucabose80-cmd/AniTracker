@@ -1,0 +1,397 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (matches Firebase Auth UID)
+    // Fields:
+    //   - uid: string (required on create, matches auth.uid, immutable)
+    //   - username: string (required on create, 1-100 chars)
+    //   - avatar_url: string (optional, 0-1000 chars)
+    //   - email: string (optional, 0-254 chars)
+    //   - following_array: list of strings (optional, max 5000 items)
+    //   - top_9_list: list of strings (optional, legacy, max 50 items)
+    //   - top_9_anime: list of strings (optional, max 50 items)
+    //   - top_9_manga: list of strings (optional, max 50 items)
+    //   - read_watch_history: list of strings (optional, max 10000 items)
+    //   - notification_settings: map (optional)
+    //   - fcm_tokens: list of strings (optional, max 50 items)
+    //   - weekly_ranking_anime: map (optional)
+    //   - weekly_ranking_manga: map (optional)
+    //   - last_maintenance_timestamp: number (optional)
+    //
+    // Subcollection: users/{userId}/works/{workId}
+    // Fields:
+    //   - top9_rank: number (optional, 1-100)
+    //
+    // Collection: user_works
+    // Document ID: {userWorkId} (format: `${userId}_${workId}`)
+    // Fields:
+    //   - user_id: string (required, matches auth.uid, immutable)
+    //   - work_id: string (required, 1-100 chars, immutable)
+    //   - status: string (optional, max 20 chars)
+    //   - current_episode: number (optional, >= 0)
+    //   - priority_tier: number (optional, 1-3)
+    //   - sync_offset_days: number (optional)
+    //   - synchro_offset_episodes: number (optional)
+    //   - manual_available_eps: number or null (optional)
+    //   - selected_platform: string (optional, max 100 chars)
+    //   - manual_max_episode: number or null (optional)
+    //   - auto_added: bool (optional)
+    //   - top9_rank: number (optional, 1-100)
+    //   - added_status: string (optional, max 50 chars)
+    //   - adaptationScores: map (optional)
+    //   - mal_rated: bool (optional)
+    //   - classification: map (optional)
+    //   - evaluation: map (optional)
+    //
+    // Collection: comments
+    // Document ID: {commentId}
+    // Fields:
+    //   - comment_id: string (required, immutable)
+    //   - work_id: string (required, immutable)
+    //   - author_uid: string (required, matches auth.uid, immutable)
+    //   - author_name: string (required, 1-100 chars)
+    //   - author_avatar: string (optional, 0-1000 chars)
+    //   - text: string (required, 1-5000 chars)
+    //   - timestamp: string (required, immutable)
+    //   - is_spoiler: bool (required)
+    //   - parent_comment_id: string or null (optional)
+    //   - episode_num: number (optional)
+    //   - upvotes: list of strings (optional, max 5000 items)
+    //   - downvotes: list of strings (optional, max 5000 items)
+    //
+    // Collection: activity_feed & activities
+    // Document ID: {activityId}
+    // Fields:
+    //   - activity_id: string (required, immutable)
+    //   - user_id: string (required, matches auth.uid, immutable)
+    //   - action_type: string (required, immutable)
+    //   - work_id: string (optional, max 100 chars)
+    //   - episode_num: number (optional)
+    //   - text: string (optional, max 5000 chars)
+    //   - details: string (optional, max 5000 chars)
+    //   - timestamp: string (required, immutable)
+    //   - comments_count: number (optional)
+    //   - likes: list of strings (optional, max 5000 items)
+    //
+    // Collection: activity_comments
+    // Document ID: {commentId}
+    // Fields:
+    //   - comment_id: string (required, immutable)
+    //   - activity_id: string (required, immutable)
+    //   - user_id: string (required, matches auth.uid, immutable)
+    //   - text: string (required, 1-5000 chars)
+    //   - timestamp: string (required, immutable)
+    //   - parent_comment_id: string (optional)
+    //
+    // Collection: notifications
+    // Document ID: {notificationId}
+    // Fields:
+    //   - notification_id: string (required, immutable)
+    //   - user_id: string (required, recipient, immutable)
+    //   - actor_id: string (required, max 128 chars)
+    //   - actor_name: string (required, 1-100 chars)
+    //   - actor_avatar: string (optional, max 1000 chars)
+    //   - type: string (required, max 50 chars)
+    //   - activity_id: string (optional, max 128 chars)
+    //   - work_id: string (optional, max 100 chars)
+    //   - work_title: string (optional, max 200 chars)
+    //   - media_type: string (optional, max 20 chars)
+    //   - episode_num: number (optional)
+    //   - comment_id: string (optional, max 128 chars)
+    //   - text: string (required, max 1000 chars)
+    //   - timestamp: string (required, immutable)
+    //   - read: bool (required)
+    //
+    // Collection: calendar_overrides
+    // Document ID: {workId}
+    //
+    // Collection: work_pauses
+    // Document ID: {workId}
+    //
+    // Collection: app_config
+    // Document ID: version
+    // ===============================================================
+
+    // --- Helper Functions ---
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    function isValidList(listVal, maxSize) {
+      return listVal is list && listVal.size() <= maxSize;
+    }
+
+    // --- Domain Validators ---
+
+    function isValidUser(data) {
+      return (!('uid' in data) || (data.uid is string && data.uid.size() <= 128)) &&
+             (!('username' in data) || (data.username is string && data.username.size() >= 1 && data.username.size() <= 100)) &&
+             (!('avatar_url' in data) || (data.avatar_url is string && data.avatar_url.size() <= 1000)) &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 254)) &&
+             (!('following_array' in data) || isValidList(data.following_array, 5000)) &&
+             (!('top_9_list' in data) || isValidList(data.top_9_list, 50)) &&
+             (!('top_9_anime' in data) || isValidList(data.top_9_anime, 50)) &&
+             (!('top_9_manga' in data) || isValidList(data.top_9_manga, 50)) &&
+             (!('read_watch_history' in data) || isValidList(data.read_watch_history, 10000)) &&
+             (!('notification_settings' in data) || data.notification_settings is map) &&
+             (!('fcm_tokens' in data) || isValidList(data.fcm_tokens, 50)) &&
+             (!('weekly_ranking_anime' in data) || data.weekly_ranking_anime is map) &&
+             (!('weekly_ranking_manga' in data) || data.weekly_ranking_manga is map) &&
+             (!('last_maintenance_timestamp' in data) || data.last_maintenance_timestamp is number);
+    }
+
+    function isValidUserSubWork(data) {
+      return !('top9_rank' in data) || (data.top9_rank is number && data.top9_rank >= 1 && data.top9_rank <= 100);
+    }
+
+    function isValidUserWork(data) {
+      return data.user_id is string && data.user_id == request.auth.uid &&
+             data.work_id is string && data.work_id.size() <= 100 &&
+             (!('status' in data) || (data.status is string && data.status.size() <= 20)) &&
+             (!('current_episode' in data) || (data.current_episode is number && data.current_episode >= 0 && data.current_episode <= 100000)) &&
+             (!('priority_tier' in data) || (data.priority_tier is number && data.priority_tier >= 1 && data.priority_tier <= 3)) &&
+             (!('sync_offset_days' in data) || data.sync_offset_days is number) &&
+             (!('synchro_offset_episodes' in data) || data.synchro_offset_episodes is number) &&
+             (!('manual_available_eps' in data) || data.manual_available_eps == null || (data.manual_available_eps is number && data.manual_available_eps >= 0)) &&
+             (!('selected_platform' in data) || (data.selected_platform is string && data.selected_platform.size() <= 100)) &&
+             (!('manual_max_episode' in data) || data.manual_max_episode == null || (data.manual_max_episode is number && data.manual_max_episode >= 0)) &&
+             (!('auto_added' in data) || data.auto_added is bool) &&
+             (!('top9_rank' in data) || (data.top9_rank is number && data.top9_rank >= 1 && data.top9_rank <= 100)) &&
+             (!('added_status' in data) || (data.added_status is string && data.added_status.size() <= 50)) &&
+             (!('adaptationScores' in data) || data.adaptationScores is map) &&
+             (!('mal_rated' in data) || data.mal_rated is bool) &&
+             (!('classification' in data) || data.classification is map) &&
+             (!('evaluation' in data) || data.evaluation is map);
+    }
+
+    function isValidComment(data) {
+      return data.comment_id is string && data.comment_id.size() <= 128 &&
+             data.work_id is string && data.work_id.size() <= 100 &&
+             data.author_uid is string && data.author_uid == request.auth.uid &&
+             data.author_name is string && data.author_name.size() >= 1 && data.author_name.size() <= 100 &&
+             (!('author_avatar' in data) || (data.author_avatar is string && data.author_avatar.size() <= 1000)) &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 5000 &&
+             data.timestamp is string && data.timestamp.size() <= 50 &&
+             data.is_spoiler is bool &&
+             (!('parent_comment_id' in data) || data.parent_comment_id == null || (data.parent_comment_id is string && data.parent_comment_id.size() <= 128)) &&
+             (!('episode_num' in data) || (data.episode_num is number && data.episode_num >= 0)) &&
+             (!('upvotes' in data) || isValidList(data.upvotes, 5000)) &&
+             (!('downvotes' in data) || isValidList(data.downvotes, 5000));
+    }
+
+    function isValidActivity(data) {
+      return data.activity_id is string && data.activity_id.size() <= 128 &&
+             data.user_id is string && data.user_id == request.auth.uid &&
+             data.action_type is string && data.action_type.size() <= 50 &&
+             data.timestamp is string && data.timestamp.size() <= 50 &&
+             (!('work_id' in data) || (data.work_id is string && data.work_id.size() <= 100)) &&
+             (!('episode_num' in data) || (data.episode_num is number && data.episode_num >= 0)) &&
+             (!('text' in data) || (data.text is string && data.text.size() <= 5000)) &&
+             (!('details' in data) || (data.details is string && data.details.size() <= 5000)) &&
+             (!('comments_count' in data) || (data.comments_count is number && data.comments_count >= 0)) &&
+             (!('likes' in data) || isValidList(data.likes, 5000));
+    }
+
+    function isValidActivityComment(data) {
+      return data.comment_id is string && data.comment_id.size() <= 128 &&
+             data.activity_id is string && data.activity_id.size() <= 128 &&
+             data.user_id is string && data.user_id == request.auth.uid &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 5000 &&
+             data.timestamp is string && data.timestamp.size() <= 50 &&
+             (!('parent_comment_id' in data) || (data.parent_comment_id is string && data.parent_comment_id.size() <= 128));
+    }
+
+    function isValidNotification(data) {
+      return data.notification_id is string && data.notification_id.size() <= 128 &&
+             data.user_id is string && data.user_id.size() <= 128 &&
+             data.actor_id is string && data.actor_id.size() <= 128 &&
+             data.actor_name is string && data.actor_name.size() <= 100 &&
+             (!('actor_avatar' in data) || (data.actor_avatar is string && data.actor_avatar.size() <= 1000)) &&
+             data.type is string && data.type.size() <= 50 &&
+             (!('activity_id' in data) || (data.activity_id is string && data.activity_id.size() <= 128)) &&
+             (!('work_id' in data) || (data.work_id is string && data.work_id.size() <= 100)) &&
+             (!('work_title' in data) || (data.work_title is string && data.work_title.size() <= 200)) &&
+             (!('media_type' in data) || (data.media_type is string && data.media_type.size() <= 20)) &&
+             (!('episode_num' in data) || data.episode_num is number) &&
+             (!('comment_id' in data) || (data.comment_id is string && data.comment_id.size() <= 128)) &&
+             data.text is string && data.text.size() <= 1000 &&
+             data.timestamp is string && data.timestamp.size() <= 50 &&
+             data.read is bool;
+    }
+
+    function isValidCalendarOverride(data) {
+      return data.work_id is string && data.work_id.size() <= 100 &&
+             (!('airingAt' in data) || data.airingAt is number) &&
+             (!('weeklyDay' in data) || (data.weeklyDay is number && data.weeklyDay >= 0 && data.weeklyDay <= 6)) &&
+             (!('weeklyTime' in data) || (data.weeklyTime is string && data.weeklyTime.size() <= 10)) &&
+             (!('releaseFrequency' in data) || (data.releaseFrequency is number && data.releaseFrequency >= 1 && data.releaseFrequency <= 52)) &&
+             (!('manualMaxEpisode' in data) || (data.manualMaxEpisode is number && data.manualMaxEpisode >= 0)) &&
+             (!('manualAvailableEps' in data) || (data.manualAvailableEps is number && data.manualAvailableEps >= 0)) &&
+             (!('lastIncrementedAt' in data) || data.lastIncrementedAt is number) &&
+             (!('startDate' in data) || (data.startDate is string && data.startDate.size() <= 50)) &&
+             (!('rhythmType' in data) || (data.rhythmType is string && data.rhythmType.size() <= 20)) &&
+             (!('flexibleDayRange' in data) || data.flexibleDayRange is map);
+    }
+
+    function isValidWorkPause(data) {
+      return data.work_id is string && data.work_id.size() <= 100 &&
+             data.paused is bool &&
+             data.paused_until is string && data.paused_until.size() <= 50 &&
+             data.paused_by is string && data.paused_by.size() <= 128;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    // 1. User Profiles & Subcollections
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.uid == userId;
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && (!('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid);
+      allow delete: if false;
+
+      match /works/{workId} {
+        allow read: if isAuthenticated();
+        allow create, update: if isOwner(userId) && isValidUserSubWork(request.resource.data);
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // 2. User Works (Tracking & Library)
+    match /user_works/{userWorkId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+                       request.resource.data.user_id == request.auth.uid &&
+                       isValidUserWork(request.resource.data);
+      allow update: if isAuthenticated() &&
+                       resource.data.user_id == request.auth.uid &&
+                       request.resource.data.user_id == request.auth.uid &&
+                       areImmutableFieldsUnchanged(['user_id', 'work_id']) &&
+                       isValidUserWork(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+    }
+
+    // 3. Comments (Episode & Work discussions)
+    match /comments/{commentId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+                       request.resource.data.author_uid == request.auth.uid &&
+                       isValidComment(request.resource.data);
+      allow update: if isAuthenticated() && (
+        // Author edit
+        (resource.data.author_uid == request.auth.uid &&
+         request.resource.data.author_uid == request.auth.uid &&
+         areImmutableFieldsUnchanged(['comment_id', 'work_id', 'author_uid', 'timestamp']) &&
+         isValidComment(request.resource.data)) ||
+        // Upvote / downvote by any authenticated user
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['upvotes', 'downvotes']) &&
+         (!('upvotes' in request.resource.data) || isValidList(request.resource.data.upvotes, 5000)) &&
+         (!('downvotes' in request.resource.data) || isValidList(request.resource.data.downvotes, 5000)))
+      );
+      allow delete: if isAuthenticated() && resource.data.author_uid == request.auth.uid;
+    }
+
+    // 4. Social Activity Feed
+    match /activity_feed/{activityId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+                       request.resource.data.user_id == request.auth.uid &&
+                       isValidActivity(request.resource.data);
+      allow update: if isAuthenticated() && (
+        // Author edit
+        (resource.data.user_id == request.auth.uid &&
+         request.resource.data.user_id == request.auth.uid &&
+         areImmutableFieldsUnchanged(['activity_id', 'user_id', 'action_type', 'timestamp']) &&
+         isValidActivity(request.resource.data)) ||
+        // Likes or comments counter update by community
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'comments_count']) &&
+         (!('likes' in request.resource.data) || isValidList(request.resource.data.likes, 5000)) &&
+         (!('comments_count' in request.resource.data) || (request.resource.data.comments_count is number && request.resource.data.comments_count >= 0)))
+      );
+      allow delete: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+    }
+
+    // Secondary activities collection alias
+    match /activities/{activityId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+                       request.resource.data.user_id == request.auth.uid &&
+                       isValidActivity(request.resource.data);
+      allow update: if isAuthenticated() && (
+        (resource.data.user_id == request.auth.uid &&
+         request.resource.data.user_id == request.auth.uid &&
+         areImmutableFieldsUnchanged(['activity_id', 'user_id', 'action_type', 'timestamp']) &&
+         isValidActivity(request.resource.data)) ||
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'comments_count']) &&
+         (!('likes' in request.resource.data) || isValidList(request.resource.data.likes, 5000)) &&
+         (!('comments_count' in request.resource.data) || (request.resource.data.comments_count is number && request.resource.data.comments_count >= 0)))
+      );
+      allow delete: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+    }
+
+    // 5. Activity Comments
+    match /activity_comments/{commentId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+                       request.resource.data.user_id == request.auth.uid &&
+                       isValidActivityComment(request.resource.data);
+      allow update: if isAuthenticated() &&
+                       resource.data.user_id == request.auth.uid &&
+                       request.resource.data.user_id == request.auth.uid &&
+                       areImmutableFieldsUnchanged(['comment_id', 'activity_id', 'user_id', 'timestamp']) &&
+                       isValidActivityComment(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+    }
+
+    // 6. In-App Notifications (Private to recipient)
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+      allow create: if isAuthenticated() && isValidNotification(request.resource.data);
+      allow update: if isAuthenticated() &&
+                       resource.data.user_id == request.auth.uid &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']) &&
+                       request.resource.data.read is bool;
+      allow delete: if isAuthenticated() && resource.data.user_id == request.auth.uid;
+    }
+
+    // 7. Calendar Overrides (Global release schedule tracking)
+    match /calendar_overrides/{workId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidCalendarOverride(request.resource.data);
+      allow delete: if isAuthenticated();
+    }
+
+    // 8. Work Pauses
+    match /work_pauses/{workId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && isValidWorkPause(request.resource.data);
+      allow delete: if isAuthenticated();
+    }
+
+    // 9. App Configuration (Read-only for clients; updated only via Admin SDK)
+    match /app_config/{configId} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
