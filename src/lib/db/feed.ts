@@ -159,7 +159,10 @@ export async function getGlobalFeed(limitCount: number = 50): Promise<ActivityFe
   const activities: ActivityFeed[] = [];
   if (snapshot && typeof snapshot.forEach === 'function') {
     snapshot.forEach((doc: any) => {
-      activities.push(doc.data() as ActivityFeed);
+      activities.push({
+        ...doc.data(),
+        activity_id: doc.data().activity_id || doc.id,
+      } as ActivityFeed);
     });
   }
   
@@ -191,17 +194,32 @@ export async function getGlobalFeedPaginated(limitCount: number = 50, lastDocTim
   const activities: ActivityFeed[] = [];
   if (snapshot && typeof snapshot.forEach === 'function') {
     snapshot.forEach((doc: any) => {
-      activities.push(doc.data() as ActivityFeed);
+      activities.push({
+        ...doc.data(),
+        activity_id: doc.data().activity_id || doc.id,
+      } as ActivityFeed);
     });
   }
   
   return activities;
 }
 
-export async function deleteActivity(activityId: string): Promise<void> {
-  if (!db) return;
-  const docRef = doc(db, "activity_feed", activityId);
-  await deleteDoc(docRef);
+export async function deleteActivity(activityId: string, userId?: string): Promise<void> {
+  const { auth } = await import("@/lib/firebase");
+  const uid = userId || auth?.currentUser?.uid;
+  if (!uid) throw new Error("Nicht eingeloggt");
+
+  const res = await fetch("/api/feed/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ activityId, userId: uid }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || "Fehler beim Löschen");
+  }
+  const { useAppStore } = await import("@/lib/store");
+  useAppStore.getState().triggerReload();
 }
 
 export async function addActivityComment(activityId: string, userId: string, text: string, parentCommentId?: string): Promise<ActivityComment | null> {
@@ -521,50 +539,31 @@ export async function deleteEpisodeThread(
   activity: ActivityFeed, 
   userId: string
 ): Promise<{ success: boolean; error?: string }> {
-  if (!db || !activity || !userId) return { success: false, error: "Ungültige Parameter" };
+  if (!activity || !userId) return { success: false, error: "Ungültige Parameter" };
   
   if (activity.user_id !== userId) {
     return { success: false, error: "Nur der Ersteller kann diesen Thread löschen." };
   }
   
   try {
-    // 1. Check if comments exist
-    const commentsRef = collection(db, "activity_comments");
-    const qComments = query(commentsRef, where("activity_id", "==", activity.activity_id), limit(1));
-    const commentsSnap = await getDocs(qComments);
-    if (!commentsSnap.empty || (activity.comments_count && activity.comments_count > 0)) {
-      return { success: false, error: "Dieser Thread kann nicht mehr gelöscht werden, da bereits Kommentare existieren." };
+    const res = await fetch("/api/feed/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        activityId: activity.activity_id,
+        userId: userId,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      return { success: false, error: data.error || "Fehler beim Löschen des Threads" };
     }
 
-    // 2. Delete activity from activity_feed
-    const actRef = doc(db, "activity_feed", activity.activity_id);
-    await deleteDoc(actRef);
-    
-    // 3. Delete related notifications
-    const notifRef = collection(db, "notifications");
-    const qNotif = query(notifRef, where("activity_id", "==", activity.activity_id));
-    const notifSnap = await getDocs(qNotif);
-    if (!notifSnap.empty) {
-      const { writeBatch } = await import("firebase/firestore");
-      const batch = writeBatch(db);
-      notifSnap.docs.forEach(d => batch.delete(d.ref));
-      await batch.commit();
-    }
-    
-    // 4. If it was created by check-in, revert current_episode in user_works
-    if (activity.work_id && activity.episode_num != null) {
-      const { getUserWork, saveUserWork } = await import("./works");
-      const userWork = await getUserWork(userId, activity.work_id);
-      if (userWork && userWork.current_episode === activity.episode_num) {
-        const revertedEp = Math.max(0, activity.episode_num - 1);
-        await saveUserWork(userId, activity.work_id, { current_episode: revertedEp });
-        
-        // Trigger reload in store so Home / Library immediately updates
-        const { useAppStore } = await import("@/lib/store");
-        useAppStore.getState().triggerReload();
-      }
-    }
-    
+    // Trigger reload in store so Home / Library immediately updates
+    const { useAppStore } = await import("@/lib/store");
+    useAppStore.getState().triggerReload();
+
     return { success: true };
   } catch (err: any) {
     console.error("deleteEpisodeThread error:", err);

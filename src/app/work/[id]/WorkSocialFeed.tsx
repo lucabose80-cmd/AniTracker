@@ -9,11 +9,14 @@ import { SpoilerProtectedThread, CommentSection } from "@/components/ui/SocialCo
 import { formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
 
+import { useAppStore } from "@/lib/store";
+
 export function WorkSocialFeed({ workId, work }: { workId: string, work: any }) {
   const [feed, setFeed] = useState<ActivityFeed[]>([]);
   const [userProfiles, setUserProfiles] = useState<Record<string, any>>({});
   const [currentUserUid, setCurrentUserUid] = useState<string | undefined>(undefined);
   const [sortAsc, setSortAsc] = useState(false);
+  const reloadTrigger = useAppStore(state => state.reloadTrigger);
 
   useEffect(() => {
     const unsub = auth.onAuthStateChanged((u) => setCurrentUserUid(u?.uid));
@@ -38,7 +41,7 @@ export function WorkSocialFeed({ workId, work }: { workId: string, work: any }) 
       }
     }
     load();
-  }, [workId]);
+  }, [workId, reloadTrigger]);
 
   if (feed.length === 0) return (
     <div className="mt-8 text-center text-gray-500 py-8 bg-[#1a1d24] rounded-xl border border-gray-800">
