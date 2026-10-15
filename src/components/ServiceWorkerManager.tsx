@@ -77,16 +77,18 @@ export function ServiceWorkerManager() {
         if (user) {
           setupVersionCheck(user);
           
-          // Setup global unread notifications listener
+          // Setup global unread notifications listener without requiring composite index
           const { collection, query, where, onSnapshot } = await import('firebase/firestore');
           const q = query(
             collection(db!, 'notifications'),
-            where('user_id', '==', user.uid),
-            where('read', '==', false)
+            where('user_id', '==', user.uid)
           );
           
           unsubscribeNotifications = onSnapshot(q, (snap) => {
-            useAppStore.getState().setUnreadNotifications(snap.docs.length);
+            const unread = snap.docs.filter(d => d.data()?.read === false).length;
+            useAppStore.getState().setUnreadNotifications(unread);
+          }, (err) => {
+            console.error("Unread notifications listener error:", err);
           });
         } else {
           useAppStore.getState().setUnreadNotifications(0);

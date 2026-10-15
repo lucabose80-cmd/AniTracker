@@ -45,13 +45,16 @@ export async function addComment(
     if (parentDoc.exists()) {
       const parentData = parentDoc.data() as Comment;
       if (parentData.author_uid !== author_uid) {
+        const { getWorkTitleAndType } = await import("@/lib/anilist");
+        const workInfo = await getWorkTitleAndType(work_id);
+        const workTitle = workInfo?.title ? ` (${workInfo.title})` : "";
         fetch("/api/notify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             targetUserId: parentData.author_uid,
-            title: "Neue Antwort",
-            body: `${author_name} hat auf deinen Kommentar geantwortet.`,
+            title: `Neue Antwort${workTitle}`,
+            body: `${author_name} hat geantwortet: "${text}"`,
             type: "replies",
             link: `/work/${work_id}?episode=${episode_num || ''}`
           })
@@ -83,16 +86,18 @@ export async function addComment(
         .filter(id => id !== author_uid);
         
       if (userIds.length > 0) {
-        // We'll send individual fetch requests or a bulk endpoint. Since /api/notify takes targetUserId, we just loop.
-        // It's async so it won't block the UI much, but we shouldn't await them all.
+        const { getWorkTitleAndType } = await import("@/lib/anilist");
+        const workInfo = await getWorkTitleAndType(work_id);
+        const workTitle = workInfo?.title || "Werk";
+        const unit = workInfo?.type === "MANGA" ? "Kapitel" : "Folge";
         userIds.forEach(uid => {
           fetch("/api/notify", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               targetUserId: uid,
-              title: "Neuer Raum eröffnet!",
-              body: `${author_name} hat eine Diskussion zu Folge/Kapitel ${episode_num} gestartet.`,
+              title: `Neuer Raum: ${workTitle}`,
+              body: `${author_name} hat eine Diskussion zu ${unit} ${episode_num} gestartet.`,
               type: "social",
               link: `/work/${work_id}?episode=${episode_num}`
             })

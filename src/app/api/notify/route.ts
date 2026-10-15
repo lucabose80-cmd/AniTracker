@@ -28,8 +28,17 @@ export async function POST(req: Request) {
         notification: { title, body },
         data: { link: link || "/", type },
         webpush: {
-          headers: { Urgency: "high" },
-          notification: { icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png" },
+          headers: { 
+            Urgency: "high",
+            TTL: "86400"
+          },
+          notification: { 
+            icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
+            badge: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
+            requireInteraction: true,
+            tag: `notify-${type}-${Date.now()}`,
+            renotify: true
+          },
           fcmOptions: { link: link || "/" }
         },
         tokens,
@@ -60,8 +69,17 @@ export async function POST(req: Request) {
       notification: { title, body },
       data: { link: link || "/", type },
       webpush: {
-        headers: { Urgency: "high" },
-        notification: { icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png" },
+        headers: { 
+          Urgency: "high",
+          TTL: "86400"
+        },
+        notification: { 
+          icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
+          badge: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
+          requireInteraction: true,
+          tag: `notify-${type}-${Date.now()}`,
+          renotify: true
+        },
         fcmOptions: { link: link || "/" }
       },
       tokens,

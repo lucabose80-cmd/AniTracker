@@ -82,10 +82,11 @@ export async function GET(req: Request) {
     overridesSnap.docs.forEach(doc => {
       const over = doc.data();
       if (over.weeklyDay !== undefined && over.weeklyTime !== undefined) {
-        const date = new Date();
-        const currentDay = date.getDay();
-        const currentHour = date.getHours();
-        const currentMinute = date.getMinutes();
+        // Convert to Europe/Berlin timezone so German release times match Vercel's UTC clock
+        const berlinDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Berlin" }));
+        const currentDay = berlinDate.getDay();
+        const currentHour = berlinDate.getHours();
+        const currentMinute = berlinDate.getMinutes();
         const [targetHour, targetMinute] = over.weeklyTime.split(':').map(Number);
         
         if (currentDay === over.weeklyDay) {
@@ -155,6 +156,7 @@ export async function GET(req: Request) {
               const notifRef = adminDb.collection("notifications").doc(notifId);
               const notifSnap = await notifRef.get();
               if (!notifSnap.exists) {
+                const workTitle = schedule.media?.title?.english || schedule.media?.title?.native || schedule.media?.title?.romaji || "";
                 await notifRef.set({
                   notification_id: notifId,
                   user_id: uid,
@@ -163,7 +165,10 @@ export async function GET(req: Request) {
                   actor_avatar: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
                   type: "SYSTEM",
                   work_id: String(schedule.mediaId),
-                  text: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${schedule.media.title.english || schedule.media.title.native || schedule.media.title.romaji} ist jetzt online.`,
+                  work_title: workTitle,
+                  media_type: schedule.type || "ANIME",
+                  episode_num: schedule.episode,
+                  text: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${workTitle} ist jetzt online.`,
                   timestamp: new Date().toISOString(),
                   read: false
                 });
@@ -179,13 +184,22 @@ export async function GET(req: Request) {
         if (tokensToNotify.length > 0) {
           const payload = {
             notification: {
-              title: schedule.type === "MANGA" ? "Neues Kapitel verfügbar!" : "Neue Folge verfügbar!",
+              title: schedule.type === "MANGA" ? "Neues Kapitel verf\u00FCgbar!" : "Neue Folge verf\u00FCgbar!",
               body: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${schedule.media.title.english || schedule.media.title.native || schedule.media.title.romaji} ist jetzt online.`,
             },
             data: { link: `/work/${schedule.mediaId}`, type: "releases" },
             webpush: {
-              headers: { Urgency: "high" },
-              notification: { icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png" },
+              headers: { 
+                Urgency: "high",
+                TTL: "86400"
+              },
+              notification: { 
+                icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
+                badge: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
+                requireInteraction: true,
+                tag: `release-${schedule.mediaId}-${schedule.episode}`,
+                renotify: true
+              },
               fcmOptions: { link: `/work/${schedule.mediaId}` }
             },
             tokens: tokensToNotify,
@@ -271,8 +285,17 @@ export async function GET(req: Request) {
                   },
                   data: { link: `/work/${workId}`, type: "releases" },
                   webpush: {
-                    headers: { Urgency: "high" },
-                    notification: { icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png" },
+                    headers: { 
+                      Urgency: "high",
+                      TTL: "86400"
+                    },
+                    notification: { 
+                      icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
+                      badge: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
+                      requireInteraction: true,
+                      tag: `wishlist-${workId}`,
+                      renotify: true
+                    },
                     fcmOptions: { link: `/work/${workId}` }
                   },
                   tokens,

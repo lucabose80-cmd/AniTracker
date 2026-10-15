@@ -83,7 +83,23 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
         works.forEach((w: any) => { map[w.work_id] = w.current_episode; });
         setCurrentUserWorks(map);
         
-        getInAppNotifications(user.uid).then(setNotifications).catch(console.error);
+        getInAppNotifications(user.uid).then((notifs) => {
+          setNotifications(notifs);
+          const unread = notifs.filter(n => !n.read).length;
+          useAppStore.getState().setUnreadNotifications(unread);
+          
+          const notifWorkIds = notifs.map(n => n.work_id).filter(Boolean) as string[];
+          const missingIds = notifWorkIds.filter(id => !workDetails[id]).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+          if (missingIds.length > 0) {
+            fetchAniList(GET_WORKS_BATCH, { ids: missingIds }).then(data => {
+              if (data?.Page?.media) {
+                const map: Record<string, any> = {};
+                data.Page.media.forEach((m: any) => { map[m.id.toString()] = m; });
+                setWorkDetails(prev => ({ ...prev, ...map }));
+              }
+            }).catch(console.warn);
+          }
+        }).catch(console.error);
       } else {
         setUserProfile(null);
         setCurrentUserWorks({});
@@ -248,7 +264,28 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
     }
   };
 
+  const [notifTab, setNotifTab] = useState<"ALL" | "ANIME" | "MANGA">("ALL");
+
+  const getNotificationMediaType = useCallback((notif: InAppNotification): "ANIME" | "MANGA" | "SYSTEM" => {
+    if (notif.media_type) return notif.media_type;
+    if (notif.work_id && workDetails[notif.work_id]?.type) {
+      return workDetails[notif.work_id].type;
+    }
+    const textLower = (notif.text || "").toLowerCase();
+    if (textLower.includes("kapitel") || textLower.includes("manga") || textLower.includes("manhwa")) return "MANGA";
+    if (textLower.includes("folge") || textLower.includes("episode") || textLower.includes("anime")) return "ANIME";
+    return "SYSTEM";
+  }, [workDetails]);
+
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  const animeUnreadCount = useMemo(() => {
+    return notifications.filter(n => !n.read && getNotificationMediaType(n) === "ANIME").length;
+  }, [notifications, getNotificationMediaType]);
+
+  const mangaUnreadCount = useMemo(() => {
+    return notifications.filter(n => !n.read && getNotificationMediaType(n) === "MANGA").length;
+  }, [notifications, getNotificationMediaType]);
 
   const groupedUnread = useMemo(() => {
     const unread = notifications.filter(n => !n.read);
@@ -283,14 +320,22 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
     return [...regular, ...Array.from(groups.values())].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }, [notifications]);
 
+  const filteredGroupedUnread = useMemo(() => {
+    if (notifTab === "ALL") return groupedUnread;
+    return groupedUnread.filter(n => {
+      const type = getNotificationMediaType(n);
+      if (type === "SYSTEM") return true;
+      return type === notifTab;
+    });
+  }, [groupedUnread, notifTab, getNotificationMediaType]);
+
   const handleMarkAllRead = async () => {
     const unreadIds = notifications.filter(n => !n.read).map(n => n.notification_id);
     if (unreadIds.length === 0) return;
     
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    if (userProfile) {
-       await markAllNotificationsRead(unreadIds);
-    }
+    useAppStore.getState().setUnreadNotifications(0);
+    await markAllNotificationsRead(unreadIds);
   };
 
   const handleNotificationClick = async (notif: any) => {
@@ -311,17 +356,23 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
 
     if (!notif.read) {
       const ids = notif.notification_ids || [notif.notification_id];
-        for (const id of ids) await markNotificationRead(id);
-        setNotifications(prev => prev.map(n => ids.includes(n.notification_id) ? { ...n, read: true } : n));
+      for (const id of ids) await markNotificationRead(id);
+      setNotifications(prev => prev.map(n => ids.includes(n.notification_id) ? { ...n, read: true } : n));
+      const remaining = Math.max(0, notifications.filter(n => !n.read && !ids.includes(n.notification_id)).length);
+      useAppStore.getState().setUnreadNotifications(remaining);
     }
     setShowNotifications(false);
     
+    if (notif.work_id && !notif.activity_id) {
+      window.location.href = `/work/${notif.work_id}`;
+      return;
+    }
+
     // Smooth scroll to the activity
     setTimeout(() => {
       const element = document.getElementById(`activity_${notif.activity_id}`);
       if (element) {
         element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        // Optional: flash the element
         element.classList.add('ring-2', 'ring-blue-500', 'transition-all');
         setTimeout(() => element.classList.remove('ring-2', 'ring-blue-500'), 2000);
       }
@@ -351,9 +402,9 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
             </button>
             
             {showNotifications && (
-              <div className="absolute right-0 top-full mt-2 w-72 max-h-96 overflow-y-auto bg-[#1a1d24] border border-gray-700 rounded-xl shadow-2xl z-50 flex flex-col">
-                <div className="flex items-center justify-between p-3 border-b border-gray-800 bg-[#141a29] sticky top-0 z-10">
-                  <h3 className="font-bold text-gray-200">Benachrichtigungen</h3>
+              <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 max-w-[calc(100vw-2rem)] max-h-[28rem] overflow-y-auto bg-[#1a1d24] border border-gray-700 rounded-xl shadow-2xl z-50 flex flex-col">
+                <div className="flex items-center justify-between p-3 border-b border-gray-800 bg-[#141a29] sticky top-0 z-20">
+                  <h3 className="font-bold text-gray-200 text-sm">Benachrichtigungen</h3>
                   <div className="flex items-center gap-3">
                     {unreadCount > 0 && (
                       <button onClick={(e) => { e.stopPropagation(); handleMarkAllRead(); }} className="text-xs text-blue-400 hover:text-blue-300 font-medium">
@@ -363,48 +414,112 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
                     <button onClick={() => setShowNotifications(false)} className="text-gray-400 hover:text-white"><X size={16} /></button>
                   </div>
                 </div>
-                {groupedUnread.length === 0 ? (
-                  <div className="p-4 text-center text-sm text-gray-500">Keine Neuigkeiten.</div>
+
+                {/* Sub-Tabs: Alle | Anime | Manga */}
+                <div className="flex border-b border-gray-800 bg-[#10141f] text-xs font-semibold sticky top-[45px] z-10">
+                  <button
+                    onClick={() => setNotifTab("ALL")}
+                    className={`flex-1 py-2 text-center transition border-b-2 flex items-center justify-center gap-1 ${
+                      notifTab === "ALL" ? "border-blue-500 text-white font-bold bg-[#141a29]" : "border-transparent text-gray-400 hover:text-gray-200"
+                    }`}
+                  >
+                    <span>Alle</span>
+                    {unreadCount > 0 && <span className="text-[10px] bg-gray-700 text-gray-200 px-1.5 py-0.2 rounded-full">{unreadCount}</span>}
+                  </button>
+                  <button
+                    onClick={() => setNotifTab("ANIME")}
+                    className={`flex-1 py-2 text-center transition border-b-2 flex items-center justify-center gap-1 ${
+                      notifTab === "ANIME" ? "border-blue-500 text-white font-bold bg-[#141a29]" : "border-transparent text-gray-400 hover:text-gray-200"
+                    }`}
+                  >
+                    <span>Anime</span>
+                    {animeUnreadCount > 0 && <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.2 rounded-full">{animeUnreadCount}</span>}
+                  </button>
+                  <button
+                    onClick={() => setNotifTab("MANGA")}
+                    className={`flex-1 py-2 text-center transition border-b-2 flex items-center justify-center gap-1 ${
+                      notifTab === "MANGA" ? "border-purple-500 text-white font-bold bg-[#141a29]" : "border-transparent text-gray-400 hover:text-gray-200"
+                    }`}
+                  >
+                    <span>Manga</span>
+                    {mangaUnreadCount > 0 && <span className="text-[10px] bg-purple-600 text-white px-1.5 py-0.2 rounded-full">{mangaUnreadCount}</span>}
+                  </button>
+                </div>
+
+                {filteredGroupedUnread.length === 0 ? (
+                  <div className="p-6 text-center text-sm text-gray-500">Keine Neuigkeiten in diesem Bereich.</div>
                 ) : (
                   <div className="flex flex-col">
-                    {groupedUnread.map(n => (
-                      <button 
-                        key={n.notification_id}
-                        onClick={() => handleNotificationClick(n)}
-                        className={`flex gap-3 p-3 border-b border-gray-800/50 hover:bg-gray-800 transition text-left ${n.read ? 'opacity-70' : 'bg-blue-900/10'}`}
-                      >
-                        <div className="w-8 h-8 rounded-full bg-gray-700 shrink-0 overflow-hidden">
-                          {n.actor_avatar ? <img src={n.actor_avatar} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-bold text-xs">{n.actor_name[0]}</div>}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-gray-300">
-                            {n.type === "APP_UPDATE" ? (
-                              <span className="font-bold text-blue-400">System Update</span>
-                            ) : n.type === "NEW_EPISODE_THREAD" ? (
-                              <>
-                                <span className="font-bold text-gray-200">{n.actor_name}</span> hat einen neuen Thread er�ffnet:
-                              </>
-                            ) : n.type === "COMMENT_ON_THREAD" ? (
-                              n.count > 1 ? (
-                                <>Es gibt <span className="font-bold text-blue-400">{n.count} neue Kommentare</span> in einem verfolgten Thread:</>
+                    {filteredGroupedUnread.map(n => {
+                      const mType = getNotificationMediaType(n);
+                      const displayTitle = n.work_title || (n.work_id && workDetails[n.work_id]?.title?.english) || (n.work_id && workDetails[n.work_id]?.title?.romaji) || "";
+                      const epNum = n.episode_num || (n.work_id && workDetails[n.work_id]?.nextAiringEpisode?.episode ? workDetails[n.work_id].nextAiringEpisode.episode - 1 : undefined);
+
+                      return (
+                        <button 
+                          key={n.notification_id}
+                          onClick={() => handleNotificationClick(n)}
+                          className={`flex gap-3 p-3 border-b border-gray-800/50 hover:bg-gray-800/60 transition text-left ${n.read ? 'opacity-70' : 'bg-blue-900/10'}`}
+                        >
+                          <div className="w-8 h-8 rounded-full bg-gray-700 shrink-0 overflow-hidden mt-0.5">
+                            {n.actor_avatar ? <img src={n.actor_avatar} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-bold text-xs">{n.actor_name?.[0] || 'A'}</div>}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            {/* Werk & Typ Header */}
+                            <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                              {mType === "ANIME" && (
+                                <span className="text-[9px] bg-blue-900/70 text-blue-300 border border-blue-700/50 px-1.5 py-0.2 rounded font-bold uppercase">
+                                  Anime
+                                </span>
+                              )}
+                              {mType === "MANGA" && (
+                                <span className="text-[9px] bg-purple-900/70 text-purple-300 border border-purple-700/50 px-1.5 py-0.2 rounded font-bold uppercase">
+                                  Manga
+                                </span>
+                              )}
+                              {displayTitle && (
+                                <span className="text-xs font-semibold text-blue-300 truncate max-w-[200px]">
+                                  {displayTitle}
+                                </span>
+                              )}
+                              {epNum && (
+                                <span className="text-[10px] text-gray-400">
+                                  � {mType === "MANGA" ? "Kapitel" : "Folge"} {epNum}
+                                </span>
+                              )}
+                            </div>
+
+                            <p className="text-xs text-gray-300 leading-snug">
+                              {n.type === "APP_UPDATE" ? (
+                                <span className="font-bold text-blue-400">System Update</span>
+                              ) : n.type === "SYSTEM" ? (
+                                <span className="font-bold text-green-400">Release Alert</span>
+                              ) : n.type === "NEW_EPISODE_THREAD" ? (
+                                <>
+                                  <span className="font-bold text-gray-200">{n.actor_name}</span> hat einen Thread er�ffnet:
+                                </>
+                              ) : n.type === "COMMENT_ON_THREAD" ? (
+                                n.count > 1 ? (
+                                  <>Es gibt <span className="font-bold text-blue-400">{n.count} neue Kommentare</span>:</>
+                                ) : (
+                                  <><span className="font-bold text-gray-200">{n.actor_name}</span> hat geschrieben:</>
+                                )
                               ) : (
-                                <><span className="font-bold text-gray-200">{n.actor_name}</span> hat im verfolgten Thread geschrieben:</>
-                              )
-                            ) : (
-                              <>
-                                <span className="font-bold text-gray-200">{n.actor_name}</span> 
-                                {n.type === "REPLY_TO_COMMENT" ? " hat auf deinen Kommentar geantwortet:" : " hat kommentiert:"}
-                              </>
-                            )}
-                          </p>
-                          <p className={`text-sm text-gray-400 truncate mt-0.5 ${n.type !== "APP_UPDATE" ? "italic" : ""}`}>
-                            {n.type === "APP_UPDATE" ? n.text : `"${n.text}"`}
-                          </p>
-                          <p className="text-[10px] text-gray-500 mt-1">{formatDistanceToNow(new Date(n.timestamp), { addSuffix: true, locale: de })}</p>
-                        </div>
-                        {!n.read && <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0 mt-1" />}
-                      </button>
-                    ))}
+                                <>
+                                  <span className="font-bold text-gray-200">{n.actor_name}</span> 
+                                  {n.type === "REPLY_TO_COMMENT" ? " hat geantwortet:" : " hat kommentiert:"}
+                                </>
+                              )}
+                            </p>
+                            <p className={`text-xs text-gray-400 truncate mt-1 ${n.type !== "APP_UPDATE" ? "italic" : ""}`}>
+                              {n.type === "APP_UPDATE" ? n.text : `"${n.text}"`}
+                            </p>
+                            <p className="text-[10px] text-gray-500 mt-1">{formatDistanceToNow(new Date(n.timestamp), { addSuffix: true, locale: de })}</p>
+                          </div>
+                          {!n.read && <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0 mt-1.5" />}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>

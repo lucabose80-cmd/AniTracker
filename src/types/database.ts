@@ -143,6 +143,9 @@ export interface InAppNotification {
   type: "REPLY_TO_COMMENT" | "COMMENT_ON_THREAD" | "NEW_EPISODE_THREAD" | "APP_UPDATE" | "SYSTEM";
   activity_id?: string;
   work_id?: string;
+  work_title?: string;
+  media_type?: "ANIME" | "MANGA";
+  episode_num?: number;
   comment_id?: string;
   text: string;
   timestamp: string;

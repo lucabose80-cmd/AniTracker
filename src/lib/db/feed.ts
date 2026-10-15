@@ -216,6 +216,22 @@ export async function addActivityComment(activityId: string, userId: string, tex
       const actorName = actorProfile?.username || "Unbekannt";
       const actorAvatar = actorProfile?.avatar_url || "";
       
+      let workTitle = "";
+      let mediaType: "ANIME" | "MANGA" = "ANIME";
+      if (activityData.work_id) {
+        try {
+          const { getWorkTitleAndType } = await import("@/lib/anilist");
+          const info = await getWorkTitleAndType(activityData.work_id);
+          if (info) {
+            workTitle = info.title;
+            mediaType = info.type;
+          }
+        } catch(e) {}
+      }
+      const unit = mediaType === "MANGA" ? "Kapitel" : "Folge";
+      const epPrefix = activityData.episode_num ? `[${unit} ${activityData.episode_num}] ` : "";
+      const workContext = workTitle ? ` (${workTitle})` : "";
+
       const notificationsRef = collection(db, "notifications");
       
       // 1. Notify Parent Comment Author (if reply)
@@ -234,6 +250,9 @@ export async function addActivityComment(activityId: string, userId: string, tex
               type: "REPLY_TO_COMMENT",
               activity_id: activityId,
               work_id: activityData.work_id,
+              work_title: workTitle,
+              media_type: mediaType,
+              episode_num: activityData.episode_num,
               comment_id: comment_id,
               text: text,
               timestamp: timestamp,
@@ -247,10 +266,10 @@ export async function addActivityComment(activityId: string, userId: string, tex
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 targetUserId: parentData.user_id,
-                title: `${actorName} hat geantwortet`,
-                body: text,
+                title: `${actorName} hat geantwortet${workContext}`,
+                body: `${epPrefix}${text}`,
                 type: "replies",
-                link: "/feed"
+                link: activityData.work_id ? `/work/${activityData.work_id}?episode=${activityData.episode_num || ''}` : "/feed"
               })
             }).catch(console.error);
           }
@@ -279,6 +298,9 @@ export async function addActivityComment(activityId: string, userId: string, tex
                   type: "COMMENT_ON_THREAD",
                   activity_id: activityId,
                   work_id: activityData.work_id,
+                  work_title: workTitle,
+                  media_type: mediaType,
+                  episode_num: activityData.episode_num,
                   comment_id: comment_id,
                   text: text,
                   timestamp: timestamp,
@@ -291,10 +313,10 @@ export async function addActivityComment(activityId: string, userId: string, tex
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({
                      targetUserId: data.user_id,
-                     title: `${actorName} hat im Thread kommentiert`,
+                     title: `${actorName} in ${workTitle || "Thread"}${activityData.episode_num ? ` (${unit} ${activityData.episode_num})` : ''}`,
                      body: text,
                      type: "replies",
-                     link: "/feed"
+                     link: activityData.work_id ? `/work/${activityData.work_id}?episode=${activityData.episode_num || ''}` : "/feed"
                   })
                }).catch(console.error);
             }
@@ -310,6 +332,9 @@ export async function addActivityComment(activityId: string, userId: string, tex
           type: "REPLY_TO_COMMENT", // It's a comment on their post
           activity_id: activityId,
           work_id: activityData.work_id,
+          work_title: workTitle,
+          media_type: mediaType,
+          episode_num: activityData.episode_num,
           comment_id: comment_id,
           text: text,
           timestamp: timestamp,
@@ -323,7 +348,7 @@ export async function addActivityComment(activityId: string, userId: string, tex
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             targetUserId: activityData.user_id,
-            title: `${actorName} hat deinen Beitrag kommentiert`,
+            title: `${actorName} hat deinen Beitrag kommentiert${workContext}`,
             body: text,
             type: "replies",
             link: "/feed"

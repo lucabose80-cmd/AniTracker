@@ -346,3 +346,17 @@ export const GET_USER_AIRING_SCHEDULE = `
     }
   }
 `;
+
+export async function getWorkTitleAndType(workId: string): Promise<{ title: string; type: "ANIME" | "MANGA" } | null> {
+  try {
+    const id = parseInt(workId, 10);
+    if (isNaN(id)) return null;
+    const res = await fetchAniList(`query($id: Int) { Media(id: $id) { title { romaji english } type } }`, { id });
+    if (!res?.Media) return null;
+    const title = res.Media.title?.english || res.Media.title?.romaji || "";
+    return { title, type: res.Media.type };
+  } catch {
+    return null;
+  }
+}
+

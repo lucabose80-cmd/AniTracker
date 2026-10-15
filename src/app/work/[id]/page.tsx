@@ -608,12 +608,16 @@ export default function WorkDetailPage() {
                       else {
                         await setCalendarOverride(
                           id, 
-                            null as any, 
-                            customDay === -1 ? (null as any) : customDay, 
+                          null as any, 
+                          customDay === -1 ? (null as any) : customDay, 
                           customDay === -1 ? (null as any) : customTime, 
                           manualMaxEpisode as number,
                           customDay === -1 ? (null as any) : releaseFrequency,
-                          manualAvailableEps === "" ? (null as any) : (manualAvailableEps as number)
+                          manualAvailableEps === "" ? (null as any) : (manualAvailableEps as number),
+                          undefined,
+                          startDate || undefined,
+                          rhythmType,
+                          rhythmType === 'flexible' ? { minDay: flexibleMinDay, maxDay: flexibleMaxDay } : undefined
                         );
                       }
                       
