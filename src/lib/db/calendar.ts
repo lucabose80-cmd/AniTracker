@@ -1,5 +1,5 @@
 import { db } from "@/lib/firebase";
-import { collection, doc, setDoc, getDocs } from "firebase/firestore";
+import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, deleteField } from "firebase/firestore";
 
 export interface CalendarOverride {
   work_id: string;
@@ -21,16 +21,41 @@ export interface CalendarOverride {
 export async function getCalendarOverrides(): Promise<Record<string, CalendarOverride>> {
   if (!db) return {};
   
-  const overridesRef = collection(db, "calendar_overrides");
-  const snapshot = await getDocs(overridesRef);
-  
-  const overrides: Record<string, CalendarOverride> = {};
-  snapshot.forEach((doc) => {
-    const data = doc.data() as CalendarOverride;
-    overrides[data.work_id] = data;
-  });
-  
-  return overrides;
+  try {
+    const overridesRef = collection(db, "calendar_overrides");
+    const snapshot = await getDocs(overridesRef);
+    
+    const overrides: Record<string, CalendarOverride> = {};
+    snapshot.forEach((doc) => {
+      const data = (doc.data() || {}) as CalendarOverride;
+      overrides[data.work_id || doc.id] = { ...data, work_id: data.work_id || doc.id };
+    });
+    
+    return overrides;
+  } catch (error) {
+    console.error("Error fetching calendar overrides:", error);
+    return {};
+  }
+}
+
+export async function getCalendarOverrideForWork(work_id: string): Promise<CalendarOverride | null> {
+  if (!db || !work_id?.trim()) return null;
+
+  try {
+    const cleanId = work_id.trim();
+    const overrideRef = doc(db, "calendar_overrides", cleanId);
+    const snap = await getDoc(overrideRef);
+    if (!snap.exists()) return null;
+
+    const data = (snap.data() || {}) as CalendarOverride;
+    return {
+      ...data,
+      work_id: data.work_id || snap.id,
+    };
+  } catch (error) {
+    console.error(`Error fetching calendar override for work ${work_id}:`, error);
+    return null;
+  }
 }
 
 export async function setCalendarOverride(
@@ -46,15 +71,15 @@ export async function setCalendarOverride(
   rhythmType?: 'strict' | 'flexible',
   flexibleDayRange?: { minDay: number; maxDay: number }
 ): Promise<void> {
-  if (!db) return;
+  if (!db || !work_id?.trim()) return;
   
-  const overrideRef = doc(db, "calendar_overrides", work_id);
-  const data: any = { work_id };
+  const cleanId = work_id.trim();
+  const overrideRef = doc(db, "calendar_overrides", cleanId);
+  const data: Record<string, any> = { work_id: cleanId };
   
   // If airingAt is explicitly passed as null, we delete it, otherwise we set it if defined
   if (airingAt !== undefined) {
     if ((airingAt as any) === null) {
-      const { deleteField } = await import("firebase/firestore");
       data.airingAt = deleteField();
     } else {
       data.airingAt = airingAt;
@@ -63,7 +88,6 @@ export async function setCalendarOverride(
 
   if (weeklyDay !== undefined) {
     if ((weeklyDay as any) === null) {
-      const { deleteField } = await import("firebase/firestore");
       data.weeklyDay = deleteField();
       data.weeklyTime = deleteField();
       data.releaseFrequency = deleteField();
@@ -73,13 +97,25 @@ export async function setCalendarOverride(
     }
   }
   
-  if (weeklyTime !== undefined && (weeklyTime as any) !== null) data.weeklyTime = weeklyTime;
-  if (releaseFrequency !== undefined && (releaseFrequency as any) !== null) data.releaseFrequency = releaseFrequency;
+  if (weeklyTime !== undefined) {
+    if ((weeklyTime as any) === null) {
+      data.weeklyTime = deleteField();
+    } else {
+      data.weeklyTime = weeklyTime;
+    }
+  }
+
+  if (releaseFrequency !== undefined) {
+    if ((releaseFrequency as any) === null) {
+      data.releaseFrequency = deleteField();
+    } else {
+      data.releaseFrequency = releaseFrequency;
+    }
+  }
   
   if (manualMaxEpisode !== undefined) {
     if ((manualMaxEpisode as any) === null) {
-       const { deleteField } = await import("firebase/firestore");
-       data.manualMaxEpisode = deleteField();
+      data.manualMaxEpisode = deleteField();
     } else {
       data.manualMaxEpisode = manualMaxEpisode;
     }
@@ -87,18 +123,22 @@ export async function setCalendarOverride(
 
   if (manualAvailableEps !== undefined) {
     if ((manualAvailableEps as any) === null) {
-       const { deleteField } = await import("firebase/firestore");
-       data.manualAvailableEps = deleteField();
+      data.manualAvailableEps = deleteField();
     } else {
       data.manualAvailableEps = manualAvailableEps;
     }
   }
 
-  if (lastIncrementedAt !== undefined && (lastIncrementedAt as any) !== null) data.lastIncrementedAt = lastIncrementedAt;
+  if (lastIncrementedAt !== undefined) {
+    if ((lastIncrementedAt as any) === null) {
+      data.lastIncrementedAt = deleteField();
+    } else {
+      data.lastIncrementedAt = lastIncrementedAt;
+    }
+  }
 
   if (startDate !== undefined) {
     if ((startDate as any) === null) {
-      const { deleteField } = await import("firebase/firestore");
       data.startDate = deleteField();
     } else {
       data.startDate = startDate;
@@ -107,7 +147,6 @@ export async function setCalendarOverride(
 
   if (rhythmType !== undefined) {
     if ((rhythmType as any) === null) {
-      const { deleteField } = await import("firebase/firestore");
       data.rhythmType = deleteField();
     } else {
       data.rhythmType = rhythmType;
@@ -116,19 +155,37 @@ export async function setCalendarOverride(
 
   if (flexibleDayRange !== undefined) {
     if ((flexibleDayRange as any) === null) {
-      const { deleteField } = await import("firebase/firestore");
       data.flexibleDayRange = deleteField();
     } else {
       data.flexibleDayRange = flexibleDayRange;
     }
   }
 
-  await setDoc(overrideRef, data, { merge: true });
+  try {
+    await setDoc(overrideRef, data, { merge: true });
+  } catch (error) {
+    console.error(`Error setting calendar override for work ${work_id}:`, error);
+  }
 }
 
 export async function clearManualMaxEpisode(work_id: string): Promise<void> {
-  if (!db) return;
-  const { deleteField } = await import("firebase/firestore");
-  const overrideRef = doc(db, "calendar_overrides", work_id);
-  await setDoc(overrideRef, { manualMaxEpisode: deleteField() }, { merge: true });
+  if (!db || !work_id?.trim()) return;
+  try {
+    const cleanId = work_id.trim();
+    const overrideRef = doc(db, "calendar_overrides", cleanId);
+    await setDoc(overrideRef, { manualMaxEpisode: deleteField() }, { merge: true });
+  } catch (error) {
+    console.error(`Error clearing manual max episode for work ${work_id}:`, error);
+  }
+}
+
+export async function deleteCalendarOverride(work_id: string): Promise<void> {
+  if (!db || !work_id?.trim()) return;
+  try {
+    const cleanId = work_id.trim();
+    const overrideRef = doc(db, "calendar_overrides", cleanId);
+    await deleteDoc(overrideRef);
+  } catch (error) {
+    console.error(`Error deleting calendar override for work ${work_id}:`, error);
+  }
 }
