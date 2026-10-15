@@ -415,23 +415,35 @@ export async function deleteActivityComment(commentId: string, activityId: strin
 }
 
 export async function getInAppNotifications(userId: string): Promise<InAppNotification[]> {
-  if (!db) return [];
-  const notifRef = collection(db, "notifications");
-  const q = query(notifRef, where("user_id", "==", userId), limit(30));
-  const snap = await getDocs(q);
-  
-  const notifications: InAppNotification[] = [];
-  snap.forEach(d => {
-    notifications.push(d.data() as InAppNotification);
-  });
-  
-  return notifications.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  if (!db || !userId) return [];
+  try {
+    const notifRef = collection(db, "notifications");
+    const q = query(notifRef, where("user_id", "==", userId));
+    const snap = await getDocs(q);
+    
+    const notifications: InAppNotification[] = [];
+    snap.forEach(d => {
+      notifications.push({
+        ...d.data(),
+        notification_id: d.id,
+      } as InAppNotification);
+    });
+    
+    return notifications.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, 50);
+  } catch (err) {
+    console.error("Error in getInAppNotifications:", err);
+    return [];
+  }
 }
 
 export async function markNotificationRead(notificationId: string): Promise<void> {
-  if (!db) return;
-  const notifRef = doc(db, "notifications", notificationId);
-  await updateDoc(notifRef, { read: true });
+  if (!db || !notificationId) return;
+  try {
+    const notifRef = doc(db, "notifications", notificationId);
+    await updateDoc(notifRef, { read: true });
+  } catch (err) {
+    console.error("Error marking notification read:", err);
+  }
 }
 
 export async function toggleLike(activityId: string, userId: string): Promise<void> {
@@ -468,22 +480,94 @@ export async function editActivityComment(commentId: string, newText: string) {
   }
 }
 
-export async function markAllNotificationsRead(notificationIds: string[]): Promise<void> {
-  if (!db || notificationIds.length === 0) return;
-  const { writeBatch, doc } = await import("firebase/firestore");
+export async function markAllNotificationsRead(userIdOrIds: string | string[]): Promise<void> {
+  if (!db || !userIdOrIds) return;
+  const { writeBatch, doc, getDocs, collection, query, where } = await import("firebase/firestore");
   
-  // Firestore batch limit is 500
-  const chunks = [];
-  for (let i = 0; i < notificationIds.length; i += 500) {
-      chunks.push(notificationIds.slice(i, i + 500));
+  try {
+    if (Array.isArray(userIdOrIds)) {
+      if (userIdOrIds.length === 0) return;
+      for (let i = 0; i < userIdOrIds.length; i += 400) {
+        const chunk = userIdOrIds.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach(id => {
+          if (id) batch.update(doc(db, "notifications", id), { read: true });
+        });
+        await batch.commit();
+      }
+    } else {
+      const notifRef = collection(db, "notifications");
+      const q = query(notifRef, where("user_id", "==", userIdOrIds));
+      const snap = await getDocs(q);
+      const unreadDocs = snap.docs.filter(d => d.data()?.read === false);
+      
+      if (unreadDocs.length === 0) return;
+      
+      for (let i = 0; i < unreadDocs.length; i += 400) {
+        const chunk = unreadDocs.slice(i, i + 400);
+        const batch = writeBatch(db);
+        chunk.forEach(d => {
+          batch.update(d.ref, { read: true });
+        });
+        await batch.commit();
+      }
+    }
+  } catch (err) {
+    console.error("Error in markAllNotificationsRead:", err);
+  }
+}
+
+export async function deleteEpisodeThread(
+  activity: ActivityFeed, 
+  userId: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!db || !activity || !userId) return { success: false, error: "Ungültige Parameter" };
+  
+  if (activity.user_id !== userId) {
+    return { success: false, error: "Nur der Ersteller kann diesen Thread löschen." };
   }
   
-  for (const chunk of chunks) {
+  try {
+    // 1. Check if comments exist
+    const commentsRef = collection(db, "activity_comments");
+    const qComments = query(commentsRef, where("activity_id", "==", activity.activity_id), limit(1));
+    const commentsSnap = await getDocs(qComments);
+    if (!commentsSnap.empty || (activity.comments_count && activity.comments_count > 0)) {
+      return { success: false, error: "Dieser Thread kann nicht mehr gelöscht werden, da bereits Kommentare existieren." };
+    }
+
+    // 2. Delete activity from activity_feed
+    const actRef = doc(db, "activity_feed", activity.activity_id);
+    await deleteDoc(actRef);
+    
+    // 3. Delete related notifications
+    const notifRef = collection(db, "notifications");
+    const qNotif = query(notifRef, where("activity_id", "==", activity.activity_id));
+    const notifSnap = await getDocs(qNotif);
+    if (!notifSnap.empty) {
+      const { writeBatch } = await import("firebase/firestore");
       const batch = writeBatch(db);
-      chunk.forEach(id => {
-          const ref = doc(db, "notifications", id);
-          batch.update(ref, { read: true });
-      });
+      notifSnap.docs.forEach(d => batch.delete(d.ref));
       await batch.commit();
+    }
+    
+    // 4. If it was created by check-in, revert current_episode in user_works
+    if (activity.work_id && activity.episode_num != null) {
+      const { getUserWork, saveUserWork } = await import("./works");
+      const userWork = await getUserWork(userId, activity.work_id);
+      if (userWork && userWork.current_episode === activity.episode_num) {
+        const revertedEp = Math.max(0, activity.episode_num - 1);
+        await saveUserWork(userId, activity.work_id, { current_episode: revertedEp });
+        
+        // Trigger reload in store so Home / Library immediately updates
+        const { useAppStore } = await import("@/lib/store");
+        useAppStore.getState().triggerReload();
+      }
+    }
+    
+    return { success: true };
+  } catch (err: any) {
+    console.error("deleteEpisodeThread error:", err);
+    return { success: false, error: err?.message || "Fehler beim Löschen des Threads" };
   }
 }

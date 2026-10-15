@@ -84,6 +84,7 @@ export function WorkSocialFeed({ workId, work }: { workId: string, work: any }) 
               currentUserUid={currentUserUid}
               isSpoiler={false}
               userProfiles={userProfiles}
+              onDelete={(id: string) => setFeed(prev => prev.filter(a => a.activity_id !== id))}
             />
           );
         }

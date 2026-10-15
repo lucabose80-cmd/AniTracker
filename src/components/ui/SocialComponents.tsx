@@ -353,7 +353,31 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
   );
 }
 
-export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentUserUid, userProfiles, currentUserWorks}: any) {
+export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentUserUid, userProfiles, currentUserWorks, onDelete}: any) {
+  const [isDeleting, setIsDeleting] = useState(false);
+  const canDelete = activity.user_id === currentUserUid && (!activity.comments_count || activity.comments_count === 0);
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!canDelete || isDeleting) return;
+    if (!confirm("Diesen Thread wirklich löschen? Der Check-in für dieses Kapitel/Folge wird rückgängig gemacht.")) return;
+
+    setIsDeleting(true);
+    try {
+      const { deleteEpisodeThread } = await import("@/lib/db/feed");
+      const res = await deleteEpisodeThread(activity, currentUserUid);
+      if (!res.success) {
+        alert(res.error || "Fehler beim Löschen des Threads");
+        setIsDeleting(false);
+        return;
+      }
+      onDelete?.(activity.activity_id);
+    } catch (err: any) {
+      console.error(err);
+      alert("Fehler beim Löschen");
+      setIsDeleting(false);
+    }
+  };
   const [isLiked, setIsLiked] = useState(activity.likes?.includes(currentUserUid) || false);
   const [likesCount, setLikesCount] = useState(activity.likes?.length || 0);
 
@@ -377,6 +401,17 @@ export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentU
 
   return (
     <div className="rounded-xl border-2 border-blue-900/50 bg-[#141a29] p-4 shadow-lg relative overflow-hidden group">
+      {canDelete && (
+        <div className="absolute top-3 right-3 flex gap-2 z-10">
+          <button
+            onClick={handleDelete}
+            disabled={isDeleting}
+            className="text-[10px] text-red-500 hover:text-red-400 transition font-bold bg-red-900/20 hover:bg-red-900/40 px-2 py-1 rounded"
+          >
+            {isDeleting ? "Löscht..." : "Löschen"}
+          </button>
+        </div>
+      )}
       <div className="flex gap-4">
         {work && (
           <Link href={`/work/${work.id}?episode=${activity.episode_num || ''}`} prefetch={false} className="shrink-0 relative">

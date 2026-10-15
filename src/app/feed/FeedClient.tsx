@@ -330,12 +330,11 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
   }, [groupedUnread, notifTab, getNotificationMediaType]);
 
   const handleMarkAllRead = async () => {
-    const unreadIds = notifications.filter(n => !n.read).map(n => n.notification_id);
-    if (unreadIds.length === 0) return;
-    
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     useAppStore.getState().setUnreadNotifications(0);
-    await markAllNotificationsRead(unreadIds);
+    if (currentUserUid) {
+      await markAllNotificationsRead(currentUserUid);
+    }
   };
 
   const handleNotificationClick = async (notif: any) => {
@@ -652,6 +651,7 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
                       currentUserUid={currentUserUid}
                       userProfiles={userProfiles}
                       currentUserWorks={currentUserWorks}
+                      onDelete={(id: string) => setFeed(prev => prev.filter(a => a.activity_id !== id))}
                     />
                   </div>
                 );
