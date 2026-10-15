@@ -570,7 +570,7 @@ export default function WorkDetailPage() {
                       
                       {releaseFrequency > 1 && (
                         <div className="flex flex-col gap-1 w-full mt-2">
-                          <label className="text-xs text-gray-400 font-semibold">Startdatum (f�r Takt-Berechnung)</label>
+                          <label className="text-xs text-gray-400 font-semibold">Startdatum (für Takt-Berechnung)</label>
                           <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500 w-full" />
                         </div>
                       )}
@@ -578,7 +578,7 @@ export default function WorkDetailPage() {
                       <div className="flex flex-col gap-1 w-full mt-2">
                         <label className="text-xs text-gray-400 font-semibold">Rhythmus</label>
                         <select value={rhythmType} onChange={e => setRhythmType(e.target.value as any)} className="bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500 w-full">
-                          <option value="strict">P�nktlich (Fester Tag & Zeit)</option>
+                          <option value="strict">Pünktlich (Fester Tag & Zeit)</option>
                           <option value="flexible">Flexibel (Zeitfenster)</option>
                         </select>
                       </div>
