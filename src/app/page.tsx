@@ -270,15 +270,18 @@ export default function Home() {
       const { db } = await import("@/lib/firebase");
       
       // Check if thread exists
-      const recent = await getGlobalFeed(200); // Check deeper to avoid duplicates
-      const exists = recent.some(a => a.action_type === "EPISODE_THREAD" && a.work_id === workId && a.episode_num === nextEp);
-      
-      if (!exists) {
+      const recent = await getGlobalFeed(200);
+      let targetActivityId = "";
+      const existing = recent.find(a => a.action_type === "EPISODE_THREAD" && a.work_id === workId && a.episode_num === nextEp);
+      if (!existing) {
         const text = workType === "MANGA" ? `Thread für Kapitel ${nextEp}` : `Thread für Folge ${nextEp}`;
-        await createActivity(auth.currentUser.uid, "EPISODE_THREAD", workId, text, undefined, nextEp);
+        const created = await createActivity(auth.currentUser.uid, "EPISODE_THREAD", workId, text, undefined, nextEp);
+        if (created) targetActivityId = created.activity_id;
+      } else {
+        targetActivityId = existing.activity_id;
       }
 
-      router.push(`/feed`);
+      router.push(targetActivityId ? `/feed?activity_id=${targetActivityId}` : `/feed`);
     } catch(e) {
       console.error(e);
       alert("Fehler beim Check-in");

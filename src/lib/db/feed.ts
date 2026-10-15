@@ -480,6 +480,106 @@ export async function toggleLike(activityId: string, userId: string): Promise<vo
   }
 }
 
+export async function toggleCommentLike(
+  commentId: string, 
+  activityId: string, 
+  userId: string
+): Promise<{ liked: boolean; likesCount: number }> {
+  if (!db || !commentId || !userId) return { liked: false, likesCount: 0 };
+  
+  const commentRef = doc(db, "activity_comments", commentId);
+  const commentSnap = await getDoc(commentRef);
+  if (!commentSnap.exists()) return { liked: false, likesCount: 0 };
+  
+  const comment = commentSnap.data() as ActivityComment;
+  const likes = comment.likes || [];
+  const isLiked = likes.includes(userId);
+  
+  if (isLiked) {
+    await updateDoc(commentRef, { likes: arrayRemove(userId) });
+    return { liked: false, likesCount: Math.max(0, likes.length - 1) };
+  } else {
+    await updateDoc(commentRef, { likes: arrayUnion(userId) });
+    
+    // Send notification if not liking own comment
+    if (comment.user_id !== userId) {
+      try {
+        const actorProfile = await getUserProfile(userId);
+        const actorName = actorProfile?.username || "Unbekannt";
+        const actorAvatar = actorProfile?.avatar_url || "";
+        
+        let workTitle = "";
+        let mediaType: "ANIME" | "MANGA" = "ANIME";
+        let activityData: ActivityFeed | undefined;
+        
+        if (activityId) {
+          const actSnap = await getDoc(doc(db, "activity_feed", activityId));
+          if (actSnap.exists()) {
+            activityData = actSnap.data() as ActivityFeed;
+            if (activityData.work_id) {
+              try {
+                const { getWorkTitleAndType } = await import("@/lib/anilist");
+                const info = await getWorkTitleAndType(activityData.work_id);
+                if (info) {
+                  workTitle = info.title;
+                  mediaType = info.type;
+                }
+              } catch {}
+            }
+          }
+        }
+        
+        const unit = mediaType === "MANGA" ? "Kapitel" : "Folge";
+        const epContext = activityData?.episode_num ? ` (${unit} ${activityData.episode_num})` : "";
+        
+        const notifRef = doc(collection(db, "notifications"));
+        const notifPayload: Partial<InAppNotification> = {
+          notification_id: notifRef.id,
+          user_id: comment.user_id,
+          actor_id: userId,
+          actor_name: actorName,
+          actor_avatar: actorAvatar,
+          type: "COMMENT_LIKE",
+          activity_id: activityId,
+          comment_id: commentId,
+          work_id: activityData?.work_id,
+          work_title: workTitle,
+          media_type: mediaType,
+          episode_num: activityData?.episode_num,
+          text: comment.text,
+          timestamp: new Date().toISOString(),
+          read: false
+        };
+
+        (Object.keys(notifPayload) as (keyof InAppNotification)[]).forEach(key => {
+          if (notifPayload[key] === undefined) {
+            delete notifPayload[key];
+          }
+        });
+        
+        await setDoc(notifRef, notifPayload as InAppNotification);
+        
+        // Push Notification
+        fetch("/api/notify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targetUserId: comment.user_id,
+            title: `${actorName} gefällt dein Kommentar${workTitle ? ` in ${workTitle}` : ''}${epContext}`,
+            body: comment.text?.length > 80 ? comment.text.slice(0, 77) + "..." : (comment.text || ""),
+            type: "likes",
+            link: `/feed?activity_id=${activityId}&comment_id=${commentId}`
+          })
+        }).catch(console.error);
+      } catch (err) {
+        console.error("Error sending comment like notification:", err);
+      }
+    }
+    
+    return { liked: true, likesCount: likes.length + 1 };
+  }
+}
+
 export async function editActivity(activityId: string, newText: string) {
   const q = query(collection(db, "activities"), where("activity_id", "==", activityId));
   const snap = await getDocs(q);

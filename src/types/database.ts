@@ -132,6 +132,7 @@ export interface ActivityComment {
   text: string;
   timestamp: string;
   parent_comment_id?: string;
+  likes?: string[];
 }
 
 export interface InAppNotification {
@@ -140,7 +141,7 @@ export interface InAppNotification {
   actor_id: string;      // the user who did the action
   actor_name: string;
   actor_avatar: string;
-  type: "REPLY_TO_COMMENT" | "COMMENT_ON_THREAD" | "NEW_EPISODE_THREAD" | "APP_UPDATE" | "SYSTEM";
+  type: "REPLY_TO_COMMENT" | "COMMENT_ON_THREAD" | "NEW_EPISODE_THREAD" | "APP_UPDATE" | "SYSTEM" | "COMMENT_LIKE";
   activity_id?: string;
   work_id?: string;
   work_title?: string;

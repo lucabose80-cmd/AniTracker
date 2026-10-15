@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { adminDb } from "@/lib/firebase-admin";
 import FeedClient from "./FeedClient";
 import { ActivityFeed } from "@/types/database";
@@ -22,6 +23,10 @@ export default async function FeedPage() {
     console.error("Error fetching initial activities in SSR:", error);
   }
 
-  return <FeedClient initialActivities={initialActivities} />;
+  return (
+    <Suspense fallback={<div className="text-center text-gray-500 py-8 animate-pulse">Lade Feed...</div>}>
+      <FeedClient initialActivities={initialActivities} />
+    </Suspense>
+  );
 }
 

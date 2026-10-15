@@ -17,12 +17,17 @@ import { SpoilerProtectedThread, CommentSection, SpoilerText } from "@/component
 import { groupFeedItems, StackedThreadBlock, FeedGroup } from "@/components/ui/FeedGrouping";
 import { getAllUserWorks } from "@/lib/db/works";
 import { useAppStore } from "@/lib/store";
+import { useSearchParams } from "next/navigation";
 
 export default function FeedClient({ initialActivities }: { initialActivities: ActivityFeed[] }) {
+  const searchParams = useSearchParams();
+  const urlActivityId = searchParams.get("activity_id");
+  const urlCommentId = searchParams.get("comment_id");
+
   const { contentType, setContentType } = useAppStore();
   const reloadTrigger = useAppStore(state => state.reloadTrigger);
   const [feed, setFeed] = useState<ActivityFeed[]>(initialActivities || []);
-  const [feedFilter, setFeedFilter] = useState<'focus' | 'all'>('focus');
+  const [feedFilter, setFeedFilter] = useState<'focus' | 'all' | 'library'>('focus');
   const [workDetails, setWorkDetails] = useState<Record<string, any>>({});
   const [isLoading, setIsLoading] = useState(false);
   
@@ -33,8 +38,12 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
   const [currentUserUid, setCurrentUserUid] = useState<string | undefined>(undefined);
   const [userProfiles, setUserProfiles] = useState<Record<string, any>>({});
   const [currentUserWorks, setCurrentUserWorks] = useState<Record<string, number>>({});
+  const [userWorkStatuses, setUserWorkStatuses] = useState<Record<string, string>>({});
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [showNotifications, setShowNotifications] = useState(false);
+
+  const [highlightActivityId, setHighlightActivityId] = useState<string | null>(urlActivityId);
+  const [highlightCommentId, setHighlightCommentId] = useState<string | null>(urlCommentId);
 
   const [editStates, setEditStates] = useState<Record<string, { isEditing: boolean, text: string, isSpoiler: boolean }>>({});
 
@@ -80,8 +89,13 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
         setUserProfile(profile);
         const works = await getAllUserWorks(user.uid);
         const map: Record<string, number> = {};
-        works.forEach((w: any) => { map[w.work_id] = w.current_episode; });
+        const statusMap: Record<string, string> = {};
+        works.forEach((w: any) => { 
+          map[w.work_id] = w.current_episode; 
+          statusMap[w.work_id] = w.status;
+        });
         setCurrentUserWorks(map);
+        setUserWorkStatuses(statusMap);
         
         getInAppNotifications(user.uid).then((notifs) => {
           setNotifications(notifs);
@@ -103,6 +117,7 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
       } else {
         setUserProfile(null);
         setCurrentUserWorks({});
+        setUserWorkStatuses({});
         setNotifications([]);
       }
     });
@@ -217,6 +232,37 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
       loadFeed();
     }
   }, [reloadTrigger]);
+
+  const scrollToTarget = useCallback((activityId: string, commentId?: string) => {
+    setHighlightActivityId(activityId);
+    if (commentId) {
+      setHighlightCommentId(commentId);
+    }
+    
+    setTimeout(() => {
+      if (commentId) {
+        const commentEl = document.getElementById(`comment_${commentId}`);
+        if (commentEl) {
+          commentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          commentEl.classList.add('ring-2', 'ring-blue-500', 'ring-offset-2', 'ring-offset-[#141a29]', 'bg-blue-950/40', 'transition-all');
+          setTimeout(() => commentEl.classList.remove('ring-2', 'ring-blue-500', 'ring-offset-2', 'ring-offset-[#141a29]', 'bg-blue-950/40'), 3000);
+          return;
+        }
+      }
+      const actEl = document.getElementById(`activity_${activityId}`);
+      if (actEl) {
+        actEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        actEl.classList.add('ring-2', 'ring-blue-500', 'ring-offset-2', 'ring-offset-[#141a29]', 'transition-all');
+        setTimeout(() => actEl.classList.remove('ring-2', 'ring-blue-500', 'ring-offset-2', 'ring-offset-[#141a29]'), 3000);
+      }
+    }, 350);
+  }, []);
+
+  useEffect(() => {
+    if (urlActivityId && feed.length > 0) {
+      scrollToTarget(urlActivityId, urlCommentId || undefined);
+    }
+  }, [urlActivityId, urlCommentId, feed.length, scrollToTarget]);
 
   const handlePost = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -367,15 +413,9 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
       return;
     }
 
-    // Smooth scroll to the activity
-    setTimeout(() => {
-      const element = document.getElementById(`activity_${notif.activity_id}`);
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        element.classList.add('ring-2', 'ring-blue-500', 'transition-all');
-        setTimeout(() => element.classList.remove('ring-2', 'ring-blue-500'), 2000);
-      }
-    }, 100);
+    if (notif.activity_id) {
+      scrollToTarget(notif.activity_id, notif.comment_id);
+    }
   };
 
   return (
@@ -495,7 +535,7 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
                                 <span className="font-bold text-green-400">Release Alert</span>
                               ) : n.type === "NEW_EPISODE_THREAD" ? (
                                 <>
-                                  <span className="font-bold text-gray-200">{n.actor_name}</span> hat einen Thread er�ffnet:
+                                  <span className="font-bold text-gray-200">{n.actor_name}</span> hat einen Thread eröffnet:
                                 </>
                               ) : n.type === "COMMENT_ON_THREAD" ? (
                                 n.count > 1 ? (
@@ -503,6 +543,10 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
                                 ) : (
                                   <><span className="font-bold text-gray-200">{n.actor_name}</span> hat geschrieben:</>
                                 )
+                              ) : n.type === "COMMENT_LIKE" ? (
+                                <>
+                                  <span className="font-bold text-gray-200">{n.actor_name}</span> gefällt dein Kommentar:
+                                </>
                               ) : (
                                 <>
                                   <span className="font-bold text-gray-200">{n.actor_name}</span> 
@@ -549,6 +593,16 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
             }`}
           >
             Alles
+          </button>
+          <button 
+            onClick={() => setFeedFilter('library')}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
+              feedFilter === 'library' 
+                ? 'bg-purple-600 text-white shadow-md' 
+                : 'text-gray-400 hover:text-white'
+            }`}
+          >
+            Meine Werke
           </button>
         </div>
 
@@ -625,6 +679,21 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
                   if (!['EPISODE_THREAD', 'RATING', 'WEEKLY_RANKING'].includes(activity.action_type)) {
                     return false;
                   }
+                } else if (feedFilter === 'library') {
+                  if (!activity.work_id) {
+                    if (activity.action_type === 'WEEKLY_RANKING' && activity.details && !activity.details.startsWith("Wochen-Ranking")) {
+                      const ids = activity.details.split(",");
+                      const hasTracked = ids.some(id => ['CURRENT', 'COMPLETED', 'PLANNING'].includes(userWorkStatuses[id]));
+                      if (!hasTracked) return false;
+                    } else {
+                      return false;
+                    }
+                  } else {
+                    const status = userWorkStatuses[activity.work_id];
+                    if (!status || !['CURRENT', 'COMPLETED', 'PLANNING'].includes(status)) {
+                      return false;
+                    }
+                  }
                 }
                 if (!activity.work_id) return true;
                 const work = workDetails[activity.work_id];
@@ -652,6 +721,8 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
                       userProfiles={userProfiles}
                       currentUserWorks={currentUserWorks}
                       onDelete={(id: string) => setFeed(prev => prev.filter(a => a.activity_id !== id))}
+                      highlightCommentId={activity.activity_id === highlightActivityId ? highlightCommentId : undefined}
+                      autoOpenComments={activity.activity_id === highlightActivityId && Boolean(highlightCommentId)}
                     />
                   </div>
                 );
@@ -701,7 +772,15 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
                         })}
                       </div>
                     </div>
-                    <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} commentCount={activity.comments_count || 0} forceReveal={work && activity.episode_num != null && currentUserWorks[work.id.toString()] >= activity.episode_num} />
+                    <CommentSection 
+                      activityId={activity.activity_id} 
+                      userProfiles={userProfiles} 
+                      currentUserUid={currentUserUid} 
+                      commentCount={activity.comments_count || 0} 
+                      forceReveal={work && activity.episode_num != null && currentUserWorks[work.id.toString()] >= activity.episode_num} 
+                      highlightCommentId={activity.activity_id === highlightActivityId ? highlightCommentId : undefined}
+                      autoOpen={activity.activity_id === highlightActivityId && Boolean(highlightCommentId)}
+                    />
                   </div>
                 );
               }
@@ -709,7 +788,7 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
               // Render other activity types (RATING, TOP9_UPDATE, MANUAL_POST)
               return (
                 <div id={`activity_${activity.activity_id}`} key={activity.activity_id} className="rounded-xl border-2 border-blue-900/30 bg-[#141a29] p-4 shadow-lg relative overflow-hidden group">
-                  {activity.user_id === currentUserUid && (<div className="absolute top-3 right-3 flex gap-2 z-10"><button onClick={() => startEditingPost(activity)} className="text-[10px] text-blue-500 hover:text-blue-400 transition font-bold bg-blue-900/20 px-2 py-1 rounded">Bearbeiten</button><button onClick={() => handleDeletePost(activity.activity_id)} className="text-[10px] text-red-500 hover:text-red-400 transition font-bold bg-red-900/20 px-2 py-1 rounded">L�schen</button></div>)}
+                  {activity.user_id === currentUserUid && (<div className="absolute top-3 right-3 flex gap-2 z-10"><button onClick={() => startEditingPost(activity)} className="text-[10px] text-blue-500 hover:text-blue-400 transition font-bold bg-blue-900/20 px-2 py-1 rounded">Bearbeiten</button><button onClick={() => handleDeletePost(activity.activity_id)} className="text-[10px] text-red-500 hover:text-red-400 transition font-bold bg-red-900/20 px-2 py-1 rounded">Löschen</button></div>)}
                   
                   <div className="flex gap-4">
                     {work && (
@@ -767,7 +846,15 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
                     </div>
                   </div>
                   
-                  <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} commentCount={activity.comments_count || 0} forceReveal={work && activity.episode_num != null && currentUserWorks[work.id.toString()] >= activity.episode_num} />
+                  <CommentSection 
+                    activityId={activity.activity_id} 
+                    userProfiles={userProfiles} 
+                    currentUserUid={currentUserUid} 
+                    commentCount={activity.comments_count || 0} 
+                    forceReveal={work && activity.episode_num != null && currentUserWorks[work.id.toString()] >= activity.episode_num} 
+                    highlightCommentId={activity.activity_id === highlightActivityId ? highlightCommentId : undefined}
+                    autoOpen={activity.activity_id === highlightActivityId && Boolean(highlightCommentId)}
+                  />
                 </div>
               );
             };
@@ -780,6 +867,7 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
                     group={group}
                     workDetails={workDetails}
                     renderItem={renderActivity}
+                    highlightActivityId={highlightActivityId}
                   />
                 );
               }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ChevronDown, ChevronUp, MessageSquare } from "lucide-react";
 import { ActivityFeed } from "@/types/database";
 
@@ -70,13 +70,21 @@ export function groupFeedItems(activities: ActivityFeed[]): FeedGroup[] {
 export function StackedThreadBlock({ 
   group, 
   workDetails,
-  renderItem 
+  renderItem,
+  highlightActivityId
 }: { 
   group: FeedGroup;
   workDetails: Record<string, any>;
   renderItem: (activity: ActivityFeed) => React.ReactNode;
+  highlightActivityId?: string | null;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    if (highlightActivityId && group.items.some(i => i.activity_id === highlightActivityId)) {
+      setIsExpanded(true);
+    }
+  }, [highlightActivityId, group.items]);
   const work = group.workId ? workDetails[group.workId] : null;
   const workTitle = work?.title?.english || work?.title?.romaji || 'Unbekannt';
   const hiddenCount = group.items.length - 1;

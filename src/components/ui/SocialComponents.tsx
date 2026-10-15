@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { MessageSquare, Heart } from "lucide-react";
-import { deleteActivityComment, addActivityComment, getActivityComments, editActivityComment } from "@/lib/db/feed";
+import { deleteActivityComment, addActivityComment, getActivityComments, editActivityComment, toggleCommentLike } from "@/lib/db/feed";
 import { ActivityComment } from "@/types/database";
 import { formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
@@ -39,9 +39,48 @@ function InlineSpoiler({ content, forceReveal }: { content: string, forceReveal?
   );
 }
 
-export function CommentSection({ activityId, userProfiles, currentUserUid, commentCount: initialCount = 0, forceReveal }: { activityId: string, userProfiles: Record<string, any>, currentUserUid?: string, commentCount?: number, forceReveal?: boolean }) {
+export function CommentSection({ 
+  activityId, 
+  userProfiles, 
+  currentUserUid, 
+  commentCount: initialCount = 0, 
+  forceReveal,
+  highlightCommentId,
+  autoOpen
+}: { 
+  activityId: string; 
+  userProfiles: Record<string, any>; 
+  currentUserUid?: string; 
+  commentCount?: number; 
+  forceReveal?: boolean;
+  highlightCommentId?: string | null;
+  autoOpen?: boolean;
+}) {
   const [comments, setComments] = useState<ActivityComment[]>([]);
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(Boolean(autoOpen || highlightCommentId));
+
+  useEffect(() => {
+    if (autoOpen || highlightCommentId) {
+      setIsOpen(true);
+    }
+  }, [autoOpen, highlightCommentId]);
+
+  useEffect(() => {
+    if (isOpen && highlightCommentId && comments.length > 0) {
+      const timer = setTimeout(() => {
+        const el = document.getElementById(`comment_${highlightCommentId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          const ringClasses = ["ring-2", "ring-blue-500", "ring-offset-2", "ring-offset-[#141a29]", "animate-pulse"];
+          el.classList.add(...ringClasses);
+          setTimeout(() => {
+            el.classList.remove(...ringClasses);
+          }, 2500);
+        }
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, highlightCommentId, comments]);
   const [newText, setNewText] = useState("");
   const [isSpoiler, setIsSpoiler] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -184,6 +223,27 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
     const [replyText, setReplyText] = useState(""); const [replyIsSpoiler, setReplyIsSpoiler] = useState(false);
     const [isReplying, setIsReplying] = useState(false);
     const [collapsed, setCollapsed] = useState(false);
+    const [commentLiked, setCommentLiked] = useState(node.likes?.includes(currentUserUid) || false);
+    const [commentLikesCount, setCommentLikesCount] = useState(node.likes?.length || 0);
+
+    const handleCommentLike = async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!currentUserUid) return;
+
+      const wasLiked = commentLiked;
+      setCommentLiked(!wasLiked);
+      setCommentLikesCount((prev: number) => wasLiked ? Math.max(0, prev - 1) : prev + 1);
+
+      try {
+        const res = await toggleCommentLike(node.comment_id, activityId, currentUserUid);
+        setCommentLiked(res.liked);
+        setCommentLikesCount(res.likesCount);
+      } catch (err) {
+        console.error("Failed to toggle comment like", err);
+        setCommentLiked(wasLiked);
+        setCommentLikesCount((prev: number) => wasLiked ? prev + 1 : Math.max(0, prev - 1));
+      }
+    };
 
     const handleReply = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -227,7 +287,7 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
     };
 
     return (
-      <div className="flex gap-2 text-sm mt-3 relative group">
+      <div id={`comment_${node.comment_id}`} className="flex gap-2 text-sm mt-3 relative group rounded-lg p-1 transition-all">
         <Link href={`/profile/${node.user_id}`} className="h-6 w-6 shrink-0 rounded-full bg-gray-700 overflow-hidden flex items-center justify-center font-bold text-[10px] mt-1 z-10 shadow-inner hover:opacity-80 transition">
           {author.avatar_url ? <img src={author.avatar_url} alt="" className="w-full h-full object-cover" /> : (author.username?.[0]?.toUpperCase() || "?")}
         </Link>
@@ -265,6 +325,17 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
                   <p className="text-gray-300 mt-0.5 break-words whitespace-pre-wrap leading-relaxed"><SpoilerText text={node.text} forceReveal={forceReveal} /></p>
                   
                   <div className="flex items-center gap-3 mt-1">
+                    <button
+                      type="button"
+                      onClick={handleCommentLike}
+                      className={`text-[10px] flex items-center gap-1 font-bold transition ${
+                        commentLiked ? "text-red-500 hover:text-red-400" : "text-gray-500 hover:text-gray-300"
+                      }`}
+                      title={commentLiked ? "Gefällt mir nicht mehr" : "Gefällt mir"}
+                    >
+                      <Heart size={11} className={commentLiked ? "fill-current text-red-500" : ""} />
+                      {commentLikesCount > 0 && <span>{commentLikesCount}</span>}
+                    </button>
                     {currentUserUid && (
                       <button onClick={(e) => { e.stopPropagation(); setReplyOpen(!replyOpen); }} className="text-[10px] text-gray-500 hover:text-gray-300 transition font-bold">
                         Antworten
@@ -353,7 +424,7 @@ export function CommentSection({ activityId, userProfiles, currentUserUid, comme
   );
 }
 
-export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentUserUid, userProfiles, currentUserWorks, onDelete}: any) {
+export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentUserUid, userProfiles, currentUserWorks, onDelete, highlightCommentId, autoOpenComments }: any) {
   const [isDeleting, setIsDeleting] = useState(false);
   const canDelete = activity.user_id === currentUserUid && (!activity.comments_count || activity.comments_count === 0);
 
@@ -490,7 +561,7 @@ export function SpoilerProtectedThread({ activity, work, user, timeAgo, currentU
           </div>
         </div>
       </div>
-      <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} commentCount={activity.comments_count || 0} forceReveal={currentUserWorks && work?.id ? currentUserWorks[work.id.toString()] >= activity.episode_num : false} />
+      <CommentSection activityId={activity.activity_id} userProfiles={userProfiles} currentUserUid={currentUserUid} commentCount={activity.comments_count || 0} forceReveal={currentUserWorks && work?.id ? currentUserWorks[work.id.toString()] >= activity.episode_num : false} highlightCommentId={highlightCommentId} autoOpen={autoOpenComments} />
     </div>
   );
 }
