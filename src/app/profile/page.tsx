@@ -1,10 +1,10 @@
-"use client";
+﻿"use client";
 
 import { User as UserIcon, Settings, LogOut, LogIn, Bell, Star } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import { signOut, onAuthStateChanged, User } from "firebase/auth";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import Link from "next/link";
 import { getUserProfile, updateNotificationSettings, updateTop9List, updateUserProfileData } from "@/lib/db/users";
 import { requestForToken, repairToken } from "@/lib/fcm";
@@ -24,7 +24,7 @@ function FavoriteItem({ id, index, workDetails }: { id: string, index: number, w
         <Link href={`/work/${id}`} className="absolute inset-0 block h-full w-full group">
           <img src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
           <div className="absolute bottom-0 w-full bg-black/80 backdrop-blur-md text-[10px] text-center text-blue-400 py-1 font-bold">
-            ★ {workDetails.userScore?.toFixed(1) || "?"}
+            â˜… {workDetails.userScore?.toFixed(1) || "?"}
           </div>
         </Link>
       ) : (
@@ -57,6 +57,7 @@ export default function ProfilePage() {
   const [allWorks, setAllWorks] = useState<any[]>([]);
   const [aniListDetails, setAniListDetails] = useState<Record<string, any>>({});
   const [favItems, setFavItems] = useState<any[]>([]);
+  const [onlyMalOpen, setOnlyMalOpen] = useState(false);
 
   useEffect(() => {
     if (!auth) return;
@@ -111,11 +112,11 @@ export default function ProfilePage() {
         setIsPushEnabled(true);
         alert("Push-Benachrichtigungen erfolgreich repariert!");
       } else {
-        alert("Fehler beim Reparieren der Push-Benachrichtigungen. Bitte pr�fe die Browser-Berechtigungen.");
+        if (typeof Notification !== "undefined" && Notification.permission === "denied") { alert("Benachrichtigungen sind im Browser blockiert. Bitte erlaube Push-Benachrichtigungen in den Browser-/Website-Einstellungen."); } else { alert("Fehler beim Reparieren der Push-Benachrichtigungen. Bitte prüfe die Browser-Berechtigungen, den Service Worker und die Firestore-Regeln."); }
       }
     } catch (e) {
       console.error(e);
-      alert("Ein Fehler ist aufgetreten.");
+      alert("Fehler beim Reparieren der Push-Benachrichtigungen. Bitte prüfe die Browser-Berechtigungen und Firestore-Regeln.");
     } finally {
       setIsSaving(false);
     }
@@ -129,10 +130,18 @@ export default function ProfilePage() {
       if (token) {
         setIsPushEnabled(true);
         alert("Push-Benachrichtigungen aktiviert!");
+      } else if (typeof Notification !== "undefined" && Notification.permission === "denied") {
+        alert("Benachrichtigungen sind im Browser blockiert. Bitte erlaube Push-Benachrichtigungen in den Browser-/Website-Einstellungen.");
+      } else {
+        alert("Push-Benachrichtigungen konnten nicht aktiviert werden. Bitte prÃ¼fe die Browser-Berechtigungen, den Service Worker und die Firestore-Regeln.");
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert("Fehler beim Aktivieren der Push-Benachrichtigungen.");
+      alert(
+        `Fehler beim Aktivieren der Push-Benachrichtigungen: ${
+          e?.message || "Bitte prÃ¼fe die Browser-Berechtigungen und Firestore-Regeln."
+        }`
+      );
     } finally {
       setIsSaving(false);
     }
@@ -209,6 +218,17 @@ export default function ProfilePage() {
 
     setFavItems(topWorks);
   }, [contentType, dbUser, aniListDetails, allWorks]);
+
+  const ratedWorks = useMemo(() => {
+    return allWorks
+      .filter(
+        (w) =>
+          aniListDetails[w.work_id]?.type === contentType &&
+          (w.evaluation?.overallScore || 0) > 0 &&
+          (!onlyMalOpen || !w.mal_rated)
+      )
+      .sort((a, b) => (b.evaluation?.overallScore || 0) - (a.evaluation?.overallScore || 0));
+  }, [allWorks, aniListDetails, contentType, onlyMalOpen]);
 
   const watchedAnimeCount = allWorks.filter(w => w.status === "COMPLETED" && aniListDetails[w.work_id]?.type === "ANIME").length;
   const readMangaCount = allWorks.filter(w => w.status === "COMPLETED" && aniListDetails[w.work_id]?.type === "MANGA").length;
@@ -293,7 +313,7 @@ export default function ProfilePage() {
           {!isPushEnabled ? (
             <div className="text-center">
               <p className="text-xs text-gray-400 mb-4">
-                Erlaube Push-Benachrichtigungen, um über neue Folgen und Aktivitäten informiert zu werden.
+                Erlaube Push-Benachrichtigungen, um Ã¼ber neue Folgen und AktivitÃ¤ten informiert zu werden.
               </p>
               <button 
                 onClick={enablePush}
@@ -308,7 +328,7 @@ export default function ProfilePage() {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-sm font-bold text-white">Neue Folgen & Kapitel</div>
-                  <div className="text-xs text-gray-500">Für Werke aus deiner Bibliothek</div>
+                  <div className="text-xs text-gray-500">FÃ¼r Werke aus deiner Bibliothek</div>
                 </div>
                 <button 
                   onClick={() => handleToggle("releases")}
@@ -347,7 +367,7 @@ export default function ProfilePage() {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-sm font-bold text-white">Social Feed</div>
-                  <div className="text-xs text-gray-500">Neue Beiträge der Community</div>
+                  <div className="text-xs text-gray-500">Neue BeitrÃ¤ge der Community</div>
                 </div>
                 <button 
                   onClick={() => handleToggle("social")}
@@ -378,6 +398,93 @@ export default function ProfilePage() {
               {favItems.map((item, index) => (
                 <FavoriteItem key={item.id} id={item.id} index={index} workDetails={item.details} />
               ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {user && (
+        <section className="bg-[#1a1d24] border border-gray-800 rounded-2xl p-4 shadow-lg">
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h3 className="text-base font-bold text-white">
+              Alle Bewertungen ({ratedWorks.length})
+            </h3>
+            <button
+              type="button"
+              onClick={() => setOnlyMalOpen((prev) => !prev)}
+              className={`px-3 py-1 rounded-full text-[11px] font-semibold border transition-colors whitespace-nowrap ${
+                onlyMalOpen
+                  ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
+                  : "bg-[#141a29] border-gray-700 text-gray-400 hover:text-white"
+              }`}
+            >
+              Nur AniList/MAL offen
+            </button>
+          </div>
+
+          {ratedWorks.length === 0 ? (
+            <p className="text-xs text-gray-500 text-center py-6">
+              {onlyMalOpen
+                ? "Alle bewerteten Werke sind bereits auf AniList/MAL markiert."
+                : "Keine bewerteten Werke fÃ¼r diese Kategorie vorhanden."}
+            </p>
+          ) : (
+            <div className="max-h-[420px] overflow-y-auto space-y-2 pr-1">
+              {ratedWorks.map((w) => {
+                const details = aniListDetails[w.work_id];
+                const title =
+                  details?.title?.english ||
+                  details?.title?.romaji ||
+                  `Werk #${w.work_id}`;
+                const cover = details?.coverImage?.large || details?.coverImage?.extraLarge;
+                const score = w.evaluation?.overallScore || 0;
+                const rewatch = w.evaluation?.rewatchPotential || 0;
+
+                return (
+                  <div
+                    key={w.work_id}
+                    className="flex items-center gap-3 rounded-xl border border-gray-800 bg-[#141a29] p-2.5 hover:border-gray-700 transition-colors"
+                  >
+                    <Link
+                      href={`/work/${w.work_id}`}
+                      className="w-10 h-14 rounded-md overflow-hidden bg-gray-800 shrink-0 block"
+                    >
+                      {cover ? (
+                        <img
+                          src={cover}
+                          alt={title}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : null}
+                    </Link>
+
+                    <div className="flex-1 min-w-0">
+                      <Link
+                        href={`/work/${w.work_id}`}
+                        className="text-sm font-semibold text-white hover:text-blue-400 transition-colors line-clamp-1 block"
+                      >
+                        {title}
+                      </Link>
+                      <div className="flex items-center flex-wrap gap-1.5 mt-1">
+                        {rewatch > 0 && (
+                          <span className="inline-flex items-center rounded-full bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 text-[10px] font-semibold text-purple-300">
+                            Rewatch: {rewatch}/10
+                          </span>
+                        )}
+                        {!w.mal_rated && (
+                          <span className="inline-flex items-center rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
+                            AniList offen
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <span className="text-sm font-bold text-blue-400 shrink-0 tabular-nums">
+                      â˜… {score.toFixed(1)}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>
@@ -439,7 +546,7 @@ export default function ProfilePage() {
                       onClick={() => fileInputRef.current?.click()}
                       className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-2 rounded-lg transition"
                     >
-                      Bild vom Handy wählen
+                      Bild vom Handy wÃ¤hlen
                     </button>
                     {editAvatarUrl && (
                       <button 

@@ -15,6 +15,7 @@ import { addToHistory } from "@/lib/db/users";
 import { WorkSocialFeed } from "./WorkSocialFeed";
 import { createActivity } from "@/lib/db/feed";
 import { getUserEpisodeRatingsForWork } from "@/lib/db/feedback";
+import { getPausedWorkIds, unpauseWork } from "@/lib/db/pauses";
 import { useAppStore } from "@/lib/store";
 
 export default function WorkDetailPage() {
@@ -33,6 +34,8 @@ export default function WorkDetailPage() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [synchroOffset, setSynchroOffset] = useState<number | "">(0);
   const [manualAvailableEps, setManualAvailableEps] = useState<number | "">("");
+  const [droppedReason, setDroppedReason] = useState("");
+  const [isWorkPaused, setIsWorkPaused] = useState(false);
 
   // Form State for Deep Evaluation
   const [evaluation, setEvaluation] = useState<UserWork["evaluation"]>({
@@ -45,6 +48,7 @@ export default function WorkDetailPage() {
     voiceActing: 0,
     romanceAndChemistry: 0,
     bingeFactor: 0,
+    rewatchPotential: 0,
     emotionalImpact: "None",
     comments: "",
     overallScore: 0,
@@ -71,26 +75,28 @@ export default function WorkDetailPage() {
   });
 
   useEffect(() => {
-    async function loadData() {
+    let isMounted = true;
+
+    async function loadData(user: typeof auth.currentUser) {
       if (!id) return;
       setIsLoading(true);
       try {
-        const user = auth?.currentUser;
-        
-        const [data, userWork, overrides, epRatings] = await Promise.all([
+        const [data, userWork, overrides, epRatings, pausedIds] = await Promise.all([
           fetchAniList(GET_WORK_DETAILS, { id: parseInt(id, 10) }),
           user ? getUserWork(user.uid, id) : Promise.resolve(null),
           getCalendarOverrides(),
           user
             ? getUserEpisodeRatingsForWork(user.uid, id)
             : Promise.resolve({ average: null, count: 0, items: [] }),
+          getPausedWorkIds().catch(() => new Set<string>()),
         ]);
+
+        if (!isMounted) return;
 
         setWork(data.Media);
         setEpisodeRatingStats({ average: epRatings.average, count: epRatings.count });
-        
+        setIsWorkPaused(pausedIds.has(id));
 
-        
         if (overrides[id]) {
           if (overrides[id].weeklyTime) {
             setHasCustomOverride(true);
@@ -114,26 +120,47 @@ export default function WorkDetailPage() {
           setInLibrary(true);
           setUserWorkStatus(userWork.status || "PLANNING");
           setCurrentEpisode(userWork.current_episode || 0);
-          // Legacy support: if local override exists but no global override, use local (or we just ignore local entirely, ignoring local is cleaner)
-          setEvaluation(userWork.evaluation);
+          setDroppedReason(userWork.dropped_reason || "");
+          setEvaluation({
+            ...userWork.evaluation,
+            rewatchPotential: userWork.evaluation?.rewatchPotential ?? 0,
+          });
           setWatchMode(userWork.classification?.watchMode || "SUB");
           setMalRated(userWork.mal_rated || false);
           setSynchroOffset(userWork.synchro_offset_episodes || 0);
-          // If not globally set, we could fallback to local, but global is preferred
           if (!overrides[id] || overrides[id].manualAvailableEps === undefined) {
             setManualAvailableEps(userWork.manual_available_eps ?? "");
           }
           if (userWork.evaluation.romanceAndChemistry > 0) setHasRomance(true);
         } else {
+          setInLibrary(false);
+          setUserWorkStatus("NONE");
+          setCurrentEpisode(0);
+          setDroppedReason("");
           setHasRomance(isRomance);
         }
       } catch (err) {
         console.error(err);
       } finally {
-        setIsLoading(false);
+        if (isMounted) setIsLoading(false);
       }
     }
-    loadData();
+
+    if (!auth) {
+      loadData(null);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      loadData(user);
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, [id, reloadTrigger]);
 
   const currentScore = calculateOverallScore({
@@ -286,7 +313,11 @@ export default function WorkDetailPage() {
     setIsSaving(true);
     setSaveMessage("");
 
-    const finalEval = { ...evaluation, overallScore: currentScore };
+    const finalEval = {
+      ...evaluation,
+      rewatchPotential: evaluation.rewatchPotential || 0,
+      overallScore: currentScore,
+    };
     setEvaluation(finalEval);
 
     try {
@@ -304,17 +335,31 @@ export default function WorkDetailPage() {
           pacingScale: 0,
         },
         mal_rated: malRated,
+        dropped_reason: droppedReason.trim(),
         synchro_offset_episodes: synchroOffset === "" ? 0 : synchroOffset,
         manual_available_eps: manualAvailableEps === "" ? null : manualAvailableEps,
         auto_added: false,
         status: userWorkStatus !== "NONE" ? userWorkStatus : "COMPLETED"
       });
-      
-      await addToHistory(user.uid, id);
-      
+
+      try {
+        await addToHistory(user.uid, id);
+      } catch (e) {
+        console.warn(e);
+      }
+
       // Create Feed Activity for High Ratings
       if (currentScore >= 7) {
-        await createActivity(user.uid, "RATING", id, `Hat ${work?.title?.romaji} mit ${currentScore.toFixed(1)}/10 bewertet!`);
+        try {
+          await createActivity(
+            user.uid,
+            "RATING",
+            id,
+            `Hat ${work?.title?.english || work?.title?.romaji} mit ${currentScore.toFixed(1)}/10 bewertet!`
+          );
+        } catch (e) {
+          console.warn(e);
+        }
       }
 
       setInLibrary(true);
@@ -323,6 +368,54 @@ export default function WorkDetailPage() {
     } catch (err) {
       console.error(err);
       setSaveMessage("Fehler beim Speichern");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSaveDroppedReason = async () => {
+    const user = auth?.currentUser;
+    if (!user) {
+      setSaveMessage("Bitte erst einloggen!");
+      return;
+    }
+    setIsSaving(true);
+    setSaveMessage("");
+    try {
+      await saveUserWork(user.uid, id, {
+        dropped_reason: droppedReason.trim(),
+      });
+      setSaveMessage("Gespeichert!");
+      setTimeout(() => setSaveMessage(""), 3000);
+    } catch (err) {
+      console.error(err);
+      setSaveMessage("Fehler beim Speichern");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleUnpause = async () => {
+    const user = auth?.currentUser;
+    if (!user) {
+      alert("Bitte erst einloggen!");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      if (isWorkPaused) {
+        await unpauseWork(id);
+        setIsWorkPaused(false);
+      }
+      if (userWorkStatus === "PAUSED") {
+        await updateUserWorkStatus(user.uid, id, "CURRENT");
+        setUserWorkStatus("CURRENT");
+      }
+      setSaveMessage("Entpausiert!");
+      setTimeout(() => setSaveMessage(""), 3000);
+    } catch (err) {
+      console.error(err);
+      setSaveMessage("Fehler beim Entpausieren");
     } finally {
       setIsSaving(false);
     }
@@ -694,6 +787,42 @@ export default function WorkDetailPage() {
             </button>
           </div>
           
+          {(isWorkPaused || userWorkStatus === "PAUSED") && (
+            <button
+              onClick={handleUnpause}
+              disabled={isSaving}
+              className="w-full flex items-center justify-center gap-2 rounded-xl bg-amber-600/20 border border-amber-500/50 hover:bg-amber-600/35 transition text-amber-300 py-3 text-sm font-bold active:scale-95 disabled:opacity-50"
+            >
+              <PlayCircle size={18} />
+              Entpausieren
+            </button>
+          )}
+
+          {userWorkStatus === "DROPPED" && (
+            <div className="rounded-xl border border-gray-800 bg-[#141a29] p-3 flex flex-col gap-2">
+              <label className="text-xs font-bold text-gray-400">
+                Abbruch-Grund
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={droppedReason}
+                  onChange={(e) => setDroppedReason(e.target.value)}
+                  placeholder="Warum abgebrochen? (optional)"
+                  className="flex-1 rounded-lg border border-gray-700 bg-[#0f1115] px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveDroppedReason}
+                  disabled={isSaving}
+                  className="rounded-lg bg-blue-600 hover:bg-blue-500 px-3.5 py-2 text-xs font-bold text-white transition disabled:opacity-50 shrink-0"
+                >
+                  Speichern
+                </button>
+              </div>
+            </div>
+          )}
+
           {inLibrary && (
             <div className="flex gap-2">
               <button 
@@ -847,6 +976,27 @@ export default function WorkDetailPage() {
                 )}
               </div>
             )}
+
+            {/* Rewatch Potential (separate from overall score) */}
+            <div className="pt-4 border-t border-gray-800">
+              <div className="flex justify-between text-sm mb-1">
+                <span className="text-gray-300 font-medium">
+                  Rewatch-Potenzial (zählt nicht in Gesamtwertung)
+                </span>
+                <span className="font-bold text-white">
+                  {evaluation.rewatchPotential || '-'}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="10"
+                step="0.5"
+                value={evaluation.rewatchPotential || 0}
+                onChange={(e) => handleSlider("rewatchPotential", e.target.value)}
+                className="w-full accent-purple-500"
+              />
+            </div>
 
             {/* Emotional Impact */}
             <div className="pt-4 border-t border-gray-800">

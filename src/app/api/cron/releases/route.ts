@@ -79,7 +79,7 @@ export async function GET(req: Request) {
     const customSchedules: any[] = [];
     const overridesSnap = await adminDb.collection("calendar_overrides").get();
     
-    overridesSnap.docs.forEach(doc => {
+    for (const doc of overridesSnap.docs) {
       const over = doc.data();
       if (over.weeklyDay !== undefined && over.weeklyTime !== undefined) {
         // Convert to Europe/Berlin timezone so German release times match Vercel's UTC clock
@@ -100,7 +100,7 @@ export async function GET(req: Request) {
             
             if (now - lastInc >= threshold) {
               const newEps = (over.manualAvailableEps || 0) + 1;
-              adminDb.collection("calendar_overrides").doc(doc.id).update({
+              await adminDb.collection("calendar_overrides").doc(doc.id).update({
                 manualAvailableEps: newEps,
                 lastIncrementedAt: now
               });
@@ -109,7 +109,7 @@ export async function GET(req: Request) {
           }
         }
       }
-    });
+    }
 
     if (customSchedules.length > 0) {
       const customIds = customSchedules.map(s => parseInt(s.mediaId, 10));
@@ -182,10 +182,12 @@ export async function GET(req: Request) {
         }
         
         if (tokensToNotify.length > 0) {
+          const uniqueTokens = [...new Set(tokensToNotify)];
+          const workTitle = schedule.media?.title?.english || schedule.media?.title?.native || schedule.media?.title?.romaji || "Werk";
           const payload = {
             notification: {
               title: schedule.type === "MANGA" ? "Neues Kapitel verf\u00FCgbar!" : "Neue Folge verf\u00FCgbar!",
-              body: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${schedule.media.title.english || schedule.media.title.native || schedule.media.title.romaji} ist jetzt online.`,
+              body: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${workTitle} ist jetzt online.`,
             },
             data: { link: `/work/${schedule.mediaId}`, type: "releases" },
             webpush: {
@@ -202,7 +204,7 @@ export async function GET(req: Request) {
               },
               fcmOptions: { link: `/work/${schedule.mediaId}` }
             },
-            tokens: tokensToNotify,
+            tokens: uniqueTokens,
           };
           try {
             await adminMessaging.sendEachForMulticast(payload);

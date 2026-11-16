@@ -66,6 +66,7 @@ export interface UserWork {
   };
   
   mal_rated?: boolean;
+  dropped_reason?: string;
 
   classification: {
     watchMode: WatchMode;
@@ -90,6 +91,7 @@ export interface UserWork {
     romanceAndChemistry: number;
     comedy?: number;
     bingeFactor: number;
+    rewatchPotential?: number;
     emotionalImpact: EmotionalImpact;
     comments: string;
     overallScore: number;

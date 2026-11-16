@@ -21,6 +21,7 @@ import { fetchAniListBatch } from "@/lib/anilist";
 import { UserWork, UserWorkStatus } from "@/types/database";
 import {
   getAllUserWorks,
+  saveUserWork,
   updateEpisodeProgress,
   updateUserWorkStatus,
 } from "@/lib/db/works";
@@ -198,11 +199,13 @@ export default function LibraryPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("RECENT");
   const [activeTab, setActiveTab] = useState<TabStatus>("CURRENT");
+  const [onlyMalOpen, setOnlyMalOpen] = useState(false);
 
   // Quick-Edit Modal State
   const [editingWork, setEditingWork] = useState<UserWork | null>(null);
   const [editEpisode, setEditEpisode] = useState<number>(0);
   const [editStatus, setEditStatus] = useState<UserWorkStatus>("CURRENT");
+  const [editDroppedReason, setEditDroppedReason] = useState<string>("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   useEffect(() => {
@@ -279,6 +282,7 @@ export default function LibraryPage() {
 
     return contentTypeWorks
       .filter((w) => w.status === activeTab)
+      .filter((w) => !onlyMalOpen || ((w.evaluation?.overallScore || 0) > 0 && !w.mal_rated))
       .filter((w) => {
         if (!queryLower) return true;
         const details = aniListDetails[w.work_id];
@@ -323,6 +327,7 @@ export default function LibraryPage() {
   }, [
     contentTypeWorks,
     activeTab,
+    onlyMalOpen,
     searchQuery,
     sortBy,
     aniListDetails,
@@ -363,6 +368,7 @@ export default function LibraryPage() {
     setEditingWork(work);
     setEditEpisode(work.current_episode || 0);
     setEditStatus(work.status);
+    setEditDroppedReason(work.dropped_reason || "");
   };
 
   const handleSaveQuickEdit = async () => {
@@ -372,7 +378,10 @@ export default function LibraryPage() {
 
     const prevEpisode = editingWork.current_episode || 0;
     const prevStatus = editingWork.status;
+    const prevDroppedReason = editingWork.dropped_reason || "";
     const sanitizedEpisode = Math.max(0, editEpisode);
+    const nextDroppedReason =
+      editStatus === "DROPPED" ? editDroppedReason.trim() : prevDroppedReason;
 
     setIsSavingEdit(true);
 
@@ -384,6 +393,7 @@ export default function LibraryPage() {
               ...w,
               current_episode: sanitizedEpisode,
               status: editStatus,
+              dropped_reason: nextDroppedReason,
               auto_added: false,
             }
           : w
@@ -398,6 +408,11 @@ export default function LibraryPage() {
       if (editStatus !== prevStatus) {
         promises.push(updateUserWorkStatus(uid, editingWork.work_id, editStatus));
       }
+      if (editStatus === "DROPPED" && nextDroppedReason !== prevDroppedReason) {
+        promises.push(
+          saveUserWork(uid, editingWork.work_id, { dropped_reason: nextDroppedReason })
+        );
+      }
       await Promise.all(promises);
       setEditingWork(null);
     } catch (error) {
@@ -406,7 +421,12 @@ export default function LibraryPage() {
       setAllWorks((prev) =>
         prev.map((w) =>
           w.work_id === editingWork.work_id
-            ? { ...w, current_episode: prevEpisode, status: prevStatus }
+            ? {
+                ...w,
+                current_episode: prevEpisode,
+                status: prevStatus,
+                dropped_reason: prevDroppedReason,
+              }
             : w
         )
       );
@@ -498,6 +518,17 @@ export default function LibraryPage() {
                 : opt.label}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => setOnlyMalOpen((prev) => !prev)}
+            className={`px-3 py-2 rounded-full text-xs font-semibold whitespace-nowrap border transition-colors ${
+              onlyMalOpen
+                ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
+                : "bg-[#1a1d24] border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
+            }`}
+          >
+            AniList/MAL offen
+          </button>
         </div>
       </div>
 
@@ -644,6 +675,12 @@ export default function LibraryPage() {
                       </span>
                     )}
                   </div>
+                  {work.status === "DROPPED" && work.dropped_reason && (
+                    <p className="text-xs text-red-300/90 bg-red-500/10 border border-red-500/20 rounded-lg px-2.5 py-1 line-clamp-2">
+                      <span className="font-semibold text-red-400">Grund:</span>{" "}
+                      {work.dropped_reason}
+                    </p>
+                  )}
                 </div>
 
                 {/* Right: Quick +1 Button & Quick-Edit Pencil */}
@@ -764,6 +801,31 @@ export default function LibraryPage() {
                 ))}
               </div>
             </div>
+
+            {editStatus === "DROPPED" && (
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-semibold text-gray-300">
+                  Grund für Abbruch (optional)
+                </label>
+                <input
+                  type="text"
+                  value={editDroppedReason}
+                  onChange={(e) => setEditDroppedReason(e.target.value)}
+                  placeholder="Grund für Abbruch (optional)"
+                  className="w-full rounded-xl border border-gray-800 bg-[#1a1d24] px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-red-500 focus:outline-none"
+                />
+              </div>
+            )}
+
+            {editStatus === "PAUSED" && (
+              <button
+                type="button"
+                onClick={() => setEditStatus("CURRENT")}
+                className="w-full rounded-xl border border-blue-500/40 bg-blue-500/15 hover:bg-blue-500/25 px-3 py-2 text-xs font-semibold text-blue-300 transition-colors"
+              >
+                Entpausieren (Aktiv setzen)
+              </button>
+            )}
 
             {/* Actions */}
             <div className="flex items-center justify-between gap-3 pt-1">

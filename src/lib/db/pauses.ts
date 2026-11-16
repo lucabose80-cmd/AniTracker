@@ -1,5 +1,5 @@
 import { db } from '@/lib/firebase';
-import { doc, setDoc, getDocs, collection } from 'firebase/firestore';
+import { doc, setDoc, getDocs, collection, deleteDoc } from 'firebase/firestore';
 
 /** Returns the ISO string of this Sunday 23:59:59 (end of current week) */
 function getEndOfWeek(): string {
@@ -21,6 +21,12 @@ export async function pauseWorkThisWeek(workId: string, userId: string): Promise
     paused_until: getEndOfWeek(),
     paused_by: userId,
   });
+}
+
+export async function unpauseWork(workId: string): Promise<void> {
+  if (!db) return;
+  const ref = doc(db, 'work_pauses', workId);
+  await deleteDoc(ref);
 }
 
 export async function getPausedWorkIds(): Promise<Set<string>> {

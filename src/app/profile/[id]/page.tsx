@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useMemo, useState, use } from "react";
 import { getUserProfile } from "@/lib/db/users";
 import { getAllUserWorks } from "@/lib/db/works";
 import { fetchAniListBatch } from "@/lib/anilist";
 import Link from "next/link";
 import { User as UserIcon } from "lucide-react";
 import { ProfileStats } from "@/components/ui/ProfileStats";
+import { useAppStore } from "@/lib/store";
 
 function FavoriteItem({ id, index, workDetails }: { id: string, index: number, workDetails?: any }) {
   return (
@@ -31,12 +32,25 @@ function FavoriteItem({ id, index, workDetails }: { id: string, index: number, w
 export default function PublicProfilePage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
   const userId = resolvedParams.id;
+  const { contentType } = useAppStore();
   
   const [profile, setProfile] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [favItems, setFavItems] = useState<any[]>([]);
   const [aniListDetails, setAniListDetails] = useState<Record<string, any>>({});
   const [allWorks, setAllWorks] = useState<any[]>([]);
+  const [onlyMalOpen, setOnlyMalOpen] = useState(false);
+
+  const ratedWorks = useMemo(() => {
+    return allWorks
+      .filter(
+        (w) =>
+          aniListDetails[w.work_id]?.type === contentType &&
+          (w.evaluation?.overallScore || 0) > 0 &&
+          (!onlyMalOpen || !w.mal_rated)
+      )
+      .sort((a, b) => (b.evaluation?.overallScore || 0) - (a.evaluation?.overallScore || 0));
+  }, [allWorks, aniListDetails, contentType, onlyMalOpen]);
 
   useEffect(() => {
     async function load() {
@@ -113,6 +127,91 @@ export default function PublicProfilePage({ params }: { params: Promise<{ id: st
           ))}
         </div>
       </div>
+
+      <section className="bg-[#1a1d24] border border-gray-800 rounded-xl p-4 shadow-lg">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <h3 className="text-base font-bold text-white">
+            Alle Bewertungen ({contentType}) ({ratedWorks.length})
+          </h3>
+          <button
+            type="button"
+            onClick={() => setOnlyMalOpen((prev) => !prev)}
+            className={`px-3 py-1 rounded-full text-[11px] font-semibold border transition-colors whitespace-nowrap ${
+              onlyMalOpen
+                ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
+                : "bg-[#141a29] border-gray-700 text-gray-400 hover:text-white"
+            }`}
+          >
+            Nur AniList/MAL offen
+          </button>
+        </div>
+
+        {ratedWorks.length === 0 ? (
+          <p className="text-xs text-gray-500 text-center py-6">
+            {onlyMalOpen
+              ? "Alle bewerteten Werke sind bereits auf AniList/MAL markiert."
+              : "Keine bewerteten Werke für diese Kategorie vorhanden."}
+          </p>
+        ) : (
+          <div className="max-h-[420px] overflow-y-auto space-y-2 pr-1">
+            {ratedWorks.map((w) => {
+              const details = aniListDetails[w.work_id];
+              const title =
+                details?.title?.english ||
+                details?.title?.romaji ||
+                `Werk #${w.work_id}`;
+              const cover = details?.coverImage?.large || details?.coverImage?.extraLarge;
+              const score = w.evaluation?.overallScore || 0;
+              const rewatch = w.evaluation?.rewatchPotential || 0;
+
+              return (
+                <div
+                  key={w.work_id}
+                  className="flex items-center gap-3 rounded-xl border border-gray-800 bg-[#141a29] p-2.5 hover:border-gray-700 transition-colors"
+                >
+                  <Link
+                    href={`/work/${w.work_id}`}
+                    className="w-10 h-14 rounded-md overflow-hidden bg-gray-800 shrink-0 block"
+                  >
+                    {cover ? (
+                      <img
+                        src={cover}
+                        alt={title}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : null}
+                  </Link>
+
+                  <div className="flex-1 min-w-0">
+                    <Link
+                      href={`/work/${w.work_id}`}
+                      className="text-sm font-semibold text-white hover:text-blue-400 transition-colors line-clamp-1 block"
+                    >
+                      {title}
+                    </Link>
+                    <div className="flex items-center flex-wrap gap-1.5 mt-1">
+                      {rewatch > 0 && (
+                        <span className="inline-flex items-center rounded-full bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 text-[10px] font-semibold text-purple-300">
+                          Rewatch: {rewatch}/10
+                        </span>
+                      )}
+                      {!w.mal_rated && (
+                        <span className="inline-flex items-center rounded-full bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[10px] font-semibold text-amber-300">
+                          AniList offen
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <span className="text-sm font-bold text-blue-400 shrink-0 tabular-nums">
+                    ★ {score.toFixed(1)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

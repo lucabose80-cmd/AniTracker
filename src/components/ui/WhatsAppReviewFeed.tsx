@@ -243,10 +243,11 @@ export default function WhatsAppReviewFeed({
   // Filtered feed
   const visibleActivities = useMemo(() => {
     return activities.filter((act) => {
-      // Focus on REVIEW_LIST, plus gracefully allow RATING / MANUAL_POST
+      // Support REVIEW_LIST, RATING, TOP9_UPDATE, and MANUAL_POST
       const isSupportedType =
         act.action_type === "REVIEW_LIST" ||
         act.action_type === "RATING" ||
+        act.action_type === "TOP9_UPDATE" ||
         act.action_type === "MANUAL_POST";
       if (!isSupportedType) return false;
 
@@ -255,6 +256,11 @@ export default function WhatsAppReviewFeed({
           const items = act.review_items || [];
           const hasMyWork = items.some((item) => userWorkIdsSet.has(item.work_id));
           if (!hasMyWork) return false;
+        } else if (Array.isArray(act.work_ids) && act.work_ids.length > 0) {
+          const hasMyWork = act.work_ids.some((wid) => userWorkIdsSet.has(wid));
+          if (!hasMyWork && (!act.work_id || !userWorkIdsSet.has(act.work_id))) {
+            return false;
+          }
         } else if (!act.work_id || !userWorkIdsSet.has(act.work_id)) {
           return false;
         }
@@ -268,6 +274,16 @@ export default function WhatsAppReviewFeed({
         } else if (act.work_id) {
           const details = userAniListDetails[act.work_id];
           if (details?.type && details.type !== mediaFilter) return false;
+        } else if (Array.isArray(act.work_ids) && act.work_ids.length > 0) {
+          const knownDetails = act.work_ids
+            .map((wid) => userAniListDetails[wid])
+            .filter(Boolean);
+          if (
+            knownDetails.length > 0 &&
+            !knownDetails.some((d) => d?.type === mediaFilter)
+          ) {
+            return false;
+          }
         }
       }
 
@@ -727,20 +743,101 @@ export default function WhatsAppReviewFeed({
                       </div>
                     )}
 
-                  {/* Legacy RATING / MANUAL_POST fallback */}
+                  {/* RATING / TOP9_UPDATE / MANUAL_POST rendering */}
                   {activity.action_type !== "REVIEW_LIST" && (
-                    <div className="text-xs text-gray-300">
+                    <div className="flex flex-col gap-2 text-xs text-gray-300">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {activity.action_type === "RATING" && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                            ★ Bewertung
+                          </span>
+                        )}
+                        {activity.action_type === "TOP9_UPDATE" && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                            🏆 Top 9 / Bibliothek
+                          </span>
+                        )}
+                      </div>
+
                       {activity.details && (
-                        <p className="text-gray-200">{activity.details}</p>
+                        <p className="text-gray-200 whitespace-pre-wrap break-words leading-relaxed">
+                          {activity.details}
+                        </p>
                       )}
-                      {activity.work_id && (
-                        <Link
-                          href={`/work/${activity.work_id}`}
-                          className="inline-block mt-1 text-emerald-400 hover:underline font-semibold"
-                        >
-                          Werk ansehen →
-                        </Link>
-                      )}
+
+                      {activity.work_id && (() => {
+                        const wDetails = userAniListDetails[activity.work_id];
+                        const wTitle =
+                          wDetails?.title?.english || wDetails?.title?.romaji;
+                        const wCover =
+                          wDetails?.coverImage?.large ||
+                          wDetails?.coverImage?.extraLarge;
+                        return wDetails ? (
+                          <Link
+                            href={`/work/${activity.work_id}`}
+                            className="flex items-center gap-2.5 bg-black/25 border border-white/5 hover:border-emerald-500/30 rounded-xl p-2 transition-colors"
+                          >
+                            {wCover ? (
+                              <img
+                                src={wCover}
+                                alt={wTitle || "Cover"}
+                                className="w-8 h-11 rounded object-cover shrink-0 bg-gray-800"
+                              />
+                            ) : (
+                              <div className="w-8 h-11 rounded bg-gray-800 shrink-0" />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-bold text-white truncate">
+                                {wTitle}
+                              </p>
+                              <span className="text-[11px] text-emerald-400 font-semibold">
+                                Werk ansehen →
+                              </span>
+                            </div>
+                          </Link>
+                        ) : (
+                          <Link
+                            href={`/work/${activity.work_id}`}
+                            className="inline-block mt-0.5 text-emerald-400 hover:underline font-semibold"
+                          >
+                            Werk ansehen →
+                          </Link>
+                        );
+                      })()}
+
+                      {Array.isArray(activity.work_ids) &&
+                        activity.work_ids.length > 0 && (
+                          <div className="grid grid-cols-3 gap-1.5 mt-1">
+                            {activity.work_ids.slice(0, 9).map((wid, idx) => {
+                              const wDetails = userAniListDetails[wid];
+                              const wTitle =
+                                wDetails?.title?.english ||
+                                wDetails?.title?.romaji ||
+                                `Werk #${wid}`;
+                              const wCover =
+                                wDetails?.coverImage?.large ||
+                                wDetails?.coverImage?.extraLarge;
+                              return (
+                                <Link
+                                  key={`${wid}-${idx}`}
+                                  href={`/work/${wid}`}
+                                  className="flex items-center gap-1.5 bg-black/25 border border-white/5 hover:border-emerald-500/30 rounded-lg p-1.5 transition-colors min-w-0"
+                                >
+                                  {wCover && (
+                                    <img
+                                      src={wCover}
+                                      alt={wTitle}
+                                      className="w-6 h-8 rounded object-cover shrink-0 bg-gray-800"
+                                    />
+                                  )}
+                                  <span className="text-[11px] text-gray-200 font-semibold truncate">
+                                    #{idx + 1} {wTitle}
+                                  </span>
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        )}
                     </div>
                   )}
 
@@ -983,6 +1080,11 @@ export default function WhatsAppReviewFeed({
                   placeholder="Kurze Review oder Gedanken zur Folge/Kapitel..."
                   className="w-full bg-[#0b101b] border border-white/10 rounded-xl p-3 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-emerald-500/60 resize-none"
                 />
+                {typeof rating === "number" && !reviewText.trim() && (
+                  <p className="text-[11px] text-amber-300/90 -mt-1">
+                    Tipp: Schreib noch kurz, was du darüber denkst...
+                  </p>
+                )}
 
                 {/* Optional 1-10 Rating */}
                 <div className="flex flex-col gap-1.5">

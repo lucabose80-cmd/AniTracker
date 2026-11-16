@@ -107,6 +107,7 @@ export function WorkSocialFeed({ workId, work }: { workId: string; work: any }) 
 
   const handleQuickSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setFormError("");
 
     if (!currentUserUid) {
@@ -241,10 +242,19 @@ export function WorkSocialFeed({ workId, work }: { workId: string; work: any }) 
               rows={2}
               value={textInput}
               onChange={(e) => setTextInput(e.target.value)}
-              placeholder={`Wie fandest du ${unitLabel} ${epInput || "1"}?`}
+              placeholder={
+                ratingInput !== ""
+                  ? "Schreib kurz, was du darüber denkst..."
+                  : `Wie fandest du ${unitLabel} ${epInput || "1"}?`
+              }
               className="w-full rounded-lg border border-gray-700 bg-[#0f1115] px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none resize-y"
               required
             />
+            {ratingInput !== "" && !textInput.trim() && (
+              <p className="text-[11px] text-amber-300/90 mt-1">
+                Schreib kurz, was du darüber denkst...
+              </p>
+            )}
           </div>
 
           {formError && <p className="text-xs font-semibold text-red-400">{formError}</p>}

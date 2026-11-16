@@ -10,8 +10,8 @@ service cloud.firestore {
     // Document ID: {userId} (matches Firebase Auth UID)
     // Fields:
     //   - uid: string (required on create, matches auth.uid, immutable)
-    //   - username: string (required on create, 1-100 chars)
-    //   - avatar_url: string (optional, 0-1000 chars)
+    //   - username: string (required on create, 0-100 chars)
+    //   - avatar_url: string (optional, 0-5000 chars)
     //   - email: string (optional, 0-254 chars)
     //   - following_array: list of strings (optional, max 5000 items)
     //   - top_9_list: list of strings (optional, legacy, max 50 items)
@@ -39,13 +39,14 @@ service cloud.firestore {
     //   - sync_offset_days: number (optional)
     //   - synchro_offset_episodes: number (optional)
     //   - manual_available_eps: number or null (optional)
-    //   - selected_platform: string (optional, max 100 chars)
+    //   - selected_platform: string or null (optional, max 100 chars)
     //   - manual_max_episode: number or null (optional)
     //   - auto_added: bool (optional)
     //   - top9_rank: number (optional, 1-100)
     //   - added_status: string (optional, max 50 chars)
     //   - adaptationScores: map (optional)
-    //   - mal_rated: bool (optional)
+    //   - mal_rated: bool or null (optional)
+    //   - dropped_reason: string or null (optional, max 1000 chars)
     //   - classification: map (optional)
     //   - evaluation: map (optional)
     //
@@ -157,8 +158,8 @@ service cloud.firestore {
 
     function isValidUser(data) {
       return (!('uid' in data) || (data.uid is string && data.uid.size() <= 128)) &&
-             (!('username' in data) || (data.username is string && data.username.size() >= 1 && data.username.size() <= 100)) &&
-             (!('avatar_url' in data) || (data.avatar_url is string && data.avatar_url.size() <= 1000)) &&
+             (!('username' in data) || (data.username is string && data.username.size() <= 100)) &&
+             (!('avatar_url' in data) || (data.avatar_url is string && data.avatar_url.size() <= 5000)) &&
              (!('email' in data) || (data.email is string && data.email.size() <= 254)) &&
              (!('following_array' in data) || isValidList(data.following_array, 5000)) &&
              (!('top_9_list' in data) || isValidList(data.top_9_list, 50)) &&
@@ -185,13 +186,14 @@ service cloud.firestore {
              (!('sync_offset_days' in data) || data.sync_offset_days is number) &&
              (!('synchro_offset_episodes' in data) || data.synchro_offset_episodes is number) &&
              (!('manual_available_eps' in data) || data.manual_available_eps == null || (data.manual_available_eps is number && data.manual_available_eps >= 0)) &&
-             (!('selected_platform' in data) || (data.selected_platform is string && data.selected_platform.size() <= 100)) &&
+             (!('selected_platform' in data) || data.selected_platform == null || (data.selected_platform is string && data.selected_platform.size() <= 100)) &&
              (!('manual_max_episode' in data) || data.manual_max_episode == null || (data.manual_max_episode is number && data.manual_max_episode >= 0)) &&
              (!('auto_added' in data) || data.auto_added is bool) &&
              (!('top9_rank' in data) || (data.top9_rank is number && data.top9_rank >= 1 && data.top9_rank <= 100)) &&
              (!('added_status' in data) || (data.added_status is string && data.added_status.size() <= 50)) &&
              (!('adaptationScores' in data) || data.adaptationScores is map) &&
-             (!('mal_rated' in data) || data.mal_rated is bool) &&
+             (!('mal_rated' in data) || data.mal_rated == null || data.mal_rated is bool) &&
+             (!('dropped_reason' in data) || data.dropped_reason == null || (data.dropped_reason is string && data.dropped_reason.size() <= 1000)) &&
              (!('classification' in data) || data.classification is map) &&
              (!('evaluation' in data) || data.evaluation is map);
     }
@@ -297,7 +299,7 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated();
       allow create: if isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.uid == userId;
-      allow update: if isOwner(userId) && isValidUser(request.resource.data) && (!('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && (!('uid' in resource.data) || !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid);
       allow delete: if false;
 
       match /works/{workId} {
