@@ -2,20 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Calendar, Users, Library, User } from "lucide-react";
+import { Home, Calendar, Library, Search, User } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 
 const navItems = [
   { name: "Home", href: "/", icon: Home },
-  { name: "Social", href: "/feed", icon: Users },
   { name: "Kalender", href: "/calendar", icon: Calendar },
   { name: "Bibliothek", href: "/library", icon: Library },
+  { name: "Suche", href: "/search", icon: Search },
   { name: "Profil", href: "/profile", icon: User },
 ];
 
 export function BottomNav() {
   const pathname = usePathname();
-  const unreadCount = useAppStore(state => state.unreadNotifications);
 
   return (
     <nav className="fixed bottom-0 left-0 z-50 w-full border-t border-gray-800 bg-[#0f1115]/95 pb-safe pt-2 backdrop-blur-md px-2">
@@ -37,11 +36,6 @@ export function BottomNav() {
             >
               <div className="relative">
                 <Icon size={24} strokeWidth={isActive ? 2.5 : 2} />
-                {item.name === "Social" && unreadCount > 0 && (
-                  <span className="absolute -top-1 -right-2 bg-red-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
-                    {unreadCount > 9 ? '9+' : unreadCount}
-                  </span>
-                )}
               </div>
               <span className="text-[10px] font-medium">{item.name}</span>
             </Link>

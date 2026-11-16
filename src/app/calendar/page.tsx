@@ -3,11 +3,11 @@
 
 import { useEffect, useState } from "react";
 import { auth } from "@/lib/firebase";
-import { getAllUserWorks } from "@/lib/db/works";
+import { getAllUserWorks, updateEpisodeProgress } from "@/lib/db/works";
 import { fetchAniListBatch } from "@/lib/anilist";
 import { getCalendarOverrides, setCalendarOverride } from "@/lib/db/calendar";
 import { useAppStore } from "@/lib/store";
-import { Calendar as CalendarIcon, Clock, Tv, Edit2, Check, X, ChevronDown } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, Tv, Edit2, Check, X, ChevronDown, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { format, formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
@@ -57,6 +57,7 @@ export default function CalendarPage() {
   const [isUnscheduledOpen, setIsUnscheduledOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDateString, setEditDateString] = useState("");
+  const [updatingIds, setUpdatingIds] = useState<Record<string, boolean>>({});
 
   const loadData = async () => {
     const user = auth.currentUser;
@@ -261,8 +262,52 @@ export default function CalendarPage() {
     loadData();
   };
 
+  const handleQuickIncrement = async (
+    e: React.MouseEvent,
+    strId: string,
+    currentEp: number
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const user = auth.currentUser;
+    if (!user || updatingIds[strId]) return;
+
+    const nextEp = currentEp + 1;
+
+    // Optimistic UI update
+    setUserWorkMap((prev) => ({
+      ...prev,
+      [strId]: {
+        ...(prev[strId] || { work_id: strId, user_id: user.uid, status: "CURRENT" }),
+        current_episode: nextEp,
+      },
+    }));
+    setUpdatingIds((prev) => ({ ...prev, [strId]: true }));
+
+    try {
+      await updateEpisodeProgress(user.uid, strId, nextEp);
+    } catch (err) {
+      console.error("Fehler beim Aktualisieren des Fortschritts:", err);
+      setUserWorkMap((prev) => ({
+        ...prev,
+        [strId]: {
+          ...(prev[strId] || {}),
+          current_episode: currentEp,
+        },
+      }));
+    } finally {
+      setUpdatingIds((prev) => ({ ...prev, [strId]: false }));
+    }
+  };
+
   const scheduledForCurrentType = contentType === "ANIME" ? scheduledAnime : scheduledManga;
   const unscheduledForCurrentType = contentType === "ANIME" ? unscheduledAnime : unscheduledManga;
+
+  const todayDay = new Date().getDay();
+  const todayReleases = scheduledForCurrentType.filter((item) => {
+    const date = new Date(item.nextAiringEpisode.airingAt * 1000);
+    return date.getDay() === todayDay;
+  });
 
   return (
     <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-lg mx-auto">
@@ -308,6 +353,65 @@ export default function CalendarPage() {
         </div>
       ) : (
         <>
+          {/* Heute Summary Banner */}
+          {!isLoading && todayReleases.length > 0 && (
+            <div className="bg-gradient-to-r from-blue-950/70 via-blue-900/30 to-indigo-950/50 border border-blue-700/50 rounded-xl p-4 shadow-lg">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={16} className="text-blue-400" />
+                  <h3 className="text-sm font-bold text-white">
+                    Heute ({todayReleases.length}{" "}
+                    {todayReleases.length === 1 ? "Release" : "Releases"})
+                  </h3>
+                </div>
+                <span className="text-[11px] font-semibold text-blue-300 bg-blue-500/20 px-2 py-0.5 rounded-full border border-blue-500/30">
+                  {DAYS.find((d) => d.value === todayDay)?.label}
+                </span>
+              </div>
+              <div className="flex flex-col gap-2">
+                {todayReleases.map((item) => {
+                  const date = new Date(item.nextAiringEpisode.airingAt * 1000);
+                  const strId = item.id.toString();
+                  const uWork = userWorkMap[strId];
+                  const offset = uWork?.synchro_offset_episodes || 0;
+                  let displayEp = item.nextAiringEpisode.episode;
+                  if (!item.isManualEpisode && offset > 0) {
+                    displayEp -= offset;
+                  }
+                  if (displayEp < 1) displayEp = item.nextAiringEpisode.episode;
+
+                  let timeLabel = `${format(date, "HH:mm")} Uhr`;
+                  if (item.rhythmType === "flexible" && item.flexibleDayRange) {
+                    const minL = DAYS.find((d) => d.value === item.flexibleDayRange.minDay)?.label;
+                    const maxL = DAYS.find((d) => d.value === item.flexibleDayRange.maxDay)?.label;
+                    timeLabel = `${minL} - ${maxL}`;
+                  }
+
+                  return (
+                    <Link
+                      key={`today-${strId}`}
+                      href={`/work/${strId}`}
+                      className="flex items-center justify-between gap-3 bg-[#0f1115]/70 hover:bg-[#0f1115] border border-blue-900/40 hover:border-blue-500/60 rounded-lg px-3 py-2 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xs font-semibold text-gray-100 truncate">
+                          {item.title.english || item.title.romaji}
+                        </span>
+                        <span className="text-[11px] text-blue-400 font-medium shrink-0">
+                          {item.type === "MANGA" ? "Kap." : "Ep."} {displayEp}
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-bold text-gray-300 bg-gray-800/80 px-2 py-0.5 rounded shrink-0 flex items-center gap-1">
+                        <Clock size={10} className="text-blue-400" />
+                        {timeLabel}
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Schedule List */}
           <div className="flex flex-col gap-8">
             {isLoading ? (
@@ -497,8 +601,8 @@ export default function CalendarPage() {
                                   </button>
                                 </div>
                               ) : (
-                                <div className="flex justify-between items-end mt-3">
-                                  <div className="flex items-center gap-3">
+                                <div className="flex flex-wrap justify-between items-center gap-2 mt-3">
+                                  <div className="flex items-center gap-2">
                                     <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-gray-900 border border-gray-800">
                                       <Clock size={12} className="text-gray-400" />
                                       <span className="text-xs font-bold text-gray-300">
@@ -511,13 +615,27 @@ export default function CalendarPage() {
                                     </span>
                                   </div>
 
-                                  <button
-                                    onClick={(e) => handleEditClick(item, e)}
-                                    className="text-gray-500 hover:text-white transition p-1"
-                                    title="Zeit korrigieren"
-                                  >
-                                    <Edit2 size={14} />
-                                  </button>
+                                  <div className="flex items-center gap-1.5 ml-auto">
+                                    {(behindCount > 0 || isToday || date.getTime() <= Date.now()) && (
+                                      <button
+                                        type="button"
+                                        disabled={!!updatingIds[strId]}
+                                        onClick={(e) => handleQuickIncrement(e, strId, currentEp)}
+                                        className="px-2.5 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600/35 border border-blue-500/40 text-blue-300 hover:text-white text-xs font-bold transition-colors disabled:opacity-50"
+                                        title={`${item.type === "MANGA" ? "Kapitel" : "Episode"} ${currentEp + 1} als gesehen markieren`}
+                                      >
+                                        + {item.type === "MANGA" ? "Kap" : "Ep"} {currentEp + 1}
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => handleEditClick(item, e)}
+                                      className="text-gray-500 hover:text-white transition p-1"
+                                      title="Zeit korrigieren"
+                                    >
+                                      <Edit2 size={14} />
+                                    </button>
+                                  </div>
                                 </div>
                               )}
                             </div>

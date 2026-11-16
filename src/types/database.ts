@@ -112,10 +112,20 @@ export interface Comment {
   downvotes: string[];
 }
 
+export interface ReviewListItem {
+  work_id: string;
+  work_title: string;
+  work_cover?: string;
+  media_type: "ANIME" | "MANGA";
+  episode_num: number;
+  text: string;
+  rating?: number; // 1-10
+}
+
 export interface ActivityFeed {
   activity_id: string;
   user_id: string;
-  action_type: "MANUAL_POST" | "RATING" | "COMMENT" | "TOP9_UPDATE" | "RECOMMENDATION" | "EPISODE_THREAD" | "WEEKLY_RANKING";
+  action_type: "MANUAL_POST" | "RATING" | "COMMENT" | "TOP9_UPDATE" | "RECOMMENDATION" | "EPISODE_THREAD" | "WEEKLY_RANKING" | "REVIEW_LIST";
   work_id?: string;
   episode_num?: number;
   text?: string;
@@ -123,6 +133,22 @@ export interface ActivityFeed {
   details?: string;
   comments_count?: number; // Optional cache for number of comments
   likes?: string[]; // Array of user IDs who liked this
+  review_items?: ReviewListItem[];
+  work_ids?: string[];
+  reactions?: Record<string, string[]>; // emoji -> array of user UIDs
+}
+
+export interface EpisodeFeedback {
+  feedback_id: string;
+  user_id: string;
+  work_id: string;
+  episode_num: number;
+  media_type: "ANIME" | "MANGA";
+  text: string;
+  rating?: number; // 1-10
+  activity_id?: string;
+  timestamp: string;
+  reactions?: Record<string, string[]>;
 }
 
 export interface ActivityComment {

@@ -1,682 +1,368 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useAppStore } from "@/lib/store";
-import { fetchAniList, GET_TRENDING_WORKS, GET_UPCOMING_WORKS, GET_RECOMMENDATIONS_BY_GENRE, fetchAniListBatch } from "@/lib/anilist";
-import { Star, Flame, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { Calendar, ChevronRight, Plus, Check } from "lucide-react";
+import { format, isToday, isTomorrow } from "date-fns";
+import { de } from "date-fns/locale";
 import { auth } from "@/lib/firebase";
-import { getAllUserWorks } from "@/lib/db/works";
-import { getAllUserProfiles } from "@/lib/db/users";
+import { fetchAniListBatch } from "@/lib/anilist";
+import { getAllUserWorks, updateEpisodeProgress } from "@/lib/db/works";
+import { CalendarOverride, getCalendarOverrides } from "@/lib/db/calendar";
 import { UserWork } from "@/types/database";
-import { pauseWorkThisWeek, getPausedWorkIds } from "@/lib/db/pauses";
+import { useAppStore } from "@/lib/store";
+import WhatsAppReviewFeed from "@/components/ui/WhatsAppReviewFeed";
 
-const GENRES = ["Action", "Adventure", "Comedy", "Drama", "Fantasy", "Horror", "Mystery", "Psychological", "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller"];
+interface CalendarStripItem {
+  work_id: string;
+  title: string;
+  cover?: string;
+  media_type: "ANIME" | "MANGA";
+  airingAt: number;
+  airingLabel: string;
+  airingEpisode?: number;
+  nextUserEpisode: number;
+}
+
+function computeNextAiringAt(
+  media: any,
+  over?: CalendarOverride
+): number | undefined {
+  if (over?.airingAt) {
+    return over.airingAt;
+  }
+
+  if (over?.weeklyDay !== undefined && over?.weeklyTime !== undefined) {
+    const [hours, minutes] = over.weeklyTime.split(":").map(Number);
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return undefined;
+
+    const now = new Date();
+    const date = new Date();
+    date.setHours(hours, minutes, 0, 0);
+    const currentDay = date.getDay();
+
+    let diff = over.weeklyDay - currentDay;
+    if (diff < 0) diff += 7;
+    if (diff === 0 && date.getTime() < now.getTime()) {
+      diff += 7;
+    }
+
+    date.setDate(date.getDate() + diff);
+    let computedAiringAt = Math.floor(date.getTime() / 1000);
+
+    const freqWeeks = over.releaseFrequency || 1;
+    const anchor = over.startDate
+      ? new Date(over.startDate).getTime() / 1000
+      : over.lastIncrementedAt || 0;
+
+    if (anchor > 0 && freqWeeks > 1) {
+      const startD = new Date(anchor * 1000);
+      const diffStart = startD.getDay() === 0 ? 6 : startD.getDay() - 1;
+      startD.setDate(startD.getDate() - diffStart);
+      startD.setHours(0, 0, 0, 0);
+
+      const compD = new Date(computedAiringAt * 1000);
+      const diffComp = compD.getDay() === 0 ? 6 : compD.getDay() - 1;
+      compD.setDate(compD.getDate() - diffComp);
+      compD.setHours(0, 0, 0, 0);
+
+      const diffWeeks = Math.round(
+        (compD.getTime() - startD.getTime()) / (7 * 24 * 3600 * 1000)
+      );
+      let weeksToAdd = 0;
+      if (diffWeeks < 0) {
+        weeksToAdd = Math.abs(diffWeeks);
+      } else {
+        const remainder = diffWeeks % freqWeeks;
+        if (remainder !== 0) {
+          weeksToAdd = freqWeeks - remainder;
+        }
+      }
+      computedAiringAt += weeksToAdd * 7 * 24 * 3600;
+    }
+
+    return computedAiringAt;
+  }
+
+  if (media?.nextAiringEpisode?.airingAt) {
+    return media.nextAiringEpisode.airingAt;
+  }
+
+  return undefined;
+}
+
+function formatAiringLabel(airingAtSec: number): string {
+  const date = new Date(airingAtSec * 1000);
+  const timeStr = format(date, "HH:mm");
+  if (isToday(date)) return `Heute ${timeStr}`;
+  if (isTomorrow(date)) return `Morgen ${timeStr}`;
+  return format(date, "EEE HH:mm", { locale: de });
+}
 
 export default function Home() {
-  const { contentType, homeTab: activeHomeTab, setHomeTab: setActiveHomeTab, trendingGenre, setTrendingGenre } = useAppStore();
-  const router = useRouter();
-  
-  // Trending & Upcoming State
-  const [trendingWorks, setTrendingWorks] = useState<any[]>([]);
-  const [upcomingWorks, setUpcomingWorks] = useState<any[]>([]);
-  const [isLoadingTrending, setIsLoadingTrending] = useState(true);
-  
-  // User State
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [isFetchingUserWorks, setIsFetchingUserWorks] = useState(false);
-  const [userWorks, setUserWorks] = useState<UserWork[]>([]);
-  const [userAniListDetails, setUserAniListDetails] = useState<Record<string, any>>({});
-  const [calendarOverrides, setCalendarOverrides] = useState<Record<string, any>>({});
-  
-  // Recommendations State
-  const [selectedGenre, setSelectedGenre] = useState<string>("Action");
-  const [recommendedWorks, setRecommendedWorks] = useState<any[]>([]);
-  const [isLoadingRecs, setIsLoadingRecs] = useState(false);
+  const isOnline = useAppStore((s) => s.isOnline);
 
-  // Global Community Ranking State
-  const [communityRanking, setCommunityRanking] = useState<any[]>([]);
-  const [isLoadingCommunity, setIsLoadingCommunity] = useState(true);
-
-  // Home Screen Tab State
+  const [currentUserUid, setCurrentUserUid] = useState<string | undefined>(
+    undefined
+  );
   const [authLoaded, setAuthLoaded] = useState(false);
-  const [pausedWorkIds, setPausedWorkIds] = useState<Set<string>>(new Set());
+  const [userWorks, setUserWorks] = useState<UserWork[]>([]);
+  const [userAniListDetails, setUserAniListDetails] = useState<
+    Record<string, any>
+  >({});
+  const [calendarOverrides, setCalendarOverrides] = useState<
+    Record<string, CalendarOverride>
+  >({});
+  const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
+  const [justIncrementedIds, setJustIncrementedIds] = useState<Set<string>>(
+    new Set()
+  );
 
-  const setTab = (tab: "UPNEXT" | "COMMUNITY" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS") => {
-    setActiveHomeTab(tab);
-  };
-
-  useEffect(() => {
-    if (authLoaded && !isLoggedIn && activeHomeTab === "UPNEXT") {
-      setTab("COMMUNITY");
-    }
-  }, [authLoaded, isLoggedIn]);
-
-  function getCurrentSeason() {
-    const month = new Date().getMonth();
-    if (month >= 2 && month <= 4) return "SPRING";
-    if (month >= 5 && month <= 7) return "SUMMER";
-    if (month >= 8 && month <= 10) return "FALL";
-    return "WINTER";
-  }
-
-  function getNextSeason() {
-    const current = getCurrentSeason();
-    if (current === "WINTER") return { season: "SPRING", year: new Date().getFullYear() };
-    if (current === "SPRING") return { season: "SUMMER", year: new Date().getFullYear() };
-    if (current === "SUMMER") return { season: "FALL", year: new Date().getFullYear() };
-    return { season: "WINTER", year: new Date().getFullYear() + 1 };
-  }
-
-  useEffect(() => {
-    async function loadCommunityRanking() {
-      setIsLoadingCommunity(true);
-      try {
-        const profiles = await getAllUserProfiles();
-        const scoreMap: Record<string, number> = {};
-
-        profiles.forEach(profile => {
-          const ranking = contentType === "ANIME" ? profile.weekly_ranking_anime?.current : profile.weekly_ranking_manga?.current;
-          if (ranking && Array.isArray(ranking)) {
-            ranking.forEach((workId, index) => {
-              if (workId && !workId.startsWith("empty")) {
-                const points = 9 - index; // Rank 1 = 9 pts, Rank 9 = 1 pt
-                scoreMap[workId] = (scoreMap[workId] || 0) + points;
-              }
-            });
-          }
-        });
-
-        // Sort by points descending and take top 9
-        const topIds = Object.entries(scoreMap)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 9)
-          .map(([id]) => parseInt(id, 10));
-
-        if (topIds.length > 0) {
-          const mediaList = await fetchAniListBatch(topIds);
-          // Sort mediaList back to the order of topIds
-          const sortedMediaList = topIds.map(id => mediaList.find((m: any) => m.id === id)).filter(Boolean);
-          // Attach points for display
-          const finalRanking = sortedMediaList.map(m => ({ ...m, communityPoints: scoreMap[m.id.toString()] }));
-          setCommunityRanking(finalRanking);
-        } else {
-          setCommunityRanking([]);
-        }
-      } catch (err) {
-        console.error("Failed to load community ranking", err);
-      } finally {
-        setIsLoadingCommunity(false);
-      }
-    }
-
-    loadCommunityRanking();
-  }, [contentType]);
-
-  useEffect(() => {
-    async function loadTrending() {
-      setIsLoadingTrending(true);
-      try {
-        const typeArg = contentType === "ANIME" ? "ANIME" : "MANGA";
-        const seasonArgs = contentType === "ANIME" ? { season: getCurrentSeason(), seasonYear: new Date().getFullYear() } : {};
-        const nextSeasonArgs = contentType === "ANIME" ? { season: getNextSeason().season, seasonYear: getNextSeason().year } : {};
-        const genreArg = trendingGenre !== "All" ? { genre_in: [trendingGenre] } : {};
-        
-        const [trendingData, upcomingData] = await Promise.all([
-          fetchAniList(GET_TRENDING_WORKS, { type: typeArg, page: 1, perPage: 30, ...seasonArgs, ...genreArg }),
-          fetchAniList(GET_UPCOMING_WORKS, { type: typeArg, page: 1, perPage: 30, ...nextSeasonArgs })
-        ]);
-
-        setTrendingWorks(trendingData.Page.media);
-        setUpcomingWorks(upcomingData.Page.media);
-      } catch (error) {
-        console.error("Failed to load trending", error);
-      } finally {
-        setIsLoadingTrending(false);
-      }
-    }
-    loadTrending();
-  }, [contentType, trendingGenre]);
-
-  // 2. Load User Profile & Favorite Genres
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       setAuthLoaded(true);
-      if (user) {
-        setIsLoggedIn(true);
-        const works = await getAllUserWorks(user.uid);
+      if (!user) {
+        setCurrentUserUid(undefined);
+        setUserWorks([]);
+        setUserAniListDetails({});
+        setCalendarOverrides({});
+        return;
+      }
+
+      setCurrentUserUid(user.uid);
+      setIsLoadingCalendar(true);
+      try {
+        const [works, overrides] = await Promise.all([
+          getAllUserWorks(user.uid),
+          getCalendarOverrides(),
+        ]);
         setUserWorks(works);
-
-        // Load globally paused works
-        getPausedWorkIds().then(setPausedWorkIds).catch(console.error);
-
-        const { getCalendarOverrides } = await import("@/lib/db/calendar");
-        const overrides = await getCalendarOverrides();
         setCalendarOverrides(overrides);
 
-        // Fetch AniList Details for ALL User Works to support Up Next & Top Genres
-        const idsToFetch = works.map(w => parseInt(w.work_id, 10));
-        
+        const idsToFetch = works
+          .map((w) => parseInt(w.work_id, 10))
+          .filter((id) => !Number.isNaN(id) && id > 0);
+
         if (idsToFetch.length > 0) {
-          setIsFetchingUserWorks(true);
-          
-          try {
-            const mediaList = await fetchAniListBatch(idsToFetch);
-            const map: Record<string, any> = { ...userAniListDetails };
-            const genreCounts: Record<string, number> = {};
-            
-            mediaList.forEach((m: any) => {
-              map[m.id.toString()] = m;
-              if (m.genres) {
-                m.genres.forEach((g: string) => {
-                  genreCounts[g] = (genreCounts[g] || 0) + 1;
-                });
-              }
-            });
-            setUserAniListDetails(map);
-            
-            // Check for newly released wishlist items
-            works.forEach(async (uWork) => {
-              if (uWork.status === "PLANNING") {
-                const aniListInfo = map[uWork.work_id];
-                if (aniListInfo && (aniListInfo.status === "RELEASING" || aniListInfo.status === "FINISHED")) {
-                  try {
-                    const { saveUserWork } = await import("@/lib/db/works");
-                    await saveUserWork(user.uid, uWork.work_id, { status: "CURRENT" });
-                    
-                    if (useAppStore.getState().isOnline) {
-                      const { createActivity } = await import("@/lib/db/feed");
-                      const title = aniListInfo.title?.english || aniListInfo.title?.romaji || "Ein Werk";
-                      await createActivity(user.uid, "TOP9_UPDATE", uWork.work_id, `${title} aus der Wunschliste ist jetzt verfügbar und wurde zu 'Aktiv' verschoben!`);
-                    }
-                    
-                    if ("Notification" in window && Notification.permission === "granted") {
-                      new Notification(`Wunschliste Update!`, { body: `${aniListInfo.title?.romaji || 'Ein Werk'} ist jetzt verfügbar!` });
-                    }
-                  } catch (e) {
-                    console.error("Failed to auto-update released wishlist item", e);
-                  }
-                }
-              }
-            });
-
-            // Find Top Genre
-            let topGenre = "Action";
-            let maxCount = 0;
-            Object.entries(genreCounts).forEach(([g, count]) => {
-              if (count > maxCount && GENRES.includes(g)) {
-                topGenre = g;
-                maxCount = count;
-              }
-            });
-            setSelectedGenre(topGenre);
-
-            // Run weekly maintenance logic
-            const { getUserProfile, performWeeklyMaintenance } = await import("@/lib/db/users");
-            const profile = await getUserProfile(user.uid);
-            if (profile) {
-              const needsUpdate = await performWeeklyMaintenance(user.uid, profile, works, map);
-              if (needsUpdate) {
-                const updatedWorks = await getAllUserWorks(user.uid);
-                setUserWorks(updatedWorks);
-              }
-            }
-          } catch(e) {
-            console.error("Failed to load user works batch", e);
-            // We can still try to derive genre from cache
-            let topGenre = "Action";
-            let maxCount = 0;
-            const genreCounts: Record<string, number> = {};
-            Object.values(userAniListDetails).forEach((m: any) => {
-              if (m.genres) {
-                m.genres.forEach((g: string) => {
-                  genreCounts[g] = (genreCounts[g] || 0) + 1;
-                  if (genreCounts[g] > maxCount && GENRES.includes(g)) {
-                    topGenre = g;
-                    maxCount = genreCounts[g];
-                  }
-                });
-              }
-            });
-            setSelectedGenre(topGenre);
-          } finally {
-            setIsFetchingUserWorks(false);
-          }
-        } else {
-          setIsFetchingUserWorks(false);
+          const mediaList = await fetchAniListBatch(idsToFetch);
+          const map: Record<string, any> = {};
+          mediaList.forEach((m: any) => {
+            map[m.id.toString()] = m;
+          });
+          setUserAniListDetails(map);
         }
-      } else {
-        setIsLoggedIn(false);
-        setUserWorks([]);
+      } catch (err) {
+        console.error("Failed to load home user data:", err);
+      } finally {
+        setIsLoadingCalendar(false);
       }
     });
+
     return () => unsubscribe();
   }, []);
 
-  const handleCheckIn = async (workId: string, nextEp: number, workType: string) => {
-    if (!auth.currentUser) return;
-    if (!useAppStore.getState().isOnline) {
-      alert("Keine Internetverbindung. Check-In nicht möglich.");
+  const upcomingCalendarItems = useMemo<CalendarStripItem[]>(() => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const maxWindowSec = nowSec + 7 * 24 * 3600;
+
+    return userWorks
+      .filter((w) => w.status === "CURRENT")
+      .map((w) => {
+        const media = userAniListDetails[w.work_id];
+        if (!media) return null;
+
+        const over = calendarOverrides[w.work_id];
+        const airingAt = computeNextAiringAt(media, over);
+        if (!airingAt || airingAt > maxWindowSec) return null;
+
+        const mediaType: "ANIME" | "MANGA" =
+          media.type === "MANGA" ? "MANGA" : "ANIME";
+        const currentEp = Number(w.current_episode) || 0;
+
+        return {
+          work_id: w.work_id,
+          title:
+            media.title?.english ||
+            media.title?.romaji ||
+            `Werk #${w.work_id}`,
+          cover: media.coverImage?.large || media.coverImage?.extraLarge,
+          media_type: mediaType,
+          airingAt,
+          airingLabel: formatAiringLabel(airingAt),
+          airingEpisode: media.nextAiringEpisode?.episode,
+          nextUserEpisode: currentEp + 1,
+        } as CalendarStripItem;
+      })
+      .filter((item): item is CalendarStripItem => item !== null)
+      .sort((a, b) => a.airingAt - b.airingAt);
+  }, [userWorks, userAniListDetails, calendarOverrides]);
+
+  const handleQuickIncrement = async (workId: string, nextEp: number) => {
+    if (!currentUserUid) return;
+    if (!isOnline) {
+      alert("Keine Internetverbindung. Fortschritt konnte nicht gespeichert werden.");
       return;
     }
-    
+
+    // Optimistic update
+    setUserWorks((prev) =>
+      prev.map((w) =>
+        w.work_id === workId ? { ...w, current_episode: nextEp } : w
+      )
+    );
+    setJustIncrementedIds((prev) => new Set(prev).add(workId));
+    setTimeout(() => {
+      setJustIncrementedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(workId);
+        return next;
+      });
+    }, 1500);
+
     try {
-      const { saveUserWork } = await import("@/lib/db/works");
-      await saveUserWork(auth.currentUser.uid, workId, { current_episode: nextEp });
-      
-      const { createActivity, getGlobalFeed } = await import("@/lib/db/feed");
-      const { doc, updateDoc } = await import("firebase/firestore");
-      const { db } = await import("@/lib/firebase");
-      
-      // Check if thread exists
-      const recent = await getGlobalFeed(200);
-      let targetActivityId = "";
-      const existing = recent.find(a => a.action_type === "EPISODE_THREAD" && a.work_id === workId && a.episode_num === nextEp);
-      if (!existing) {
-        const text = workType === "MANGA" ? `Thread für Kapitel ${nextEp}` : `Thread für Folge ${nextEp}`;
-        const created = await createActivity(auth.currentUser.uid, "EPISODE_THREAD", workId, text, undefined, nextEp);
-        if (created) targetActivityId = created.activity_id;
-      } else {
-        targetActivityId = existing.activity_id;
-      }
-
-      router.push(targetActivityId ? `/feed?activity_id=${targetActivityId}` : `/feed`);
-    } catch(e) {
-      console.error(e);
-      alert("Fehler beim Check-in");
+      await updateEpisodeProgress(currentUserUid, workId, nextEp);
+    } catch (err) {
+      console.error("Failed to quick-increment episode:", err);
     }
   };
 
-  const handlePauseWork = async (workId: string) => {
-    const user = auth.currentUser;
-    if (!user) return;
-    await pauseWorkThisWeek(workId, user.uid);
-    setPausedWorkIds(prev => new Set([...prev, workId]));
+  const handleProgressUpdatedFromFeed = (workId: string, newEp: number) => {
+    setUserWorks((prev) =>
+      prev.map((w) =>
+        w.work_id === workId ? { ...w, current_episode: newEp } : w
+      )
+    );
   };
-
-  // 3. Load Recommendations when Genre changes
-  useEffect(() => {
-    async function loadRecs() {
-      setIsLoadingRecs(true);
-      try {
-        const typeArg = contentType === "ANIME" ? "ANIME" : "MANGA";
-        const excludeIds = userWorks.map(w => parseInt(w.work_id, 10));
-        
-        const data = await fetchAniList(GET_RECOMMENDATIONS_BY_GENRE, {
-          genre: selectedGenre,
-          type: typeArg,
-          excludeIds: excludeIds.length > 0 ? excludeIds : null
-        });
-        
-        setRecommendedWorks(data.Page.media);
-      } catch (err) {
-        console.error("Failed to load recs", err);
-      } finally {
-        setIsLoadingRecs(false);
-      }
-    }
-    
-    loadRecs();
-  }, [selectedGenre, contentType, userWorks.length]); // Depend on userWorks.length to avoid deep equality loop
-
-  // Calculate User's Top 5 in Selected Genre
-  const myTopInGenre = userWorks
-    .map(w => ({ ...w, details: userAniListDetails[w.work_id] }))
-    .filter(w => w.details?.genres?.includes(selectedGenre))
-    .sort((a, b) => (b.evaluation?.overallScore || 0) - (a.evaluation?.overallScore || 0))
-    .slice(0, 5);
-
-  // Calculate Up Next (Rückstand)
-  const upNextWorks = userWorks
-    .map(w => {
-      const details = userAniListDetails[w.work_id];
-      if (!details || details.type !== contentType) return null;
-      if (w.status === "COMPLETED") return null;
-              let maxAiredEp = 0;
-        let totalEps = 9999;
-        if (w.manual_max_episode !== undefined && w.manual_max_episode !== null) {
-          totalEps = Number(w.manual_max_episode);
-        }
-        
-        const globalManual = calendarOverrides[w.work_id]?.manualAvailableEps;
-        if (globalManual !== undefined && globalManual !== null) {
-          maxAiredEp = globalManual;
-        } else if ((w as any).manual_available_eps !== undefined && (w as any).manual_available_eps !== null) {
-          maxAiredEp = Number((w as any).manual_available_eps);
-        } else if (details.type === "MANGA") {
-          maxAiredEp = totalEps !== 9999 ? totalEps : (details.chapters || 0);
-        } else {
-          if (details.status === "RELEASING" && details.nextAiringEpisode) {
-            maxAiredEp = details.nextAiringEpisode.episode - 1;
-          } else if (details.status === "RELEASING") {
-            maxAiredEp = Number(w.current_episode) || 0;
-          } else if (details.status === "FINISHED") {
-            maxAiredEp = totalEps !== 9999 ? totalEps : (details.episodes || 0);
-          } else {
-            maxAiredEp = 0;
-          }
-        }
-      
-      const offset = Number(w.synchro_offset_episodes) || 0; if (globalManual == null && (w as any).manual_available_eps == null) { maxAiredEp = Math.max(0, maxAiredEp - offset); }
-      const current = Number(w.current_episode) || 0;
-      const behindCount = Math.max(0, maxAiredEp - current);
-      return behindCount > 0 ? { ...w, details, behindCount, nextEpToWatch: current + 1 } : null;
-    })
-    .filter(w => w !== null)
-    .filter(w => !pausedWorkIds.has(w!.work_id))
-    .sort((a, b) => b!.behindCount - a!.behindCount);
-
-  // We need to know if we are still loading details
-  const isLoadingDetails = isFetchingUserWorks && Object.keys(userAniListDetails).length === 0;
 
   return (
-    <div className="flex flex-col gap-6 px-4 pt-6 pb-24">
-      {/* HOME TABS */}
-      <div className="flex gap-2 overflow-x-auto pb-2 snap-x scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-        {isLoggedIn && (
-          <button
-            onClick={() => setTab("UPNEXT")}
-            className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
-              activeHomeTab === "UPNEXT" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
-            }`}
+    <div className="flex flex-col gap-6 px-4 pt-5 pb-24 max-w-3xl mx-auto w-full">
+      {/* TOP SECTION: HEUTE & DEMNÄCHST IM KALENDER */}
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-bold text-white flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-emerald-400" />
+            Heute &amp; Demnächst im Kalender
+          </h2>
+          <Link
+            href="/calendar"
+            className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-0.5 transition-colors shrink-0"
           >
-            Up Next
-          </button>
-        )}
-        <button
-          onClick={() => setTab("COMMUNITY")}
-          className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
-            activeHomeTab === "COMMUNITY" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
-          }`}
-        >
-          Community Ranking
-        </button>
-        <button
-          onClick={() => setTab("TRENDING")}
-          className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
-            activeHomeTab === "TRENDING" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
-          }`}
-        >
-          Trending
-        </button>
-        <button
-          onClick={() => setTab("UPCOMING")}
-          className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
-            activeHomeTab === "UPCOMING" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
-          }`}
-        >
-          Nächste Season
-        </button>
-        <button
-          onClick={() => setTab("RECOMMENDATIONS")}
-          className={`snap-start shrink-0 px-4 py-2 rounded-full text-sm font-bold transition-colors ${
-            activeHomeTab === "RECOMMENDATIONS" ? "bg-blue-600 text-white shadow-md" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
-          }`}
-        >
-          Empfehlungen
-        </button>
-      </div>
+            Alle im Kalender
+            <ChevronRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
 
-      {/* COMMUNITY WEEKLY RANKING */}
-      {activeHomeTab === "COMMUNITY" && (
-        <section className="animate-in fade-in slide-in-from-right-4 duration-300">
-          <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
-            <Star className="text-blue-500" /> 
-            Top 9 Community Ranking
-          </h2>
-          <div className="grid grid-cols-3 gap-3">
-            {isLoadingCommunity ? (
-              [1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => (
-                <div key={i} className="relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg">
-                  <div className="aspect-[3/4] w-full bg-gray-800 animate-pulse" />
-                </div>
-              ))
-            ) : communityRanking.length === 0 ? (
-              <div className="col-span-3 text-gray-500 text-sm border border-gray-800 bg-[#1a1d24] rounded-xl p-6 text-center w-full">
-                Noch keine Rankings für diese Woche.
-              </div>
-            ) : (
-              communityRanking.map((work, index) => (
-                <Link href={`/work/${work.id}`} key={work.id} className="relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-[1.02]">
-                  <img 
-                    src={work.coverImage?.extraLarge || work.coverImage?.large} 
-                    alt={work.title.romaji}
-                    className="aspect-[3/4] w-full object-cover"
-                    loading="lazy"
-                  />
-                  <div className="absolute top-1 left-1 flex h-6 w-6 sm:h-8 sm:w-8 items-center justify-center rounded-full bg-blue-600 font-bold text-white shadow-lg border-2 border-white/20 text-xs sm:text-base">
-                    {index + 1}
-                  </div>
-                  <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/95 via-black/70 to-transparent p-2 sm:p-3">
-                    <h3 className="font-bold text-white line-clamp-1 text-[10px] sm:text-sm">{work.title.english || work.title.romaji}</h3>
-                    <div className="flex justify-between items-center mt-1">
-                      <span className="text-[9px] sm:text-[10px] font-bold text-gray-400 bg-gray-800 px-1 py-0.5 rounded">
-                        {work.communityPoints} Pkt
-                      </span>
-                    </div>
-                  </div>
-                </Link>
-              ))
-            )}
-          </div>
-        </section>
-      )}
-
-      {/* UP NEXT SECTION */}
-      {activeHomeTab === "UPNEXT" && isLoggedIn && (
-        <section className="animate-in fade-in slide-in-from-right-4 duration-300">
-          <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
-            <Star className="text-blue-500" /> 
-            Up Next (Dein Rückstand)
-          </h2>
-          
-          {isLoadingDetails ? (
-            <div className="text-gray-500 text-sm animate-pulse border border-gray-800 bg-[#1a1d24] rounded-xl p-6 text-center">Lade Werke...</div>
-          ) : upNextWorks.length === 0 ? (
-            <div className="text-gray-500 text-sm border border-gray-800 bg-[#1a1d24] rounded-xl p-6 text-center">
-              Du bist auf dem neuesten Stand! Keine fehlenden {contentType === "ANIME" ? "Folgen" : "Kapitel"}.
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {upNextWorks.map((work) => (
-              <div key={work.work_id} className="relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg flex flex-col">
-                <div className="relative aspect-video w-full overflow-hidden">
-                  <img 
-                    src={work.details?.bannerImage || work.details?.coverImage?.extraLarge} 
-                    alt={work.details?.title?.romaji}
-                    className="w-full h-full object-cover opacity-60"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#1a1d24] to-transparent" />
-                  <div className="absolute top-2 right-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded-full shadow-md">
-                    {work.behindCount} {work.details?.type === "MANGA" ? "Kapitel" : "Folgen"} zurück
-                  </div>
-                </div>
-                <div className="p-4 flex flex-col flex-1 justify-between -mt-8 relative z-10">
-                  <div>
-                    <h3 className="font-bold text-white text-sm line-clamp-1">{work.details?.title?.english || work.details?.title?.romaji}</h3>
-                    <p className="text-xs text-gray-400 mt-1">Als nächstes: {work.details?.type === "MANGA" ? "Kapitel" : "Folge"} {work.nextEpToWatch}</p>
-                  </div>
-                  <div className="mt-4 flex gap-2">
-                    <button 
-                      onClick={() => handleCheckIn(work.work_id, work.nextEpToWatch, work.details?.type || "ANIME")}
-                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded-lg text-center transition shadow-lg"
-                    >
-                      ✓ Check in
-                    </button>
-                    <button 
-                      onClick={() => handlePauseWork(work.work_id)}
-                      title="Diese Woche kein Release – aus Up Next ausblenden"
-                      className="bg-gray-700 hover:bg-yellow-600/80 text-gray-300 hover:text-white text-xs font-bold py-2 px-3 rounded-lg transition shadow-lg"
-                    >
-                      ⏸
-                    </button>
-                  </div>
-                </div>
-              </div>
+        {!authLoaded || isLoadingCalendar ? (
+          <div className="flex gap-3 overflow-x-auto pb-1 scrollbar-hide">
+            {[1, 2, 3].map((n) => (
+              <div
+                key={n}
+                className="w-56 h-24 rounded-2xl bg-[#111827] border border-white/5 animate-pulse shrink-0"
+              />
             ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* TRENDING SECTION */}
-      {activeHomeTab === "TRENDING" && (
-        <section className="animate-in fade-in slide-in-from-right-4 duration-300">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="flex items-center gap-2 text-xl font-bold">
-              <Flame className="text-blue-500" /> 
-              Trending {contentType === "ANIME" ? "Anime" : "Manga"}
-            </h2>
-            <select 
-              value={trendingGenre}
-              onChange={(e) => setTrendingGenre(e.target.value)}
-              className="bg-gray-800 text-white text-xs px-3 py-1.5 rounded-lg border border-gray-700 outline-none"
+          </div>
+        ) : !currentUserUid ? (
+          <div className="bg-[#111827] border border-white/10 rounded-2xl p-3.5 text-xs text-gray-400 flex items-center justify-between gap-3">
+            <span>
+              Melde dich an, um deine heutigen Releases aus dem Kalender zu sehen.
+            </span>
+            <Link
+              href="/profile"
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-bold shrink-0"
             >
-              <option value="All">Alle Genres</option>
-              <option value="Action">Action</option>
-              <option value="Romance">Romance</option>
-              <option value="Comedy">Comedy</option>
-              <option value="Drama">Drama</option>
-              <option value="Fantasy">Fantasy</option>
-              <option value="Slice of Life">Slice of Life</option>
-              <option value="Sci-Fi">Sci-Fi</option>
-              <option value="Mystery">Mystery</option>
-              <option value="Sports">Sports</option>
-            </select>
+              Anmelden
+            </Link>
           </div>
-          {isLoadingTrending ? (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-              {[1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="aspect-[3/4] rounded-xl bg-gray-800 animate-pulse" />
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-              {trendingWorks.filter(w => !userWorks.some(uw => uw.work_id === w.id.toString())).slice(0, 30).map((work) => {
-                const isUnreleased = work.status === "NOT_YET_RELEASED";
-                const isSequel = work.relations?.edges?.some((edge: any) => {
-                  return (edge.relationType === "PREQUEL" || edge.relationType === "PARENT") &&
-                         userWorks.some(uw => uw.work_id === edge.node.id.toString());
-                });
-                
-                let borderClass = "border-gray-800";
-                if (isUnreleased) borderClass = "border-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]";
-                else if (isSequel) borderClass = "border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.5)]";
+        ) : upcomingCalendarItems.length === 0 ? (
+          <div className="bg-[#111827]/70 border border-white/10 rounded-2xl p-3.5 text-xs text-gray-400 flex items-center justify-between gap-3">
+            <span>Keine anstehenden Releases in den nächsten 7 Tagen.</span>
+            <Link
+              href="/calendar"
+              className="text-emerald-400 font-semibold hover:underline shrink-0"
+            >
+              Kalender öffnen →
+            </Link>
+          </div>
+        ) : (
+          <div className="flex gap-3 overflow-x-auto pb-1 snap-x scrollbar-hide [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
+            {upcomingCalendarItems.map((item) => {
+              const unitShort = item.media_type === "MANGA" ? "Kap" : "Ep";
+              const wasJustIncremented = justIncrementedIds.has(item.work_id);
 
-                return (
-                  <Link href={`/work/${work.id}`} key={work.id} className={`group relative overflow-hidden rounded-xl border ${borderClass} bg-[#1a1d24] shadow-lg transition-transform hover:scale-105 hover:border-gray-600`}>
-                    <img 
-                      src={work.coverImage.extraLarge || work.coverImage.large} 
-                      alt={work.title.english || work.title.romaji}
-                      className="aspect-[3/4] w-full object-cover"
-                    />
-                    <div className="absolute bottom-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent p-2 sm:p-3 pt-6">
-                      <h3 className="font-bold text-white text-[10px] sm:text-xs line-clamp-2">{work.title.english || work.title.romaji}</h3>
-                    </div>
+              return (
+                <div
+                  key={item.work_id}
+                  className="snap-start shrink-0 w-64 bg-[#111827] border border-white/10 rounded-2xl p-2.5 flex items-center gap-3 shadow-sm"
+                >
+                  <Link href={`/work/${item.work_id}`} className="shrink-0">
+                    {item.cover ? (
+                      <img
+                        src={item.cover}
+                        alt={item.title}
+                        className="w-12 h-16 rounded-xl object-cover bg-gray-800"
+                      />
+                    ) : (
+                      <div className="w-12 h-16 rounded-xl bg-gray-800" />
+                    )}
                   </Link>
-                );
-              })}
-            </div>
-          )}
-        </section>
-      )}
 
-      {/* UPCOMING SECTION */}
-      {activeHomeTab === "UPCOMING" && (
-        <section className="animate-in fade-in slide-in-from-right-4 duration-300">
-          <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
-            <Sparkles className="text-yellow-400" /> 
-            Nächste Season
-          </h2>
-          
-          {isLoadingTrending ? (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-              {[1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="aspect-[3/4] rounded-xl bg-gray-800 animate-pulse" />
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-              {upcomingWorks.map((work) => (
-                <Link href={`/work/${work.id}`} key={work.id} className="group relative overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] shadow-lg transition-transform hover:scale-105">
-                  <img 
-                    src={work.coverImage.extraLarge || work.coverImage.large} 
-                    alt={work.title.english || work.title.romaji}
-                    className="aspect-[3/4] w-full object-cover"
-                  />
-                  <div className="absolute bottom-0 w-full bg-gradient-to-t from-black via-black/80 to-transparent p-2 sm:p-3 pt-6">
-                    <h3 className="font-bold text-white text-[10px] sm:text-xs line-clamp-2">{work.title.english || work.title.romaji}</h3>
+                  <div className="flex-1 min-w-0 flex flex-col gap-1">
+                    <Link
+                      href={`/work/${item.work_id}`}
+                      className="text-xs font-bold text-white hover:text-emerald-300 truncate transition-colors"
+                    >
+                      {item.title}
+                    </Link>
+
+                    <div className="flex items-center gap-1.5 text-[11px] text-gray-300">
+                      <span className="text-emerald-400 font-semibold">
+                        {item.airingLabel}
+                      </span>
+                      {item.airingEpisode && (
+                        <span className="text-gray-400">
+                          • {unitShort}. {item.airingEpisode}
+                        </span>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleQuickIncrement(item.work_id, item.nextUserEpisode)
+                      }
+                      className={`mt-0.5 self-start inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                        wasJustIncremented
+                          ? "bg-emerald-500 text-white"
+                          : "bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/30"
+                      }`}
+                    >
+                      {wasJustIncremented ? (
+                        <>
+                          <Check className="w-3 h-3" />
+                          Gespeichert
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-3 h-3" />
+                          {unitShort} {item.nextUserEpisode}
+                        </>
+                      )}
+                    </button>
                   </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* RECOMMENDATIONS SECTION */}
-      {activeHomeTab === "RECOMMENDATIONS" && (
-        <section className="animate-in fade-in slide-in-from-right-4 duration-300">
-          <h2 className="mb-4 flex items-center gap-2 text-xl font-bold">
-            <Sparkles className="text-blue-500" /> 
-            Für Dich Empfohlen
-          </h2>
-          
-          {/* Genre Selector */}
-          <div className="flex gap-2 overflow-x-auto pb-4 snap-x [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-            {GENRES.map(g => (
-              <button 
-                key={g} 
-                onClick={() => setSelectedGenre(g)}
-                className={`snap-start shrink-0 px-4 py-2 rounded-full text-xs sm:text-sm font-bold transition-colors ${
-                  selectedGenre === g ? "bg-blue-600 text-white" : "bg-[#1a1d24] text-gray-400 hover:bg-gray-800 border border-gray-800"
-                }`}
-              >
-                {g}
-              </button>
-            ))}
+                </div>
+              );
+            })}
           </div>
+        )}
+      </section>
 
-          {/* User's Top Favorites in Selected Genre */}
-          {isLoggedIn && myTopInGenre.length > 0 && (
-            <div className="mb-6">
-              <h3 className="text-sm font-bold text-gray-400 mb-3">Deine Top Favoriten in {selectedGenre}</h3>
-              <div className="flex gap-3 overflow-x-auto pb-4 snap-x [&::-webkit-scrollbar]:hidden [-ms-overflow-style:'none'] [scrollbar-width:'none']">
-                {myTopInGenre.map(work => (
-                  <Link href={`/work/${work.work_id}`} key={work.work_id} className="relative w-24 sm:w-28 shrink-0 snap-start overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24]">
-                    <img src={work.details?.coverImage?.large} alt="Cover" className="aspect-[3/4] w-full object-cover" />
-                    <div className="absolute top-1 right-1 bg-black/70 backdrop-blur-md rounded px-1.5 py-0.5 text-[10px] font-bold text-blue-400 border border-gray-700">
-                      ★ {work.evaluation.overallScore.toFixed(1)}
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* General/Community Recommendations */}
-          <div>
-             <h3 className="text-sm font-bold text-gray-400 mb-3">Top Empfehlungen ({selectedGenre})</h3>
-             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-               {isLoadingRecs ? (
-                 [1, 2, 3, 4, 5, 6].map(i => <div key={i} className="aspect-[3/4] w-full bg-[#1a1d24] border border-gray-800 rounded-xl animate-pulse" />)
-               ) : recommendedWorks.length === 0 ? (
-                 <p className="text-sm text-gray-500 col-span-full">Keine Empfehlungen gefunden.</p>
-               ) : (
-                 recommendedWorks.map(work => (
-                   <Link href={`/work/${work.id}`} key={work.id} className="group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500">
-                     <img src={work.coverImage?.extraLarge || work.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition duration-300 group-hover:scale-105" />
-                     <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/90 to-transparent p-2 text-center opacity-0 transition group-hover:opacity-100">
-                       <p className="text-[10px] font-bold text-white line-clamp-2">{work.title.english || work.title.romaji}</p>
-                     </div>
-                   </Link>
-                 ))
-               )}
-             </div>
-          </div>
-        </section>
-      )}
+      {/* WHATSAPP-STYLE REVIEW COMPOSER & FEED */}
+      <WhatsAppReviewFeed
+        currentUserUid={currentUserUid}
+        userWorks={userWorks}
+        userAniListDetails={userAniListDetails}
+        onProgressUpdated={handleProgressUpdatedFromFeed}
+      />
     </div>
   );
 }

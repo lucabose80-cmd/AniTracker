@@ -1,271 +1,241 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAppStore } from "@/lib/store";
-import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Library as LibraryIcon, Search, LayoutGrid, PauseCircle } from "lucide-react";
-import { getPausedWorkIds } from "@/lib/db/pauses";
-import {
-  DndContext,
-  closestCenter,
-  KeyboardSensor,
-  PointerSensor,
-  TouchSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent,
-  useDraggable,
-} from "@dnd-kit/core";
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  rectSortingStrategy,
-  useSortable,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { auth } from "@/lib/firebase";
-import { getUserProfile, updateTop9List, getLastMonday } from "@/lib/db/users";
-import { fetchAniListBatch } from "@/lib/anilist";
-import { UserWork } from "@/types/database";
-import { getAllUserWorks } from "@/lib/db/works";
-import { getCalendarOverrides } from "@/lib/db/calendar";
 import Link from "next/link";
-import { ArrowUp, ArrowDown, Minus, Save, Share, Play, Check, Bookmark, Star } from "lucide-react";
-import { createActivity } from "@/lib/db/feed";
-import { isEligibleForWeeklyRanking, hasNewReleaseThisWeek, hasUserCheckedLatestEpisode } from '@/lib/weeklyValidation';
+import {
+  Library as LibraryIcon,
+  Search,
+  Edit2,
+  X,
+  Plus,
+  Minus,
+  ExternalLink,
+  Check,
+  Tv,
+  BookOpen,
+} from "lucide-react";
+import { auth } from "@/lib/firebase";
+import { fetchAniListBatch } from "@/lib/anilist";
+import { UserWork, UserWorkStatus } from "@/types/database";
+import {
+  getAllUserWorks,
+  updateEpisodeProgress,
+  updateUserWorkStatus,
+} from "@/lib/db/works";
+import { CalendarOverride, getCalendarOverrides } from "@/lib/db/calendar";
+import { getPausedWorkIds } from "@/lib/db/pauses";
 
-// Simple Sortable Item Component
-function SortableItem({ id, index, workDetails, userWork, previousRank, globalOverride, isEligible, isPaused, isEditing, onRemove, onClick }: { id: string, index: number, workDetails?: any, userWork?: any, previousRank?: number, globalOverride?: any, isEligible?: boolean, isPaused?: boolean, isEditing?: boolean, onRemove: (id: string) => void, onClick?: () => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
-  
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    zIndex: isDragging ? 50 : 1,
-    opacity: isDragging ? 0.8 : 1,
-  };
+type SortOption = "RECENT" | "TITLE" | "BEHIND";
+type TabStatus = "PLANNING" | "CURRENT" | "COMPLETED" | "PAUSED" | "DROPPED";
 
-  let behindCount = 0;
-  let progressPercentage = 0;
-  if (workDetails && userWork) {
-    const currentEp = userWork.current_episode || 0;
-    
-    let maxAiredEp = 0;
-    let totalEps = 9999;
-    if (globalOverride?.manualMaxEpisode !== undefined && globalOverride?.manualMaxEpisode !== null) {
-      totalEps = globalOverride.manualMaxEpisode;
-    } else if (userWork.manual_max_episode !== undefined && userWork.manual_max_episode !== null) {
-      totalEps = userWork.manual_max_episode;
-    }
-    
-    if (globalOverride?.manualAvailableEps !== undefined && globalOverride?.manualAvailableEps !== null) {
-      maxAiredEp = globalOverride.manualAvailableEps;
-    } else if ((userWork as any).manual_available_eps !== undefined && (userWork as any).manual_available_eps !== null) {
-      maxAiredEp = Number((userWork as any).manual_available_eps);
-    } else if (workDetails.type === "MANGA") {
-      maxAiredEp = totalEps !== 9999 ? totalEps : (workDetails.chapters || 0);
-    } else {
-      if (workDetails.status === "RELEASING" && workDetails.nextAiringEpisode) {
-        maxAiredEp = workDetails.nextAiringEpisode.episode - 1;
-      } else if (workDetails.status === "RELEASING") {
-        maxAiredEp = currentEp; // Assume they are up to date if AniList doesn't know
-      } else if (workDetails.status === "FINISHED") {
-        maxAiredEp = totalEps !== 9999 ? totalEps : (workDetails.episodes || 0);
-      } else {
-        maxAiredEp = 0;
-      }
-    }
-    const offset = userWork.synchro_offset_episodes || 0; if (globalOverride?.manualAvailableEps == null && (userWork as any).manual_available_eps == null) { maxAiredEp = Math.max(0, maxAiredEp - offset); }
-    
-    // If paused, we pretend they have seen everything up to maxAiredEp
-    if (isPaused) {
-      maxAiredEp = currentEp;
-    }
-    
-    behindCount = Math.max(0, maxAiredEp - currentEp);
-    
-    const maxEpsToCalculateProgress = isPaused ? currentEp : (workDetails.episodes || workDetails.chapters || 1);
-    progressPercentage = Math.min(100, Math.max(0, (currentEp / maxEpsToCalculateProgress) * 100));
+const STATUS_TABS: { key: TabStatus; label: string }[] = [
+  { key: "PLANNING", label: "Planung" },
+  { key: "CURRENT", label: "Aktiv" },
+  { key: "COMPLETED", label: "Fertig" },
+  { key: "PAUSED", label: "Pausiert" },
+  { key: "DROPPED", label: "Abgebrochen" },
+];
+
+const SORT_OPTIONS: { key: SortOption; label: string }[] = [
+  { key: "RECENT", label: "Zuletzt" },
+  { key: "TITLE", label: "Titel A-Z" },
+  { key: "BEHIND", label: "Offene Folgen" },
+];
+
+function computeBehindCount(
+  work: UserWork,
+  details: any,
+  globalOverride?: CalendarOverride,
+  isPaused?: boolean
+): number {
+  if (!details || isPaused || work.status === "PAUSED" || work.status === "COMPLETED" || work.status === "DROPPED") {
+    return 0;
   }
 
-  return (
-    <div 
-      ref={setNodeRef} 
-      style={{ touchAction: isEditing ? 'none' : 'auto', ...style }} 
-      {...(isEditing ? attributes : {})} {...(isEditing ? listeners : {})} className={`w-full aspect-[3/4] relative rounded-xl bg-[#1a1d24] border ${isDragging ? "border-blue-500 shadow-2xl scale-105" : "border-gray-800"} flex items-center justify-center font-bold text-gray-500 overflow-hidden ${isEditing ? "cursor-grab active:cursor-grabbing" : ""}`}
-    >
-      <span className="absolute top-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white backdrop-blur-md z-10 pointer-events-none">
-        {index + 1}
-      </span>
-      {behindCount > 0 && (
-        <span className="absolute -top-1 -right-1 flex items-center justify-center rounded-full bg-red-600 text-[10px] px-1.5 py-0.5 font-bold text-white shadow-md z-10 pointer-events-none">
-          {behindCount}
-        </span>
-      )}
-      {!id.startsWith("empty") && previousRank !== undefined && (
-        <div className="absolute bottom-1 right-1 flex items-center justify-center rounded bg-black/80 px-1 py-0.5 z-10">
-          {previousRank === -1 ? (
-            <span className="text-[10px] font-bold text-blue-400">NEU</span>
-          ) : previousRank === index ? (
-            <Minus size={12} className="text-gray-400" />
-          ) : previousRank > index ? (
-            <div className="flex items-center text-[10px] font-bold text-green-500">
-              <ArrowUp size={10} /> {previousRank - index}
-            </div>
-          ) : (
-            <div className="flex items-center text-[10px] font-bold text-red-500">
-              <ArrowDown size={10} /> {index - previousRank}
-            </div>
-          )}
-        </div>
-      )}
-      {id.startsWith("empty") ? ( isEditing ? (
-        <button 
-          onClick={(e) => { e.stopPropagation(); onClick && onClick(); }}
-          className="absolute inset-0 w-full h-full flex items-center justify-center text-gray-700 text-4xl font-light hover:text-gray-500 transition-colors bg-[#1a1d24]"
-        >
-          +
-        </button> ) : null ) : workDetails ? (
-        <div 
-          onClick={(e) => {
-            if (!isDragging) {
-              window.location.href = `/work/${id}`;
-            }
-          }}
-          className="absolute inset-0 block h-full w-full cursor-pointer"
-        >
-          <Image src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" fill sizes="(max-width: 768px) 33vw, 20vw" className={`object-cover pointer-events-none ${isEligible === false ? 'opacity-60' : ''}`} />
-          {isEditing && isPaused && (
-            <div className="absolute inset-0 bg-yellow-600/50 flex flex-col items-center justify-center z-10">
-              <PauseCircle size={32} className="text-white drop-shadow-lg" />
-              <span className="text-white font-bold text-xs mt-1 drop-shadow-md uppercase tracking-wider">Pausiert</span>
-            </div>
-          )}
-          <div className="absolute bottom-0 left-0 w-full h-1 bg-[#1a1d24]/80">
-            <div className="h-full bg-blue-500" style={{ width: `${progressPercentage}%` }} />
-          </div>
-        </div>
-      ) : (
-        <div className="absolute inset-0 w-full h-full animate-pulse bg-gray-800" />
-      )}
-      {isEditing && !id.startsWith("empty") && (
-        <button 
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => { e.stopPropagation(); onRemove(id); }}
-          className="absolute top-1 right-1 bg-red-600/80 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] hover:bg-red-500 z-20 shadow-md"
-        >
-          X
-        </button>
-      )}
-      {!id.startsWith("empty") && isEligible === false && (
-        <div className="absolute bottom-1 left-1 bg-orange-600/90 text-[9px] font-bold text-white px-1.5 py-0.5 rounded z-10">
-          ⚠ Nicht qualifiziert
-        </div>
-      )}
-    </div>
-  );
+  const currentEp = work.current_episode || 0;
+  let totalEps = 9999;
+
+  if (globalOverride?.manualMaxEpisode !== undefined && globalOverride?.manualMaxEpisode !== null) {
+    totalEps = globalOverride.manualMaxEpisode;
+  } else if (work.manual_max_episode !== undefined && work.manual_max_episode !== null) {
+    totalEps = work.manual_max_episode;
+  }
+
+  let maxAiredEp = 0;
+  if (globalOverride?.manualAvailableEps !== undefined && globalOverride?.manualAvailableEps !== null) {
+    maxAiredEp = globalOverride.manualAvailableEps;
+  } else if (work.manual_available_eps !== undefined && work.manual_available_eps !== null) {
+    maxAiredEp = Number(work.manual_available_eps);
+  } else if (details?.type === "MANGA") {
+    maxAiredEp = totalEps !== 9999 ? totalEps : (details?.chapters || 0);
+  } else if (details?.status === "RELEASING" && details?.nextAiringEpisode?.episode) {
+    maxAiredEp = details.nextAiringEpisode.episode - 1;
+  } else if (details?.status === "RELEASING") {
+    maxAiredEp = currentEp;
+  } else if (details?.status === "FINISHED") {
+    maxAiredEp = totalEps !== 9999 ? totalEps : (details?.episodes || 0);
+  }
+
+  const offset = work.synchro_offset_episodes || 0;
+  if (globalOverride?.manualAvailableEps == null && work.manual_available_eps == null) {
+    maxAiredEp = Math.max(0, maxAiredEp - offset);
+  }
+
+  return Math.max(0, maxAiredEp - currentEp);
 }
 
-function DraggableLibraryItem({ id, isEditing, children }: { id: string, isEditing?: boolean, children: React.ReactNode }) {
-  const {attributes, listeners, setNodeRef, transform, isDragging} = useDraggable({
-    id: `library-${id}`,
-  });
-  const style = transform ? {
-    transform: CSS.Translate.toString(transform),
-    zIndex: isDragging ? 50 : 1,
-    opacity: isDragging ? 0.8 : 1,
-    touchAction: isEditing ? 'none' : 'auto',
-  } : { touchAction: isEditing ? 'none' : 'auto' };
+function getTotalCount(
+  work: UserWork,
+  details: any,
+  globalOverride?: CalendarOverride
+): number | null {
+  if (globalOverride?.manualMaxEpisode != null) {
+    return globalOverride.manualMaxEpisode;
+  }
+  if (work.manual_max_episode != null) {
+    return work.manual_max_episode;
+  }
+  if (details?.type === "MANGA") {
+    return details?.chapters || null;
+  }
+  return details?.episodes || null;
+}
 
-  return (
-    <div ref={setNodeRef} style={style} {...(isEditing ? listeners : {})} {...(isEditing ? attributes : {})} className={isEditing ? "cursor-grab active:cursor-grabbing" : ""}>
-      {children}
-    </div>
-  );
+function getNextReleaseTimestampMs(
+  details: any,
+  globalOverride?: CalendarOverride
+): number | null {
+  const now = Date.now();
+
+  if (globalOverride?.airingAt && globalOverride.airingAt * 1000 > now) {
+    return globalOverride.airingAt * 1000;
+  }
+
+  if (details?.nextAiringEpisode?.airingAt) {
+    return details.nextAiringEpisode.airingAt * 1000;
+  }
+
+  if (globalOverride?.weeklyDay !== undefined && globalOverride?.weeklyTime) {
+    const [hoursStr, minutesStr] = globalOverride.weeklyTime.split(":");
+    const hours = parseInt(hoursStr, 10);
+    const minutes = parseInt(minutesStr, 10);
+    if (!Number.isNaN(hours) && !Number.isNaN(minutes)) {
+      const candidate = new Date();
+      const currentDay = candidate.getDay();
+      let daysUntil = (globalOverride.weeklyDay - currentDay + 7) % 7;
+      candidate.setHours(hours, minutes, 0, 0);
+      if (daysUntil === 0 && candidate.getTime() <= now) {
+        daysUntil = 7;
+      }
+      candidate.setDate(candidate.getDate() + daysUntil);
+      return candidate.getTime();
+    }
+  }
+
+  return null;
+}
+
+function formatNextReleaseLabel(
+  work: UserWork,
+  details: any,
+  globalOverride?: CalendarOverride,
+  isPaused?: boolean
+): string | null {
+  if (isPaused || work.status === "PAUSED") return "Pausiert";
+  if (work.status === "DROPPED") return "Abgebrochen";
+  if (work.status === "COMPLETED") return "Abgeschlossen";
+
+  const nextMs = getNextReleaseTimestampMs(details, globalOverride);
+  if (!nextMs) {
+    if (details?.status === "FINISHED") return "Abgeschlossen";
+    if (details?.status === "NOT_YET_RELEASED") return "Noch nicht gestartet";
+    return null;
+  }
+
+  const nextDate = new Date(nextMs);
+  const now = new Date();
+  const timeStr = nextDate.toLocaleTimeString("de-DE", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const isSameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  if (isSameDay(nextDate, now)) {
+    return `Heute ${timeStr}`;
+  }
+
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  if (isSameDay(nextDate, tomorrow)) {
+    return `Morgen ${timeStr}`;
+  }
+
+  const datePart = nextDate.toLocaleDateString("de-DE", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+  const unitLabel = details?.type === "MANGA" ? "Nächstes Kapitel" : "Nächste Folge";
+  return `${unitLabel}: ${datePart} · ${timeStr}`;
 }
 
 export default function LibraryPage() {
-  const { contentType } = useAppStore();
-  const reloadTrigger = useAppStore(state => state.reloadTrigger);
-  const router = useRouter();
-  
-  const [items, setItems] = useState<string[]>(Array(9).fill("").map((_, i) => `empty-${i}`));
+  const { contentType, setContentType } = useAppStore();
+  const reloadTrigger = useAppStore((state) => state.reloadTrigger);
+
   const [allWorks, setAllWorks] = useState<UserWork[]>([]);
   const [aniListDetails, setAniListDetails] = useState<Record<string, any>>({});
-  const [globalOverrides, setGlobalOverrides] = useState<Record<string, any>>({});
-  const [userProfile, setUserProfile] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [sortBy, setSortBy] = useState<"RELEASE" | "SCORE" | "PROGRESS" | "TITLE">("RELEASE");
-  const [activeTab, setActiveTab] = useState<"CURRENT" | "COMPLETED" | "PLANNING" | "PAUSED">("CURRENT");
+  const [globalOverrides, setGlobalOverrides] = useState<Record<string, CalendarOverride>>({});
   const [pausedWorkIds, setPausedWorkIds] = useState<Set<string>>(new Set());
+  const [isLoading, setIsLoading] = useState(true);
 
-  const [isSelectorOpen, setIsSelectorOpen] = useState(false);
-  const [isEditingRanking, setIsEditingRanking] = useState(false);
-  const [selectingIndex, setSelectingIndex] = useState<number | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<SortOption>("RECENT");
+  const [activeTab, setActiveTab] = useState<TabStatus>("CURRENT");
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  );
-
-  const handleEmptySlotClick = (index: number) => {
-    setSelectingIndex(index);
-    setIsSelectorOpen(true);
-  };
-
-  const handleSelectWorkForSlot = async (workId: string) => {
-    if (selectingIndex === null) return;
-    const newItems = [...items];
-    newItems[selectingIndex] = workId;
-    setItems(newItems);
-    setIsSelectorOpen(false);
-    
-    if (auth.currentUser) {
-      try {
-        const { updateWeeklyRanking } = await import("@/lib/db/users");
-        await updateWeeklyRanking(auth.currentUser.uid, contentType as "ANIME" | "MANGA", newItems);
-      } catch(e) {
-        console.error(e);
-      }
-    }
-  };
+  // Quick-Edit Modal State
+  const [editingWork, setEditingWork] = useState<UserWork | null>(null);
+  const [editEpisode, setEditEpisode] = useState<number>(0);
+  const [editStatus, setEditStatus] = useState<UserWorkStatus>("CURRENT");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       if (user) {
+        setIsLoading(true);
         try {
-          const profile = await getUserProfile(user.uid);
-          setUserProfile(profile);
           const works = await getAllUserWorks(user.uid);
           setAllWorks(works);
           getPausedWorkIds().then(setPausedWorkIds).catch(console.error);
 
-          const allIdsToFetch = works.map((w: UserWork) => parseInt(w.work_id, 10));
+          const allIdsToFetch = works
+            .map((w: UserWork) => parseInt(w.work_id, 10))
+            .filter((id) => !Number.isNaN(id));
+
           if (allIdsToFetch.length > 0) {
-            let mediaList: any[] = [];
-            let overrides: Record<string, any> = {};
-            
             try {
-              [mediaList, overrides] = await Promise.all([
+              const [mediaList, overrides] = await Promise.all([
                 fetchAniListBatch(allIdsToFetch),
-                getCalendarOverrides()
+                getCalendarOverrides(),
               ]);
-              
+
               const map: Record<string, any> = {};
               mediaList.forEach((m: any) => {
                 map[m.id.toString()] = m;
               });
               setAniListDetails(map);
+              setGlobalOverrides(overrides);
             } catch (e) {
               console.warn("AniList Error", e);
-              // keep existing state
-              overrides = await getCalendarOverrides(); // might be cached by Firestore
+              const overrides = await getCalendarOverrides().catch(() => ({}));
+              setGlobalOverrides(overrides);
             }
-            
-            setGlobalOverrides(overrides);
           }
         } catch (error) {
           console.error("Fehler beim Laden der Bibliothek:", error);
@@ -273,6 +243,7 @@ export default function LibraryPage() {
           setIsLoading(false);
         }
       } else {
+        setAllWorks([]);
         setIsLoading(false);
       }
     });
@@ -280,488 +251,548 @@ export default function LibraryPage() {
     return () => unsubscribe();
   }, [reloadTrigger]);
 
-  // Sync Weekly Ranking list when contentType or aniListDetails changes
-  useEffect(() => {
-    if (!userProfile || Object.keys(aniListDetails).length === 0) return;
+  // Works matching active contentType (ANIME / MANGA)
+  const contentTypeWorks = useMemo(() => {
+    return allWorks.filter((w) => aniListDetails[w.work_id]?.type === contentType);
+  }, [allWorks, aniListDetails, contentType]);
 
-    const rankingData = contentType === "ANIME" ? userProfile.weekly_ranking_anime : userProfile.weekly_ranking_manga;
-    let currentRanking = rankingData?.current ? [...rankingData.current] : [];
-
-    const lastActive = rankingData?.last_active || 0;
-    const d = new Date();
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(d.setDate(diff));
-    monday.setHours(0, 0, 0, 0);
-
-    if (lastActive > 0 && lastActive < monday.getTime()) {
-      currentRanking = [];
-    }
-
-    // Remove duplicates or old deleted works
-    let validRanking = currentRanking.filter(id => id.startsWith("empty") || allWorks.some(w => w.work_id === id));
-    
-    while(validRanking.length < 9) {
-      validRanking.push(`empty-${validRanking.length}`);
-    }
-
-    setItems(validRanking.slice(0, 9));
-  }, [contentType, userProfile, aniListDetails, allWorks]);
-
-  const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over) return;
-    
-    let newItems = [...items];
-    const activeIdStr = String(active.id);
-    const overIdStr = String(over.id);
-
-    // Drag from library into Ranking
-    if (activeIdStr.startsWith("library-")) {
-      const workId = activeIdStr.replace("library-", "");
-
-      const uWork = allWorks.find(w => w.work_id === workId);
-      const details = aniListDetails[workId];
-      if (uWork && details) {
-        if (!isEligibleForWeeklyRanking(uWork, details, globalOverrides[workId])) {
-          alert("Dieses Werk ist noch nicht für die aktuelle Woche qualifiziert! Du musst erst eine neue Folge/Kapitel gesehen haben.");
-          return; // Abbrechen, da nicht qualifiziert
-        }
+  // Live counts per status
+  const statusCounts = useMemo(() => {
+    const counts: Record<TabStatus, number> = {
+      PLANNING: 0,
+      CURRENT: 0,
+      COMPLETED: 0,
+      PAUSED: 0,
+      DROPPED: 0,
+    };
+    contentTypeWorks.forEach((w) => {
+      if (w.status in counts) {
+        counts[w.status as TabStatus] += 1;
       }
-
-      if (newItems.includes(workId)) return; // Already in ranking
-      
-      const overIndex = newItems.indexOf(overIdStr);
-      if (overIndex !== -1) {
-        newItems[overIndex] = workId;
-        setItems(newItems);
-        
-        if (auth.currentUser) {
-          try {
-            const { updateWeeklyRanking } = await import("@/lib/db/users");
-            await updateWeeklyRanking(auth.currentUser.uid, contentType as "ANIME" | "MANGA", newItems);
-          } catch(e) {
-            console.error(e);
-          }
-        }
-      }
-      return;
-    }
-
-    // Sort within Ranking
-    if (active.id !== over.id) {
-      const oldIndex = newItems.indexOf(activeIdStr);
-      const newIndex = newItems.indexOf(overIdStr);
-      newItems = arrayMove(newItems, oldIndex, newIndex);
-      setItems(newItems);
-      
-      if (auth.currentUser) {
-        try {
-          const { updateWeeklyRanking } = await import("@/lib/db/users");
-          await updateWeeklyRanking(auth.currentUser.uid, contentType as "ANIME" | "MANGA", newItems);
-        } catch(e) {
-          console.error(e);
-        }
-      }
-    }
-  };
-
-  const handleRemoveFromRanking = async (idToRemove: string) => {
-    const newItems = [...items];
-    const idx = newItems.indexOf(idToRemove);
-    if (idx !== -1) {
-      let maxEmpty = -1;
-      newItems.forEach(item => {
-        if (item.startsWith("empty-")) {
-          const num = parseInt(item.split("-")[1]);
-          if (num > maxEmpty) maxEmpty = num;
-        }
-      });
-      newItems[idx] = `empty-${maxEmpty + 1}`;
-    }
-    
-    setItems(newItems);
-    if (auth.currentUser) {
-      try {
-        const { updateWeeklyRanking } = await import("@/lib/db/users");
-        await updateWeeklyRanking(auth.currentUser.uid, contentType as "ANIME" | "MANGA", newItems);
-      } catch(e) {
-        console.error(e);
-      }
-    }
-  };
-
-  const handleSaveSnapshot = async () => {
-    if (!auth.currentUser) return;
-
-    const hasIneligible = items.some(id => {
-      if (id.startsWith('empty')) return false;
-      const uWork = allWorks.find(w => w.work_id === id);
-      const details = aniListDetails[id];
-      if (uWork && details) {
-        if (pausedWorkIds.has(id)) return true; // It's paused, so it's ineligible
-        return !isEligibleForWeeklyRanking(uWork, details, globalOverrides[id]);
-      }
-      return false;
     });
+    return counts;
+  }, [contentTypeWorks]);
 
-    if (hasIneligible) {
-      alert("Hinweis: Einige Werke in deinem Ranking sind nicht qualifiziert (keine neue Folge, nicht aktuell oder pausiert).");
-    }
+  // Filtered & sorted works for active tab
+  const visibleWorks = useMemo(() => {
+    const queryLower = searchQuery.trim().toLowerCase();
+
+    return contentTypeWorks
+      .filter((w) => w.status === activeTab)
+      .filter((w) => {
+        if (!queryLower) return true;
+        const details = aniListDetails[w.work_id];
+        const titleEnglish = details?.title?.english?.toLowerCase() || "";
+        const titleRomaji = details?.title?.romaji?.toLowerCase() || "";
+        const titleNative = details?.title?.native?.toLowerCase() || "";
+        return (
+          titleEnglish.includes(queryLower) ||
+          titleRomaji.includes(queryLower) ||
+          titleNative.includes(queryLower)
+        );
+      })
+      .sort((a, b) => {
+        const detA = aniListDetails[a.work_id];
+        const detB = aniListDetails[b.work_id];
+
+        if (sortBy === "TITLE") {
+          const titleA = detA?.title?.english || detA?.title?.romaji || "";
+          const titleB = detB?.title?.english || detB?.title?.romaji || "";
+          return titleA.localeCompare(titleB, "de");
+        }
+
+        if (sortBy === "BEHIND") {
+          const behindA = computeBehindCount(
+            a,
+            detA,
+            globalOverrides[a.work_id],
+            pausedWorkIds.has(a.work_id)
+          );
+          const behindB = computeBehindCount(
+            b,
+            detB,
+            globalOverrides[b.work_id],
+            pausedWorkIds.has(b.work_id)
+          );
+          if (behindB !== behindA) return behindB - behindA;
+        }
+
+        // RECENT fallback
+        return parseInt(b.work_id, 10) - parseInt(a.work_id, 10);
+      });
+  }, [
+    contentTypeWorks,
+    activeTab,
+    searchQuery,
+    sortBy,
+    aniListDetails,
+    globalOverrides,
+    pausedWorkIds,
+  ]);
+
+  const handleQuickIncrement = async (work: UserWork) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    const current = work.current_episode || 0;
+    const nextEp = current + 1;
+
+    // Optimistic UI update
+    setAllWorks((prev) =>
+      prev.map((w) =>
+        w.work_id === work.work_id
+          ? { ...w, current_episode: nextEp, auto_added: false }
+          : w
+      )
+    );
 
     try {
-      const { saveWeeklyRankingSnapshot } = await import("@/lib/db/users");
-      await saveWeeklyRankingSnapshot(auth.currentUser.uid, contentType as "ANIME" | "MANGA", items);
-      
-      const eligibleItemsForFeed = items.filter(id => {
-        if (id.startsWith('empty')) return false;
-        const uWork = allWorks.find(w => w.work_id === id);
-        const details = aniListDetails[id];
-        if (uWork && details && !pausedWorkIds.has(id)) {
-          return isEligibleForWeeklyRanking(uWork, details, globalOverrides[id]);
-        }
-        return false;
-      });
-
-      if (eligibleItemsForFeed.length > 0) {
-        // Post to Social Feed
-        await createActivity(auth.currentUser.uid, "WEEKLY_RANKING", eligibleItemsForFeed[0], `Wochen-Ranking für ${contentType} veröffentlicht!`, eligibleItemsForFeed.join(","));
-      }
-      // Update local profile state to reflect arrows resetting
-      setUserProfile((prev: any) => ({
-        ...prev,
-        [contentType === "ANIME" ? "weekly_ranking_anime" : "weekly_ranking_manga"]: {
-          current: items,
-          previous: items,
-          last_updated: new Date().toISOString()
-        }
-      }));
-      
-      alert("Wochen-Ranking erfolgreich gespeichert und geteilt!");
-    } catch (e) {
-      console.error(e);
-      alert("Fehler beim Speichern des Wochen-Rankings.");
+      await updateEpisodeProgress(uid, work.work_id, nextEp);
+    } catch (error) {
+      console.error("Fehler beim Aktualisieren des Fortschritts:", error);
+      // Revert on failure
+      setAllWorks((prev) =>
+        prev.map((w) =>
+          w.work_id === work.work_id ? { ...w, current_episode: current } : w
+        )
+      );
     }
   };
 
-  const filteredWorks = allWorks.filter(w => aniListDetails[w.work_id]?.type === contentType);
+  const openEditModal = (work: UserWork) => {
+    setEditingWork(work);
+    setEditEpisode(work.current_episode || 0);
+    setEditStatus(work.status);
+  };
 
-  let isRankingReset = false;
-  if (userProfile) {
-    const rankingData = contentType === "ANIME" ? userProfile.weekly_ranking_anime : userProfile.weekly_ranking_manga;
-    const lastActive = rankingData?.last_active || 0;
-    const d = new Date();
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(d.setDate(diff));
-    monday.setHours(0, 0, 0, 0);
-    isRankingReset = lastActive < monday.getTime();
-  }
+  const handleSaveQuickEdit = async () => {
+    if (!editingWork) return;
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+
+    const prevEpisode = editingWork.current_episode || 0;
+    const prevStatus = editingWork.status;
+    const sanitizedEpisode = Math.max(0, editEpisode);
+
+    setIsSavingEdit(true);
+
+    // Optimistic update
+    setAllWorks((prev) =>
+      prev.map((w) =>
+        w.work_id === editingWork.work_id
+          ? {
+              ...w,
+              current_episode: sanitizedEpisode,
+              status: editStatus,
+              auto_added: false,
+            }
+          : w
+      )
+    );
+
+    try {
+      const promises: Promise<void>[] = [];
+      if (sanitizedEpisode !== prevEpisode) {
+        promises.push(updateEpisodeProgress(uid, editingWork.work_id, sanitizedEpisode));
+      }
+      if (editStatus !== prevStatus) {
+        promises.push(updateUserWorkStatus(uid, editingWork.work_id, editStatus));
+      }
+      await Promise.all(promises);
+      setEditingWork(null);
+    } catch (error) {
+      console.error("Fehler beim Speichern:", error);
+      // Revert on error
+      setAllWorks((prev) =>
+        prev.map((w) =>
+          w.work_id === editingWork.work_id
+            ? { ...w, current_episode: prevEpisode, status: prevStatus }
+            : w
+        )
+      );
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const unitPrefix = contentType === "MANGA" ? "KAP" : "EP";
+  const progressBarColor = contentType === "MANGA" ? "bg-pink-500" : "bg-blue-500";
 
   return (
-    <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-5xl mx-auto">
-      <h2 className="flex items-center gap-2 text-xl font-bold">
-        <LibraryIcon className="text-blue-500" /> 
-        Meine Bibliothek
-      </h2>
+    <div className="flex flex-col gap-5 px-4 pt-6 pb-24 max-w-4xl mx-auto">
+      {/* Header + ContentType Switch */}
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="flex items-center gap-2.5 text-xl font-bold text-white">
+          <LibraryIcon className="text-blue-500" size={22} />
+          Meine Bibliothek
+        </h1>
 
-      <form className="relative" onSubmit={(e) => {
-        e.preventDefault();
-        const val = (e.target as any).elements.q.value;
-        if(val) router.push(`/search?q=${encodeURIComponent(val)}`);
-      }}>
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
-        <input 
-          name="q"
-          type="text" 
-          placeholder={`In ${contentType} suchen oder neues hinzufügen...`}
-          className="w-full rounded-lg border border-gray-800 bg-[#1a1d24] p-3 pl-10 text-white focus:border-blue-500 focus:outline-none"
-        />
-        <button type="submit" className="hidden" />
-      </form>
+        <div className="flex items-center bg-[#1a1d24] border border-gray-800 rounded-full p-1">
+          <button
+            type="button"
+            onClick={() => setContentType("ANIME")}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+              contentType === "ANIME"
+                ? "bg-blue-600 text-white"
+                : "text-gray-400 hover:text-white"
+            }`}
+          >
+            <Tv size={13} />
+            Anime
+          </button>
+          <button
+            type="button"
+            onClick={() => setContentType("MANGA")}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+              contentType === "MANGA"
+                ? "bg-pink-600 text-white"
+                : "text-gray-400 hover:text-white"
+            }`}
+          >
+            <BookOpen size={13} />
+            Manga
+          </button>
+        </div>
+      </div>
 
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h3 className="text-lg font-bold flex items-center gap-2">
-                <LayoutGrid size={18} className="text-blue-500" />
-                Wochen-Ranking ({contentType})
-              </h3>
-              <p className="text-xs text-gray-400">Sortiere deine aktuellen Favoriten dieser Woche.</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setIsEditingRanking(!isEditingRanking)} className={`flex items-center gap-2 text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-lg ${isEditingRanking ? "bg-red-600 hover:bg-red-700 text-white" : "bg-gray-700 hover:bg-gray-600 text-white"}`}>{isEditingRanking ? "Fertig" : "Bearbeiten"}</button><button onClick={handleSaveSnapshot} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-lg">
-                <Share size={14} /> Im Feed teilen
-              </button>
-            </div>
-          </div>
-          
-          <SortableContext items={items} strategy={rectSortingStrategy}>
-            <div className={`grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 pb-2 transition-all duration-500 ${isRankingReset ? "opacity-50 grayscale" : ""}`}>
-              {items.map((id, index) => {
-                const uWork = allWorks.find(w => w.work_id === id);
-                const prevRanking = contentType === "ANIME" ? userProfile?.weekly_ranking_anime?.previous : userProfile?.weekly_ranking_manga?.previous;
-                let prevRank = prevRanking ? prevRanking.indexOf(id) : -1;
-                if (prevRank === -1 && uWork && uWork.top9_rank) {
-                  prevRank = uWork.top9_rank - 1;
-                }
-                const isEligible = id.startsWith('empty') ? undefined : 
-                  (uWork && aniListDetails[id] && !pausedWorkIds.has(id)) ? isEligibleForWeeklyRanking(uWork, aniListDetails[id], globalOverrides[id]) : false;
-                return (
-                  <SortableItem 
-                    key={id} 
-                    id={id} 
-                    index={index} 
-                    workDetails={aniListDetails[id]} 
-                    userWork={uWork} 
-                    previousRank={prevRank} 
-                    globalOverride={globalOverrides[id]} 
-                    isEligible={isEligible}
-                    isPaused={pausedWorkIds.has(id)}
-                    isEditing={isEditingRanking}
-                    onRemove={handleRemoveFromRanking} 
-                    onClick={() => handleEmptySlotClick(index)}
-                  />
-                );
-              })}
-            </div>
-          </SortableContext>
-        </section>
-        
-        <section className="mt-4">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="text-lg font-bold">Alle Werke</h3>
-          </div>
-          
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
-            <div className="flex w-full sm:w-auto bg-[#1a1d24] border border-gray-800 rounded-lg overflow-hidden shrink-0">
-              <button
-                onClick={() => setActiveTab("CURRENT")}
-                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-md transition ${activeTab === "CURRENT" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}
+      {/* Top Search & Sort Bar */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div className="relative flex-1">
+          <Search
+            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500"
+            size={16}
+          />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Suche in Bibliothek..."
+            className="w-full rounded-full border border-gray-800 bg-[#1a1d24] py-2.5 pl-10 pr-9 text-sm text-white placeholder:text-gray-500 focus:border-blue-500 focus:outline-none transition-colors"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
+              aria-label="Suche zurücksetzen"
+            >
+              <X size={15} />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 sm:pb-0 shrink-0">
+          {SORT_OPTIONS.map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={() => setSortBy(opt.key)}
+              className={`px-3 py-2 rounded-full text-xs font-semibold whitespace-nowrap border transition-colors ${
+                sortBy === opt.key
+                  ? "bg-[#222631] border-gray-600 text-white"
+                  : "bg-[#1a1d24] border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
+              }`}
+            >
+              {opt.key === "BEHIND" && contentType === "MANGA"
+                ? "Offene Kapitel"
+                : opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Status Pill-Tabs with live counts */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+        {STATUS_TABS.map((tab) => {
+          const isActive = activeTab === tab.key;
+          const count = statusCounts[tab.key];
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap border transition-all ${
+                isActive
+                  ? "bg-blue-600 border-blue-500 text-white shadow-sm"
+                  : "bg-[#1a1d24] border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
+              }`}
+            >
+              {tab.label} ({count})
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Watchlist / Tracking Rows */}
+      {isLoading ? (
+        <div className="flex flex-col gap-3">
+          {Array(6)
+            .fill(0)
+            .map((_, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-3.5 p-3 rounded-2xl border border-gray-800 bg-[#1a1d24] animate-pulse"
               >
-                <Play size={12} /> Aktiv
-              </button>
-              <button
-                onClick={() => setActiveTab("COMPLETED")}
-                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-md transition ${activeTab === "COMPLETED" ? "bg-green-600 text-white" : "text-gray-400 hover:text-white"}`}
-              >
-                <Check size={12} /> Fertig
-              </button>
-              <button
-                onClick={() => setActiveTab("PLANNING")}
-                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-md transition ${activeTab === "PLANNING" ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"}`}
-              >
-                <Bookmark size={12} /> Wunschliste
-              </button>
-            </div>
+                <div className="w-14 h-20 rounded-lg bg-gray-800 shrink-0" />
+                <div className="flex-1 space-y-2.5">
+                  <div className="h-4 w-2/3 rounded bg-gray-800" />
+                  <div className="h-1.5 w-full rounded-full bg-gray-800" />
+                  <div className="h-3 w-1/3 rounded bg-gray-800" />
+                </div>
+                <div className="w-20 h-8 rounded-full bg-gray-800 shrink-0" />
+              </div>
+            ))}
+        </div>
+      ) : visibleWorks.length === 0 ? (
+        <div className="rounded-2xl border border-gray-800 bg-[#1a1d24] p-10 text-center text-sm text-gray-400">
+          {searchQuery
+            ? "Keine passenden Einträge in dieser Kategorie gefunden."
+            : "Keine Werke in dieser Kategorie vorhanden."}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2.5">
+          {visibleWorks.map((work) => {
+            const details = aniListDetails[work.work_id];
+            const globalOverride = globalOverrides[work.work_id];
+            const isPaused = pausedWorkIds.has(work.work_id);
 
-            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-              <span className="text-xs text-gray-400 font-bold hidden sm:inline">Sortieren:</span>
-              <select 
-                value={sortBy} 
-                onChange={e => setSortBy(e.target.value as any)}
-                className="bg-[#1a1d24] border border-gray-800 rounded-lg text-xs font-bold text-gray-300 py-1.5 px-3 outline-none focus:border-blue-500 transition-colors w-full sm:w-auto cursor-pointer"
+            const title =
+              details?.title?.english ||
+              details?.title?.romaji ||
+              `Werk #${work.work_id}`;
+            const coverSrc =
+              details?.coverImage?.large || details?.coverImage?.extraLarge;
+
+            const current = work.current_episode || 0;
+            const total = getTotalCount(work, details, globalOverride);
+            const progressPct = total
+              ? Math.min(100, Math.max(0, (current / total) * 100))
+              : current > 0
+              ? 100
+              : 0;
+
+            const behindCount = computeBehindCount(
+              work,
+              details,
+              globalOverride,
+              isPaused
+            );
+            const nextReleaseText = formatNextReleaseLabel(
+              work,
+              details,
+              globalOverride,
+              isPaused
+            );
+
+            const isCompleted =
+              work.status === "COMPLETED" ||
+              (total !== null && total > 0 && current >= total);
+
+            return (
+              <div
+                key={work.work_id}
+                className="flex items-center gap-3.5 p-3 rounded-2xl border border-gray-800/90 bg-[#1a1d24] hover:border-gray-700 transition-colors"
               >
-                <option value="RELEASE">Kürzlich aktualisiert</option>
-                <option value="SCORE">Bewertung</option>
-                <option value="PROGRESS">Fortschritt</option>
-                <option value="TITLE">Alphabetisch</option>
-              </select>
-            </div>
-          </div>
-          
-          {isLoading ? (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-              {Array(10).fill(0).map((_, i) => (
-                <div key={i} className="aspect-[3/4] rounded-xl border border-gray-800 bg-gray-800/50 animate-pulse" />
-              ))}
-            </div>
-          ) : filteredWorks.filter(w => w.status === activeTab).length === 0 ? (
-            <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-8 text-center text-gray-500">
-              Keine Werke in dieser Kategorie gefunden.
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
-              {filteredWorks
-                .filter(w => w.status === activeTab)
-                .sort((a, b) => {
-                  const detA = aniListDetails[a.work_id];
-                  const detB = aniListDetails[b.work_id];
-                  
-                  if (sortBy === "SCORE") {
-                    const scoreA = a.evaluation?.overallScore || 0;
-                    const scoreB = b.evaluation?.overallScore || 0;
-                    if (scoreB !== scoreA) return scoreB - scoreA;
-                  }
-                  if (sortBy === "PROGRESS") {
-                    const pA = a.current_episode || 0;
-                    const pB = b.current_episode || 0;
-                    if (pB !== pA) return pB - pA;
-                  }
-                  if (sortBy === "TITLE") {
-                    const titleA = detA?.title?.romaji || "";
-                    const titleB = detB?.title?.romaji || "";
-                    return titleA.localeCompare(titleB);
-                  }
-                  
-                  // RELEASE (default fallback to ID/Timestamp or nothing if exact match isn't available)
-                  // Assuming larger ID means newer entry as simple fallback
-                  return parseInt(b.work_id) - parseInt(a.work_id);
-                })
-                .map(work => {
-                const details = aniListDetails[work.work_id];
-                const globalOverride = globalOverrides[work.work_id];
-                let behindCount = 0;
-                if (details) {
-                  const currentEp = work.current_episode || 0;
-                  let maxAiredEp = 0;
-                  let totalEps = 9999;
-                  if (globalOverride?.manualMaxEpisode !== undefined && globalOverride?.manualMaxEpisode !== null) {
-                    totalEps = globalOverride.manualMaxEpisode;
-                  } else if (work.manual_max_episode !== undefined && work.manual_max_episode !== null) {
-                    totalEps = work.manual_max_episode;
-                  }
-                  
-                  if (globalOverride?.manualAvailableEps !== undefined && globalOverride?.manualAvailableEps !== null) {
-                    maxAiredEp = globalOverride.manualAvailableEps;
-                  } else if ((work as any).manual_available_eps !== undefined && (work as any).manual_available_eps !== null) {
-                    maxAiredEp = Number((work as any).manual_available_eps);
-                  } else if (details.type === "MANGA") {
-                    maxAiredEp = totalEps !== 9999 ? totalEps : (details.chapters || 0);
-                  } else {
-                    if (details.status === "RELEASING" && details.nextAiringEpisode) {
-                      maxAiredEp = details.nextAiringEpisode.episode - 1;
-                    } else if (details.status === "RELEASING") {
-                      maxAiredEp = currentEp; // Assume they are up to date if AniList doesn't know
-                    } else if (details.status === "FINISHED") {
-                      maxAiredEp = totalEps !== 9999 ? totalEps : (details.episodes || 0);
-                    } else {
-                      maxAiredEp = 0;
-                    }
-                  }
-                  const offset = work.synchro_offset_episodes || 0; if (globalOverride?.manualAvailableEps == null && (work as any).manual_available_eps == null) { maxAiredEp = Math.max(0, maxAiredEp - offset); }
-                  const isPaused = pausedWorkIds.has(work.work_id);
-                  if (isPaused) {
-                    maxAiredEp = currentEp;
-                  }
-                  behindCount = Math.max(0, maxAiredEp - currentEp);
-                }
+                {/* Left: Cover */}
+                <Link
+                  href={`/work/${work.work_id}`}
+                  className="relative w-14 h-20 rounded-lg overflow-hidden bg-gray-800 shrink-0"
+                >
+                  {coverSrc ? (
+                    <Image
+                      src={coverSrc}
+                      alt={title}
+                      fill
+                      sizes="56px"
+                      className="object-cover"
+                    />
+                  ) : null}
+                </Link>
 
-                // Treat paused items as eligible if they were otherwise up to date
-                const isEligibleForRanking = work.status === "CURRENT" && !pausedWorkIds.has(work.work_id) && 
-                  (details ? isEligibleForWeeklyRanking(work, details, globalOverride) : true);
-
-                const content = (
-                  <div 
-                    className={`block group relative aspect-[3/4] overflow-hidden rounded-xl border border-gray-800 bg-[#1a1d24] transition hover:border-blue-500 hover:shadow-lg ${work.status === "CURRENT" ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${work.auto_added ? "opacity-50 grayscale hover:grayscale-0 hover:opacity-100" : ""}`}
-                    onPointerDown={(e) => {
-                      e.currentTarget.dataset.startX = e.clientX.toString();
-                      e.currentTarget.dataset.startY = e.clientY.toString();
-                    }}
-                    onClick={(e) => {
-                      const startX = parseFloat(e.currentTarget.dataset.startX || "0");
-                      const startY = parseFloat(e.currentTarget.dataset.startY || "0");
-                      const dx = Math.abs(e.clientX - startX);
-                      const dy = Math.abs(e.clientY - startY);
-                      if (dx > 10 || dy > 10) {
-                        e.preventDefault();
-                        return;
-                      }
-                      router.push(`/work/${work.work_id}`);
-                    }}
+                {/* Middle: Title, Progress Bar, Next Release */}
+                <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                  <Link
+                    href={`/work/${work.work_id}`}
+                    className="font-semibold text-sm sm:text-base text-white hover:text-blue-400 transition-colors line-clamp-1"
                   >
-                    {details ? (
-                      <Image src={details.coverImage?.extraLarge || details.coverImage?.large} alt="Cover" fill sizes="(max-width: 768px) 33vw, 20vw" className="object-cover transition duration-300 group-hover:scale-105 pointer-events-none" />
-                    ) : (
-                      <div className="w-full h-full animate-pulse bg-gray-800/50" />
-                    )}
-                    
-                    {pausedWorkIds.has(work.work_id) && (
-                      <div className="absolute inset-0 bg-yellow-600/50 flex flex-col items-center justify-center z-10 pointer-events-none">
-                        <PauseCircle size={32} className="text-white drop-shadow-lg" />
-                        <span className="text-white font-bold text-xs mt-1 drop-shadow-md uppercase tracking-wider">Pausiert</span>
-                      </div>
+                    {title}
+                  </Link>
+
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex-1 h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          isCompleted ? "bg-green-500" : progressBarColor
+                        }`}
+                        style={{ width: `${progressPct}%` }}
+                      />
+                    </div>
+                    <span className="text-[11px] font-semibold text-gray-300 tabular-nums shrink-0">
+                      {unitPrefix} {current} / {total ?? "?"}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center flex-wrap gap-2">
+                    {nextReleaseText && (
+                      <span className="text-xs text-gray-400 truncate">
+                        {nextReleaseText}
+                      </span>
                     )}
                     {behindCount > 0 && (
-                      <div className="absolute top-1 right-1 flex items-center justify-center rounded-full bg-red-600 text-[10px] px-1.5 py-0.5 font-bold text-white shadow-md z-10 pointer-events-none">
-                        {behindCount}
-                      </div>
+                      <span className="inline-flex items-center rounded-full bg-blue-500/15 border border-blue-500/30 px-2 py-0.5 text-[10px] font-semibold text-blue-400">
+                        {behindCount} offen
+                      </span>
                     )}
-                    {sortBy === "SCORE" && work.evaluation?.overallScore !== undefined && work.evaluation.overallScore > 0 && (
-                      <div className="absolute top-1 left-8 flex items-center justify-center rounded-full border border-yellow-400 bg-yellow-600/90 px-1.5 py-0.5 text-[10px] font-bold text-white shadow-md z-10 pointer-events-none gap-1">
-                        <Star size={10} className="fill-white" /> {work.evaluation.overallScore.toFixed(1)}
-                      </div>
-                    )}
-                    {isEligibleForRanking && (
-                      <div className="absolute top-1 left-1 flex items-center justify-center rounded-full bg-blue-600/90 p-1 shadow-md z-10 pointer-events-none" title="Bereit fürs Wochen-Ranking!">
-                        <Star size={12} className="fill-white text-white" />
-                      </div>
-                    )}
-                    {work.auto_added && (
-                      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/80 text-white text-[10px] px-2 py-1 rounded font-bold pointer-events-none z-10">
-                        Prequel (Unbestätigt)
-                      </div>
-                    )}
-                    {/* Status Badge */}
-                    <div className="absolute bottom-0 w-full bg-gradient-to-t from-black/90 to-transparent p-2 text-center text-[10px] font-bold text-white opacity-0 transition group-hover:opacity-100 pointer-events-none">
-                      {work.status}
-                    </div>
                   </div>
-                );
-
-                return isEligibleForRanking ? (
-                  <DraggableLibraryItem key={work.work_id} id={work.work_id}>
-                    {content}
-                  </DraggableLibraryItem>
-                ) : (
-                  <div key={work.work_id} className="opacity-75 hover:opacity-100 transition">
-                    {content}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
-      </DndContext>
-
-      {/* Modal for selecting a work for an empty slot */}
-      {isSelectorOpen && selectingIndex !== null && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center p-4">
-          <div className="bg-[#1a1d24] border border-gray-800 rounded-2xl w-full max-w-lg p-6 flex flex-col max-h-[80vh] shadow-2xl">
-            <div className="flex justify-between items-center mb-4 shrink-0">
-              <h3 className="text-lg font-bold">Werk für Platz {selectingIndex + 1} auswählen</h3>
-              <button onClick={() => setIsSelectorOpen(false)} className="text-gray-400 hover:text-white text-xl leading-none">✕</button>
-            </div>
-            <div className="overflow-y-auto flex-1 grid grid-cols-3 sm:grid-cols-4 gap-3 pr-2 scrollbar-thin">
-              {filteredWorks
-                .filter(w => !items.includes(w.work_id) && w.status === "CURRENT")
-                .filter(w => {
-                  const details = aniListDetails[w.work_id];
-                  if (!details) return true;
-                  return isEligibleForWeeklyRanking(w, details, globalOverrides[w.work_id]);
-                })
-                .map(w => (
-                <button 
-                  key={w.work_id} 
-                  onClick={() => handleSelectWorkForSlot(w.work_id)}
-                  className="relative aspect-[3/4] rounded-lg overflow-hidden border border-gray-800 hover:border-blue-500 text-left transition focus:outline-none"
-                >
-                  <Image src={aniListDetails[w.work_id]?.coverImage?.large} alt="Cover" fill sizes="(max-width: 768px) 33vw, 25vw" className="object-cover" />
-                  <div className="absolute bottom-0 w-full bg-black/80 p-2 text-[10px] font-bold text-white line-clamp-2">
-                    {aniListDetails[w.work_id]?.title?.english || aniListDetails[w.work_id]?.title?.romaji}
-                  </div>
-                </button>
-              ))}
-              {filteredWorks.filter(w => !items.includes(w.work_id) && w.status === "CURRENT").filter(w => {
-                  const details = aniListDetails[w.work_id];
-                  if (!details) return true;
-                  return isEligibleForWeeklyRanking(w, details, globalOverrides[w.work_id]);
-                }).length === 0 && (
-                <div className="col-span-full text-center text-gray-500 py-8">
-                  Keine verfügbaren Werke in "Aktiv" gefunden.
                 </div>
-              )}
+
+                {/* Right: Quick +1 Button & Quick-Edit Pencil */}
+                <div className="flex items-center gap-2 shrink-0">
+                  {isCompleted ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-green-500/15 border border-green-500/30 px-3 py-1.5 text-xs font-semibold text-green-400">
+                      <Check size={13} />
+                      Fertig
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleQuickIncrement(work)}
+                      className="rounded-full bg-[#222631] hover:bg-blue-600 text-xs font-semibold text-white px-3 py-1.5 transition-colors whitespace-nowrap"
+                    >
+                      + {unitPrefix} {current + 1}
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => openEditModal(work)}
+                    className="p-2 rounded-full bg-[#222631] hover:bg-gray-700 text-gray-300 hover:text-white transition-colors"
+                    aria-label="Schnell bearbeiten"
+                    title="Schnell bearbeiten"
+                  >
+                    <Edit2 size={14} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Quick-Edit Modal */}
+      {editingWork && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={() => !isSavingEdit && setEditingWork(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-gray-800 bg-[#161920] p-5 shadow-2xl flex flex-col gap-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Schnell bearbeiten
+                </p>
+                <h2 className="text-base font-bold text-white line-clamp-2 mt-0.5">
+                  {aniListDetails[editingWork.work_id]?.title?.english ||
+                    aniListDetails[editingWork.work_id]?.title?.romaji ||
+                    `Werk #${editingWork.work_id}`}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingWork(null)}
+                className="p-1.5 rounded-full text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+                aria-label="Schließen"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Episode / Chapter Adjuster */}
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-semibold text-gray-300">
+                {contentType === "MANGA" ? "Aktuelles Kapitel" : "Aktuelle Folge"}
+              </label>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditEpisode((prev) => Math.max(0, prev - 1))}
+                  className="p-2.5 rounded-xl bg-[#222631] hover:bg-gray-700 text-white transition-colors"
+                  aria-label="Verringern"
+                >
+                  <Minus size={16} />
+                </button>
+                <input
+                  type="number"
+                  min={0}
+                  value={editEpisode}
+                  onChange={(e) =>
+                    setEditEpisode(Math.max(0, parseInt(e.target.value, 10) || 0))
+                  }
+                  className="flex-1 rounded-xl border border-gray-800 bg-[#1a1d24] px-3 py-2 text-center text-base font-bold text-white focus:border-blue-500 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setEditEpisode((prev) => prev + 1)}
+                  className="p-2.5 rounded-xl bg-[#222631] hover:bg-gray-700 text-white transition-colors"
+                  aria-label="Erhöhen"
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Status Selector */}
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-semibold text-gray-300">Status</label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {STATUS_TABS.map((tab) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setEditStatus(tab.key)}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${
+                      editStatus === tab.key
+                        ? "bg-blue-600 border-blue-500 text-white"
+                        : "bg-[#1a1d24] border-gray-800 text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <Link
+                href={`/work/${editingWork.work_id}`}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors"
+              >
+                <ExternalLink size={14} />
+                Zur Detailseite
+              </Link>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingWork(null)}
+                  disabled={isSavingEdit}
+                  className="px-4 py-2 rounded-full text-xs font-semibold text-gray-300 hover:text-white bg-[#222631] hover:bg-gray-700 transition-colors"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveQuickEdit}
+                  disabled={isSavingEdit}
+                  className="px-4 py-2 rounded-full text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 transition-colors"
+                >
+                  {isSavingEdit ? "Speichern..." : "Speichern"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

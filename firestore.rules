@@ -78,6 +78,24 @@ service cloud.firestore {
     //   - timestamp: string (required, immutable)
     //   - comments_count: number (optional)
     //   - likes: list of strings (optional, max 5000 items)
+    //   - review_items: list (optional, max 50 items)
+    //   - work_ids: list of strings (optional, max 50 items)
+    //   - reactions: map (optional, max 20 keys)
+    //
+    // Collection: episode_feedback
+    // Document ID: {feedbackId}
+    // Fields:
+    //   - feedback_id: string (required, max 128 chars, immutable)
+    //   - user_id: string (required, matches auth.uid, immutable)
+    //   - work_id: string (required, 1-100 chars, immutable)
+    //   - episode_num: number (required, >= 0)
+    //   - media_type: string (required, 'ANIME' or 'MANGA')
+    //   - text: string (required, max 2000 chars)
+    //   - timestamp: string (required, max 50 chars, immutable)
+    //   - rating: number (optional, 1-10)
+    //   - activity_id: string (optional, max 128 chars)
+    //   - reactions: map (optional, max 20 keys)
+    //   - likes: list of strings (optional, max 5000 items)
     //
     // Collection: activity_comments
     // Document ID: {commentId}
@@ -203,6 +221,23 @@ service cloud.firestore {
              (!('text' in data) || (data.text is string && data.text.size() <= 5000)) &&
              (!('details' in data) || (data.details is string && data.details.size() <= 5000)) &&
              (!('comments_count' in data) || (data.comments_count is number && data.comments_count >= 0)) &&
+             (!('likes' in data) || isValidList(data.likes, 5000)) &&
+             (!('review_items' in data) || (data.review_items is list && data.review_items.size() <= 50)) &&
+             (!('work_ids' in data) || isValidList(data.work_ids, 50)) &&
+             (!('reactions' in data) || (data.reactions is map && data.reactions.size() <= 20));
+    }
+
+    function isValidEpisodeFeedback(data) {
+      return data.feedback_id is string && data.feedback_id.size() <= 128 &&
+             data.user_id is string && data.user_id == request.auth.uid &&
+             data.work_id is string && data.work_id.size() >= 1 && data.work_id.size() <= 100 &&
+             data.episode_num is number && data.episode_num >= 0 &&
+             data.media_type in ['ANIME', 'MANGA'] &&
+             data.text is string && data.text.size() <= 2000 &&
+             data.timestamp is string && data.timestamp.size() <= 50 &&
+             (!('rating' in data) || (data.rating is number && data.rating >= 1 && data.rating <= 10)) &&
+             (!('activity_id' in data) || (data.activity_id is string && data.activity_id.size() <= 128)) &&
+             (!('reactions' in data) || (data.reactions is map && data.reactions.size() <= 20)) &&
              (!('likes' in data) || isValidList(data.likes, 5000));
     }
 
@@ -318,10 +353,11 @@ service cloud.firestore {
          request.resource.data.user_id == request.auth.uid &&
          areImmutableFieldsUnchanged(['activity_id', 'user_id', 'action_type', 'timestamp']) &&
          isValidActivity(request.resource.data)) ||
-        // Likes or comments counter update by community
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'comments_count']) &&
+        // Likes, comments counter, or reactions update by community
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'comments_count', 'reactions']) &&
          (!('likes' in request.resource.data) || isValidList(request.resource.data.likes, 5000)) &&
-         (!('comments_count' in request.resource.data) || (request.resource.data.comments_count is number && request.resource.data.comments_count >= 0)))
+         (!('comments_count' in request.resource.data) || (request.resource.data.comments_count is number && request.resource.data.comments_count >= 0)) &&
+         (!('reactions' in request.resource.data) || (request.resource.data.reactions is map && request.resource.data.reactions.size() <= 20)))
       );
       allow delete: if isAuthenticated() && resource.data.user_id == request.auth.uid;
     }
@@ -337,9 +373,10 @@ service cloud.firestore {
          request.resource.data.user_id == request.auth.uid &&
          areImmutableFieldsUnchanged(['activity_id', 'user_id', 'action_type', 'timestamp']) &&
          isValidActivity(request.resource.data)) ||
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'comments_count']) &&
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'comments_count', 'reactions']) &&
          (!('likes' in request.resource.data) || isValidList(request.resource.data.likes, 5000)) &&
-         (!('comments_count' in request.resource.data) || (request.resource.data.comments_count is number && request.resource.data.comments_count >= 0)))
+         (!('comments_count' in request.resource.data) || (request.resource.data.comments_count is number && request.resource.data.comments_count >= 0)) &&
+         (!('reactions' in request.resource.data) || (request.resource.data.reactions is map && request.resource.data.reactions.size() <= 20)))
       );
       allow delete: if isAuthenticated() && resource.data.user_id == request.auth.uid;
     }
@@ -387,6 +424,26 @@ service cloud.firestore {
     match /app_config/{configId} {
       allow read: if isAuthenticated();
       allow write: if false;
+    }
+
+    // 10. Episode/Chapter Feedback
+    match /episode_feedback/{feedbackId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+                       request.resource.data.user_id == request.auth.uid &&
+                       isValidEpisodeFeedback(request.resource.data);
+      allow update: if isAuthenticated() && (
+        // Author edit
+        (resource.data.user_id == request.auth.uid &&
+         request.resource.data.user_id == request.auth.uid &&
+         areImmutableFieldsUnchanged(['feedback_id', 'user_id', 'work_id', 'timestamp']) &&
+         isValidEpisodeFeedback(request.resource.data)) ||
+        // Reactions or likes update by community
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'likes']) &&
+         (!('reactions' in request.resource.data) || (request.resource.data.reactions is map && request.resource.data.reactions.size() <= 20)) &&
+         (!('likes' in request.resource.data) || isValidList(request.resource.data.likes, 5000)))
+      );
+      allow delete: if isAuthenticated() && resource.data.user_id == request.auth.uid;
     }
 
     // Default deny

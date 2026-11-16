@@ -14,6 +14,7 @@ import { saveUserWork, getUserWork, updateEpisodeProgress, removeUserWork, updat
 import { addToHistory } from "@/lib/db/users";
 import { WorkSocialFeed } from "./WorkSocialFeed";
 import { createActivity } from "@/lib/db/feed";
+import { getUserEpisodeRatingsForWork } from "@/lib/db/feedback";
 import { useAppStore } from "@/lib/store";
 
 export default function WorkDetailPage() {
@@ -64,6 +65,10 @@ export default function WorkDetailPage() {
   const [rhythmType, setRhythmType] = useState<"strict" | "flexible">("strict");
   const [flexibleMinDay, setFlexibleMinDay] = useState<number>(5);
   const [flexibleMaxDay, setFlexibleMaxDay] = useState<number>(0);
+  const [episodeRatingStats, setEpisodeRatingStats] = useState<{ average: number | null; count: number }>({
+    average: null,
+    count: 0,
+  });
 
   useEffect(() => {
     async function loadData() {
@@ -72,13 +77,17 @@ export default function WorkDetailPage() {
       try {
         const user = auth?.currentUser;
         
-        const [data, userWork, overrides] = await Promise.all([
+        const [data, userWork, overrides, epRatings] = await Promise.all([
           fetchAniList(GET_WORK_DETAILS, { id: parseInt(id, 10) }),
           user ? getUserWork(user.uid, id) : Promise.resolve(null),
-          getCalendarOverrides()
+          getCalendarOverrides(),
+          user
+            ? getUserEpisodeRatingsForWork(user.uid, id)
+            : Promise.resolve({ average: null, count: 0, items: [] }),
         ]);
 
         setWork(data.Media);
+        setEpisodeRatingStats({ average: epRatings.average, count: epRatings.count });
         
 
         
@@ -722,6 +731,20 @@ export default function WorkDetailPage() {
               </label>
             </div>
           </div>
+
+          {episodeRatingStats.count > 0 && episodeRatingStats.average !== null && (
+            <div className="mb-6 rounded-xl border border-blue-500/30 bg-blue-950/30 px-4 py-3">
+              <div className="flex items-center gap-2 text-sm font-bold text-blue-300">
+                <Star size={15} className="text-yellow-400 fill-yellow-400 shrink-0" />
+                <span>
+                  Dein {work.type === "MANGA" ? "Kapitel" : "Folgen"}-Durchschnitt: Ø {episodeRatingStats.average.toFixed(1)} / 10
+                </span>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">
+                (basierend auf {episodeRatingStats.count} bewerteten {work.type === "MANGA" ? "Kapiteln" : "Folgen"} aus deinen Reviews)
+              </p>
+            </div>
+          )}
 
           <div className="space-y-6">
             <div className="bg-[#141a29] p-4 rounded-xl border border-gray-800">
