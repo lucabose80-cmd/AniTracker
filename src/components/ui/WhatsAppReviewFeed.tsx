@@ -912,8 +912,8 @@ export default function WhatsAppReviewFeed({
 
       {/* PICKER MODAL FOR "+ Werk hinzufügen" */}
       {isPickerOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full sm:max-w-md bg-[#111827] border border-white/15 rounded-t-3xl sm:rounded-2xl p-4 max-h-[88vh] flex flex-col gap-3 shadow-2xl">
+        <div className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full sm:max-w-md bg-[#111827] border border-white/15 rounded-t-3xl sm:rounded-2xl p-4 pb-8 sm:pb-4 max-h-[85vh] overflow-y-auto flex flex-col gap-3 shadow-2xl">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-bold text-white">
                 {selectedWork ? "Review-Eintrag" : "Werk auswählen"}
@@ -1132,7 +1132,7 @@ export default function WhatsAppReviewFeed({
 
                 <button
                   type="button"
-                  disabled={!reviewText.trim()}
+                  disabled={!reviewText.trim() && rating === undefined}
                   onClick={handleAddDraftItem}
                   className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold text-sm transition-colors"
                 >
