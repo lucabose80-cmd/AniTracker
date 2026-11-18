@@ -1,13 +1,21 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @next/next/no-img-element */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { auth } from "@/lib/firebase";
 import { getAllUserWorks, updateEpisodeProgress } from "@/lib/db/works";
 import { fetchAniListBatch } from "@/lib/anilist";
 import { getCalendarOverrides, setCalendarOverride } from "@/lib/db/calendar";
 import { useAppStore } from "@/lib/store";
-import { Calendar as CalendarIcon, Clock, Tv, Edit2, Check, X, ChevronDown, Sparkles } from "lucide-react";
+import {
+  Calendar as CalendarIcon,
+  Clock,
+  Tv,
+  Edit2,
+  Check,
+  X,
+  ChevronDown,
+} from "lucide-react";
 import Link from "next/link";
 import { format, formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
@@ -15,13 +23,13 @@ import { usePathname } from "next/navigation";
 
 // Map JS getDay() (0 = Sunday, 1 = Monday) for the UI
 const DAYS = [
-  { label: "Mo", value: 1 },
-  { label: "Di", value: 2 },
-  { label: "Mi", value: 3 },
-  { label: "Do", value: 4 },
-  { label: "Fr", value: 5 },
-  { label: "Sa", value: 6 },
-  { label: "So", value: 0 },
+  { label: "Montag", short: "Mo", value: 1 },
+  { label: "Dienstag", short: "Di", value: 2 },
+  { label: "Mittwoch", short: "Mi", value: 3 },
+  { label: "Donnerstag", short: "Do", value: 4 },
+  { label: "Freitag", short: "Fr", value: 5 },
+  { label: "Samstag", short: "Sa", value: 6 },
+  { label: "Sonntag", short: "So", value: 0 },
 ];
 
 function getUnscheduledStatusText(status?: string) {
@@ -42,7 +50,7 @@ function getUnscheduledStatusText(status?: string) {
 }
 
 export default function CalendarPage() {
-  const { contentType, setContentType } = useAppStore();
+  const { contentType } = useAppStore();
   const [scheduledAnime, setScheduledAnime] = useState<any[]>([]);
   const [unscheduledAnime, setUnscheduledAnime] = useState<any[]>([]);
   const [scheduledManga, setScheduledManga] = useState<any[]>([]);
@@ -54,6 +62,7 @@ export default function CalendarPage() {
   const pathname = usePathname();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
+  const [selectedDayFilter, setSelectedDayFilter] = useState<number | "ALL">("ALL");
   const [isUnscheduledOpen, setIsUnscheduledOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDateString, setEditDateString] = useState("");
@@ -105,7 +114,6 @@ export default function CalendarPage() {
             computedAiringAt = over.airingAt;
             hasSchedule = true;
           } else if (over?.weeklyDay !== undefined && over?.weeklyTime !== undefined) {
-            // Compute next occurrence in the future
             const [hours, minutes] = over.weeklyTime.split(":").map(Number);
             const date = new Date();
             date.setHours(hours, minutes, 0, 0);
@@ -114,7 +122,6 @@ export default function CalendarPage() {
             let diff = over.weeklyDay - currentDay;
             if (diff < 0) diff += 7;
 
-            // If diff is 0 (today) but the time has already passed, the next occurrence is next week
             if (diff === 0 && date.getTime() < new Date().getTime()) {
               diff += 7;
             }
@@ -159,7 +166,6 @@ export default function CalendarPage() {
           }
 
           if (hasSchedule && computedAiringAt) {
-            // Shallow clone to inject the computed time safely
             const cloned = { ...m };
 
             let nextEp = m.nextAiringEpisode?.episode;
@@ -195,7 +201,6 @@ export default function CalendarPage() {
           }
         });
 
-        // Sort by airing time so they appear in chronological order for the day
         scheduledA.sort(
           (a: any, b: any) => a.nextAiringEpisode.airingAt - b.nextAiringEpisode.airingAt
         );
@@ -240,7 +245,6 @@ export default function CalendarPage() {
     e.preventDefault();
     e.stopPropagation();
     setEditingId(item.id.toString());
-    // Convert unix timestamp to datetime-local string format YYYY-MM-DDTHH:mm
     const date = new Date(item.nextAiringEpisode.airingAt * 1000);
     const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
       .toISOString()
@@ -258,7 +262,6 @@ export default function CalendarPage() {
     await setCalendarOverride(workId, newUnix);
     setEditingId(null);
 
-    // Refresh
     loadData();
   };
 
@@ -274,7 +277,6 @@ export default function CalendarPage() {
 
     const nextEp = currentEp + 1;
 
-    // Optimistic UI update
     setUserWorkMap((prev) => ({
       ...prev,
       [strId]: {
@@ -304,47 +306,47 @@ export default function CalendarPage() {
   const unscheduledForCurrentType = contentType === "ANIME" ? unscheduledAnime : unscheduledManga;
 
   const todayDay = new Date().getDay();
-  const todayReleases = scheduledForCurrentType.filter((item) => {
-    const date = new Date(item.nextAiringEpisode.airingAt * 1000);
-    return date.getDay() === todayDay;
-  });
+  const tomorrowDay = (todayDay + 1) % 7;
+
+  // Order days chronologically starting with TODAY
+  const orderedDays = useMemo(() => {
+    const startIdx = DAYS.findIndex((d) => d.value === todayDay);
+    if (startIdx === -1) return DAYS;
+    return [...DAYS.slice(startIdx), ...DAYS.slice(0, startIdx)];
+  }, [todayDay]);
+
+  // Count releases per weekday for the quick-filter strip
+  const dayCounts = useMemo(() => {
+    const counts: Record<number, number> = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+    scheduledForCurrentType.forEach((item) => {
+      const d = new Date(item.nextAiringEpisode.airingAt * 1000).getDay();
+      counts[d] = (counts[d] || 0) + 1;
+    });
+    return counts;
+  }, [scheduledForCurrentType]);
+
+  const visibleDays = useMemo(() => {
+    if (selectedDayFilter === "ALL") return orderedDays;
+    return orderedDays.filter((d) => d.value === selectedDayFilter);
+  }, [orderedDays, selectedDayFilter]);
 
   return (
-    <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-lg mx-auto">
-      <div>
-        <h2 className="flex items-center gap-2 text-xl font-bold">
-          <CalendarIcon className="text-blue-500" />
-          Release Kalender
-        </h2>
-        <p className="text-xs text-gray-400 mt-1">
-          Zeigt nur Titel an, die in deiner Bibliothek als &quot;Aktiv&quot; markiert sind.
-        </p>
-      </div>
+    <div className="flex flex-col gap-5 px-4 pt-5 pb-24 max-w-2xl mx-auto">
+      {/* Compact Header */}
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h2 className="flex items-center gap-2 text-lg font-bold text-white">
+            <CalendarIcon className="text-blue-500" size={20} />
+            Wochenplan ({contentType === "MANGA" ? "Manga" : "Anime"})
+          </h2>
+          <p className="text-xs text-gray-400">
+            Deine aktiven Releases, sortiert ab heute
+          </p>
+        </div>
 
-      {/* Anime / Manga switcher */}
-      <div className="flex bg-[#1a1d24] p-1 rounded-xl border border-gray-800">
-        <button
-          type="button"
-          onClick={() => setContentType("ANIME")}
-          className={`flex-1 py-2 px-3 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-1.5 ${
-            contentType === "ANIME"
-              ? "bg-blue-600 text-white shadow-md"
-              : "text-gray-400 hover:text-white"
-          }`}
-        >
-          Anime ({scheduledAnime.length})
-        </button>
-        <button
-          type="button"
-          onClick={() => setContentType("MANGA")}
-          className={`flex-1 py-2 px-3 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-1.5 ${
-            contentType === "MANGA"
-              ? "bg-blue-600 text-white shadow-md"
-              : "text-gray-400 hover:text-white"
-          }`}
-        >
-          Manga ({scheduledManga.length})
-        </button>
+        <span className="text-xs font-semibold text-gray-400 bg-[#1a1d24] border border-gray-800 px-3 py-1 rounded-full shrink-0">
+          {scheduledForCurrentType.length} geplant
+        </span>
       </div>
 
       {!isLoggedIn ? (
@@ -353,87 +355,81 @@ export default function CalendarPage() {
         </div>
       ) : (
         <>
-          {/* Heute Summary Banner */}
-          {!isLoading && todayReleases.length > 0 && (
-            <div className="bg-gradient-to-r from-blue-950/70 via-blue-900/30 to-indigo-950/50 border border-blue-700/50 rounded-xl p-4 shadow-lg">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <Sparkles size={16} className="text-blue-400" />
-                  <h3 className="text-sm font-bold text-white">
-                    Heute ({todayReleases.length}{" "}
-                    {todayReleases.length === 1 ? "Release" : "Releases"})
-                  </h3>
-                </div>
-                <span className="text-[11px] font-semibold text-blue-300 bg-blue-500/20 px-2 py-0.5 rounded-full border border-blue-500/30">
-                  {DAYS.find((d) => d.value === todayDay)?.label}
-                </span>
-              </div>
-              <div className="flex flex-col gap-2">
-                {todayReleases.map((item) => {
-                  const date = new Date(item.nextAiringEpisode.airingAt * 1000);
-                  const strId = item.id.toString();
-                  const uWork = userWorkMap[strId];
-                  const offset = uWork?.synchro_offset_episodes || 0;
-                  let displayEp = item.nextAiringEpisode.episode;
-                  if (!item.isManualEpisode && offset > 0) {
-                    displayEp -= offset;
-                  }
-                  if (displayEp < 1) displayEp = item.nextAiringEpisode.episode;
+          {/* Weekday Filter Strip (Starting from Today) */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+            <button
+              type="button"
+              onClick={() => setSelectedDayFilter("ALL")}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap border transition-colors ${
+                selectedDayFilter === "ALL"
+                  ? "bg-blue-600 border-blue-500 text-white"
+                  : "bg-[#1a1d24] border-gray-800 text-gray-400 hover:text-white"
+              }`}
+            >
+              Alle Tage
+            </button>
 
-                  let timeLabel = `${format(date, "HH:mm")} Uhr`;
-                  if (item.rhythmType === "flexible" && item.flexibleDayRange) {
-                    const minL = DAYS.find((d) => d.value === item.flexibleDayRange.minDay)?.label;
-                    const maxL = DAYS.find((d) => d.value === item.flexibleDayRange.maxDay)?.label;
-                    timeLabel = `${minL} - ${maxL}`;
-                  }
+            {orderedDays.map((day) => {
+              const count = dayCounts[day.value] || 0;
+              const isToday = day.value === todayDay;
+              const isSelected = selectedDayFilter === day.value;
 
-                  return (
-                    <Link
-                      key={`today-${strId}`}
-                      href={`/work/${strId}`}
-                      className="flex items-center justify-between gap-3 bg-[#0f1115]/70 hover:bg-[#0f1115] border border-blue-900/40 hover:border-blue-500/60 rounded-lg px-3 py-2 transition-colors"
+              return (
+                <button
+                  key={day.value}
+                  type="button"
+                  onClick={() =>
+                    setSelectedDayFilter(isSelected ? "ALL" : day.value)
+                  }
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap border transition-colors ${
+                    isSelected
+                      ? "bg-blue-600 border-blue-500 text-white"
+                      : isToday
+                      ? "bg-blue-500/15 border-blue-500/40 text-blue-300"
+                      : count > 0
+                      ? "bg-[#1a1d24] border-gray-800 text-gray-200 hover:text-white"
+                      : "bg-[#1a1d24]/50 border-gray-800/50 text-gray-500"
+                  }`}
+                >
+                  <span>{isToday ? `Heute (${day.short})` : day.short}</span>
+                  {count > 0 && (
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                        isSelected
+                          ? "bg-white/20 text-white"
+                          : "bg-white/10 text-gray-300"
+                      }`}
                     >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-xs font-semibold text-gray-100 truncate">
-                          {item.title.english || item.title.romaji}
-                        </span>
-                        <span className="text-[11px] text-blue-400 font-medium shrink-0">
-                          {item.type === "MANGA" ? "Kap." : "Ep."} {displayEp}
-                        </span>
-                      </div>
-                      <span className="text-[11px] font-bold text-gray-300 bg-gray-800/80 px-2 py-0.5 rounded shrink-0 flex items-center gap-1">
-                        <Clock size={10} className="text-blue-400" />
-                        {timeLabel}
-                      </span>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
 
-          {/* Schedule List */}
-          <div className="flex flex-col gap-8">
+          {/* Unified Schedule List (No Duplicate Summary Box) */}
+          <div className="flex flex-col gap-5">
             {isLoading ? (
-              <div className="text-center text-gray-500 py-8 animate-pulse">Lade Kalender...</div>
+              <div className="text-center text-gray-500 py-8 animate-pulse">
+                Lade Kalender...
+              </div>
             ) : scheduledForCurrentType.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 px-4 text-gray-500 bg-[#1a1d24] border border-gray-800 rounded-xl border-dashed text-center">
-                <Tv size={48} className="mb-4 text-gray-700" strokeWidth={1} />
+                <Tv size={42} className="mb-3 text-gray-700" strokeWidth={1.2} />
                 <p className="text-sm font-semibold text-gray-300">
-                  Es erscheinen diese Woche keine neuen Folgen für {contentType === "ANIME" ? "Anime" : "Manga"}.
+                  Keine geplanten Releases für{" "}
+                  {contentType === "ANIME" ? "Anime" : "Manga"}.
                 </p>
-                {unscheduledForCurrentType.length > 0 ? (
-                  <p className="text-xs text-gray-400 mt-2 max-w-sm">
-                    Hinweis: Du folgst {unscheduledForCurrentType.length} {contentType === "ANIME" ? "Anime" : "Manga"} auf &apos;Aktiv&apos;, für die noch kein Ausstrahlungstermin bekannt ist.
-                  </p>
-                ) : (
-                  <p className="text-xs mt-2 text-gray-500">
-                    Füge mehr aktuell laufende {contentType === "ANIME" ? "Anime" : "Manga"} hinzu!
+                {unscheduledForCurrentType.length > 0 && (
+                  <p className="text-xs text-gray-400 mt-1.5 max-w-sm">
+                    Du hast {unscheduledForCurrentType.length} aktive Werke ohne
+                    festen Wochentag (siehe unten).
                   </p>
                 )}
               </div>
             ) : (
-              DAYS.map((day) => {
+              visibleDays.map((day) => {
                 const dayList = scheduledForCurrentType.filter((item) => {
                   const date = new Date(item.nextAiringEpisode.airingAt * 1000);
                   return date.getDay() === day.value;
@@ -441,27 +437,47 @@ export default function CalendarPage() {
 
                 if (dayList.length === 0) return null;
 
-                const isToday = new Date().getDay() === day.value;
+                const isToday = todayDay === day.value;
+                const isTomorrow = tomorrowDay === day.value;
 
                 return (
                   <div
-                    key={day.label}
-                    className={`flex flex-col gap-4 ${
+                    key={day.value}
+                    className={`flex flex-col gap-2.5 rounded-2xl p-3 border ${
                       isToday
-                        ? "bg-blue-900/10 -mx-4 px-4 py-4 rounded-xl border border-blue-900/50"
-                        : ""
+                        ? "bg-blue-950/20 border-blue-500/40"
+                        : "bg-[#14171f] border-gray-800/80"
                     }`}
                   >
-                    <h3
-                      className={`text-lg font-bold pb-2 ${
-                        isToday
-                          ? "text-blue-400 border-b border-blue-900/50"
-                          : "text-white border-b border-gray-800"
-                      }`}
-                    >
-                      {day.label} {isToday ? "(Heute)" : ""}
-                    </h3>
-                    <div className="flex flex-col gap-4">
+                    {/* Day Section Header */}
+                    <div className="flex items-center justify-between px-1">
+                      <div className="flex items-center gap-2">
+                        <h3
+                          className={`text-sm font-bold ${
+                            isToday ? "text-blue-400" : "text-white"
+                          }`}
+                        >
+                          {day.label}
+                        </h3>
+                        {isToday && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-600 text-white">
+                            Heute
+                          </span>
+                        )}
+                        {isTomorrow && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white/10 text-gray-300">
+                            Morgen
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-gray-400">
+                        {dayList.length}{" "}
+                        {dayList.length === 1 ? "Release" : "Releases"}
+                      </span>
+                    </div>
+
+                    {/* Day Releases */}
+                    <div className="flex flex-col gap-2">
                       {dayList.map((item) => {
                         const date = new Date(item.nextAiringEpisode.airingAt * 1000);
                         const strId = item.id.toString();
@@ -481,15 +497,15 @@ export default function CalendarPage() {
                           locale: de,
                         });
 
-                        let displayTime = timeString;
+                        let displayTime = `${timeString} Uhr`;
                         if (item.rhythmType === "flexible" && item.flexibleDayRange) {
                           const minL = DAYS.find(
                             (d) => d.value === item.flexibleDayRange.minDay
-                          )?.label;
+                          )?.short;
                           const maxL = DAYS.find(
                             (d) => d.value === item.flexibleDayRange.maxDay
-                          )?.label;
-                          displayTime = `${minL} - ${maxL}`;
+                          )?.short;
+                          displayTime = `${minL} – ${maxL}`;
                         }
 
                         // Calculate Behind Status
@@ -541,41 +557,56 @@ export default function CalendarPage() {
                         const behindCount = Math.max(0, episodesOut - currentEp);
 
                         const isEditing = editingId === strId;
+                        const unitShort = item.type === "MANGA" ? "Kap." : "Folge";
 
                         return (
                           <Link
                             href={`/work/${strId}`}
                             key={strId}
-                            className="relative flex gap-4 p-3 bg-[#1a1d24] border border-gray-800 rounded-xl shadow-md hover:border-blue-500 transition-colors group overflow-hidden"
+                            className="flex items-center gap-3 p-2.5 bg-[#1a1d24] border border-gray-800/90 hover:border-blue-500/60 rounded-xl transition-colors group"
                           >
+                            {/* Cover */}
                             <div className="relative shrink-0">
                               <img
                                 src={item.coverImage.large}
                                 alt="Cover"
-                                className="w-16 h-24 object-cover rounded-lg shadow-sm"
+                                className="w-12 h-16 object-cover rounded-lg bg-gray-800"
                               />
                               {behindCount > 0 && (
-                                <div className="absolute top-0 right-0 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-bl-lg border-b border-l border-gray-800">
+                                <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.2 rounded-full shadow">
                                   {behindCount}
-                                </div>
+                                </span>
                               )}
                             </div>
 
-                            <div className="flex flex-col justify-between flex-1 py-1">
-                              <div>
-                                <div className="flex justify-between items-start gap-2">
-                                  <h3 className="font-bold text-sm text-gray-200 line-clamp-2 group-hover:text-blue-400 transition-colors">
-                                    {item.title.english || item.title.romaji}
-                                  </h3>
-                                </div>
-                                <p className="text-xs text-blue-400 font-semibold mt-1">
-                                  {item.type === "MANGA" ? "Kapitel" : "Episode"} {displayEpisode}
-                                </p>
+                            {/* Info */}
+                            <div className="flex-1 min-w-0 flex flex-col gap-1">
+                              <h4 className="font-semibold text-sm text-white truncate group-hover:text-blue-400 transition-colors">
+                                {item.title.english || item.title.romaji}
+                              </h4>
+
+                              <div className="flex items-center flex-wrap gap-2 text-xs">
+                                <span className="font-bold text-blue-400">
+                                  {unitShort} {displayEpisode}
+                                </span>
+                                <span className="text-gray-600">•</span>
+                                <span className="inline-flex items-center gap-1 text-gray-300 font-medium">
+                                  <Clock size={11} className="text-gray-400" />
+                                  {displayTime}
+                                </span>
+                                <span className="text-[11px] text-gray-500">
+                                  ({countdown})
+                                </span>
                               </div>
 
-                              {isEditing ? (
+                              <span className="text-[11px] text-gray-400">
+                                Dein Stand: {unitShort} {currentEp}
+                                {behindCount > 0 ? ` (${behindCount} offen)` : ""}
+                              </span>
+
+                              {isEditing && (
                                 <div
-                                  className="flex items-center gap-2 mt-2"
+                                  className="flex items-center gap-2 mt-1"
                                   onClick={(e) => e.preventDefault()}
                                 >
                                   <input
@@ -600,45 +631,36 @@ export default function CalendarPage() {
                                     <X size={14} />
                                   </button>
                                 </div>
-                              ) : (
-                                <div className="flex flex-wrap justify-between items-center gap-2 mt-3">
-                                  <div className="flex items-center gap-2">
-                                    <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-gray-900 border border-gray-800">
-                                      <Clock size={12} className="text-gray-400" />
-                                      <span className="text-xs font-bold text-gray-300">
-                                        {displayTime}
-                                        {item.rhythmType === "flexible" ? "" : " Uhr"}
-                                      </span>
-                                    </div>
-                                    <span className="text-[10px] font-medium text-gray-500 bg-gray-900/50 px-2 py-1 rounded">
-                                      {countdown}
-                                    </span>
-                                  </div>
-
-                                  <div className="flex items-center gap-1.5 ml-auto">
-                                    {(behindCount > 0 || isToday || date.getTime() <= Date.now()) && (
-                                      <button
-                                        type="button"
-                                        disabled={!!updatingIds[strId]}
-                                        onClick={(e) => handleQuickIncrement(e, strId, currentEp)}
-                                        className="px-2.5 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600/35 border border-blue-500/40 text-blue-300 hover:text-white text-xs font-bold transition-colors disabled:opacity-50"
-                                        title={`${item.type === "MANGA" ? "Kapitel" : "Episode"} ${currentEp + 1} als gesehen markieren`}
-                                      >
-                                        + {item.type === "MANGA" ? "Kap" : "Ep"} {currentEp + 1}
-                                      </button>
-                                    )}
-                                    <button
-                                      type="button"
-                                      onClick={(e) => handleEditClick(item, e)}
-                                      className="text-gray-500 hover:text-white transition p-1"
-                                      title="Zeit korrigieren"
-                                    >
-                                      <Edit2 size={14} />
-                                    </button>
-                                  </div>
-                                </div>
                               )}
                             </div>
+
+                            {/* Actions */}
+                            {!isEditing && (
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {(behindCount > 0 || isToday || date.getTime() <= Date.now()) && (
+                                  <button
+                                    type="button"
+                                    disabled={!!updatingIds[strId]}
+                                    onClick={(e) =>
+                                      handleQuickIncrement(e, strId, currentEp)
+                                    }
+                                    className="px-2.5 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 text-xs font-bold transition-colors disabled:opacity-50 whitespace-nowrap"
+                                    title={`${unitShort} ${currentEp + 1} als gesehen markieren`}
+                                  >
+                                    + {item.type === "MANGA" ? "Kap" : "Ep"}{" "}
+                                    {currentEp + 1}
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleEditClick(item, e)}
+                                  className="text-gray-500 hover:text-white transition p-1.5 rounded-lg hover:bg-gray-800"
+                                  title="Release-Zeit anpassen"
+                                >
+                                  <Edit2 size={14} />
+                                </button>
+                              </div>
+                            )}
                           </Link>
                         );
                       })}
@@ -651,17 +673,17 @@ export default function CalendarPage() {
 
           {/* Unscheduled Active Works Section */}
           {unscheduledForCurrentType.length > 0 && (
-            <div className="border border-gray-800 rounded-xl bg-[#1a1d24]/60 overflow-hidden">
+            <div className="border border-gray-800 rounded-2xl bg-[#1a1d24]/60 overflow-hidden">
               <button
                 type="button"
                 onClick={() => setIsUnscheduledOpen(!isUnscheduledOpen)}
-                className="w-full flex items-center justify-between p-4 text-left font-bold text-sm text-gray-300 hover:text-white hover:bg-gray-800/40 transition-colors"
+                className="w-full flex items-center justify-between p-3.5 text-left font-bold text-xs sm:text-sm text-gray-300 hover:text-white hover:bg-gray-800/40 transition-colors"
               >
                 <span>
-                  Werke ohne bekannten Release-Termin ({unscheduledForCurrentType.length})
+                  Aktive Werke ohne festen Termin ({unscheduledForCurrentType.length})
                 </span>
                 <ChevronDown
-                  size={18}
+                  size={16}
                   className={`text-gray-400 transition-transform duration-200 ${
                     isUnscheduledOpen ? "rotate-180" : ""
                   }`}
@@ -669,37 +691,32 @@ export default function CalendarPage() {
               </button>
 
               {isUnscheduledOpen && (
-                <div className="p-4 pt-1 border-t border-gray-800/60 flex flex-col gap-2">
-                  <p className="text-xs text-gray-400 mb-2">
-                    Diese Titel sind in deiner Bibliothek als &quot;Aktiv&quot; markiert, haben aktuell aber kein bekanntes Veröffentlichungsdatum.
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    {unscheduledForCurrentType.map((work: any) => {
-                      const strId = work.id.toString();
-                      const statusText = getUnscheduledStatusText(work.status);
-                      return (
-                        <Link
-                          key={strId}
-                          href={`/work/${strId}`}
-                          className="flex items-center gap-3 p-2 bg-[#14161b] border border-gray-800 hover:border-blue-500/60 rounded-lg transition-colors group"
-                        >
-                          <img
-                            src={work.coverImage?.medium || work.coverImage?.large}
-                            alt={work.title?.english || work.title?.romaji || "Cover"}
-                            className="w-10 h-14 object-cover rounded shrink-0 shadow-sm"
-                          />
-                          <div className="flex flex-col min-w-0 flex-1">
-                            <span className="text-xs font-bold text-gray-200 line-clamp-1 group-hover:text-blue-400 transition-colors">
-                              {work.title?.english || work.title?.romaji}
-                            </span>
-                            <span className="text-[11px] text-gray-500 mt-1">
-                              {statusText}
-                            </span>
-                          </div>
-                        </Link>
-                      );
-                    })}
-                  </div>
+                <div className="p-3.5 pt-1 border-t border-gray-800/60 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {unscheduledForCurrentType.map((work: any) => {
+                    const strId = work.id.toString();
+                    const statusText = getUnscheduledStatusText(work.status);
+                    return (
+                      <Link
+                        key={strId}
+                        href={`/work/${strId}`}
+                        className="flex items-center gap-2.5 p-2 bg-[#14161b] border border-gray-800 hover:border-blue-500/60 rounded-xl transition-colors group"
+                      >
+                        <img
+                          src={work.coverImage?.medium || work.coverImage?.large}
+                          alt={work.title?.english || work.title?.romaji || "Cover"}
+                          className="w-9 h-12 object-cover rounded-lg shrink-0"
+                        />
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <span className="text-xs font-bold text-gray-200 truncate group-hover:text-blue-400 transition-colors">
+                            {work.title?.english || work.title?.romaji}
+                          </span>
+                          <span className="text-[11px] text-gray-500">
+                            {statusText}
+                          </span>
+                        </div>
+                      </Link>
+                    );
+                  })}
                 </div>
               )}
             </div>

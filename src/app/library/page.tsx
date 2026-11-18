@@ -13,8 +13,10 @@ import {
   Minus,
   ExternalLink,
   Check,
-  Tv,
-  BookOpen,
+  LayoutList,
+  LayoutGrid,
+  SlidersHorizontal,
+  ArrowUpDown,
 } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import { fetchAniListBatch } from "@/lib/anilist";
@@ -187,7 +189,7 @@ function formatNextReleaseLabel(
 }
 
 export default function LibraryPage() {
-  const { contentType, setContentType } = useAppStore();
+  const { contentType } = useAppStore();
   const reloadTrigger = useAppStore((state) => state.reloadTrigger);
 
   const [allWorks, setAllWorks] = useState<UserWork[]>([]);
@@ -200,6 +202,8 @@ export default function LibraryPage() {
   const [sortBy, setSortBy] = useState<SortOption>("RECENT");
   const [activeTab, setActiveTab] = useState<TabStatus>("CURRENT");
   const [onlyMalOpen, setOnlyMalOpen] = useState(false);
+  const [viewColumns, setViewColumns] = useState<1 | 2>(1);
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
 
   // Quick-Edit Modal State
   const [editingWork, setEditingWork] = useState<UserWork | null>(null);
@@ -207,6 +211,24 @@ export default function LibraryPage() {
   const [editStatus, setEditStatus] = useState<UserWorkStatus>("CURRENT");
   const [editDroppedReason, setEditDroppedReason] = useState<string>("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  useEffect(() => {
+    try {
+      const savedCols = window.localStorage.getItem("weebcheck_lib_cols");
+      if (savedCols === "2") setViewColumns(2);
+    } catch {
+      // ignore localStorage errors
+    }
+  }, []);
+
+  const handleToggleColumns = (cols: 1 | 2) => {
+    setViewColumns(cols);
+    try {
+      window.localStorage.setItem("weebcheck_lib_cols", String(cols));
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
@@ -437,103 +459,156 @@ export default function LibraryPage() {
 
   const unitPrefix = contentType === "MANGA" ? "KAP" : "EP";
   const progressBarColor = contentType === "MANGA" ? "bg-pink-500" : "bg-blue-500";
+  const activeSortLabel =
+    sortBy === "TITLE"
+      ? "A-Z"
+      : sortBy === "BEHIND"
+      ? contentType === "MANGA"
+        ? "Offene Kap."
+        : "Offene Folgen"
+      : "Zuletzt";
 
   return (
-    <div className="flex flex-col gap-5 px-4 pt-6 pb-24 max-w-4xl mx-auto">
-      {/* Header + ContentType Switch */}
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="flex items-center gap-2.5 text-xl font-bold text-white">
-          <LibraryIcon className="text-blue-500" size={22} />
-          Meine Bibliothek
-        </h1>
-
-        <div className="flex items-center bg-[#1a1d24] border border-gray-800 rounded-full p-1">
-          <button
-            type="button"
-            onClick={() => setContentType("ANIME")}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
-              contentType === "ANIME"
-                ? "bg-blue-600 text-white"
-                : "text-gray-400 hover:text-white"
-            }`}
-          >
-            <Tv size={13} />
-            Anime
-          </button>
-          <button
-            type="button"
-            onClick={() => setContentType("MANGA")}
-            className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
-              contentType === "MANGA"
-                ? "bg-pink-600 text-white"
-                : "text-gray-400 hover:text-white"
-            }`}
-          >
-            <BookOpen size={13} />
-            Manga
-          </button>
-        </div>
-      </div>
-
-      {/* Top Search & Sort Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-        <div className="relative flex-1">
+    <div className="flex flex-col gap-3.5 px-4 pt-4 pb-24 max-w-4xl mx-auto">
+      {/* Compact Top Row: Search + Sort/Filter Button + 1/2 Column Switcher */}
+      <div className="relative flex items-center gap-2">
+        <div className="relative flex-1 min-w-0">
           <Search
             className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500"
-            size={16}
+            size={15}
           />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Suche in Bibliothek..."
-            className="w-full rounded-full border border-gray-800 bg-[#1a1d24] py-2.5 pl-10 pr-9 text-sm text-white placeholder:text-gray-500 focus:border-blue-500 focus:outline-none transition-colors"
+            placeholder={`${contentType === "MANGA" ? "Manga" : "Anime"} in Bibliothek suchen...`}
+            className="w-full rounded-xl border border-gray-800 bg-[#1a1d24] py-2 pl-9 pr-8 text-sm text-white placeholder:text-gray-500 focus:border-blue-500 focus:outline-none transition-colors"
           />
           {searchQuery && (
             <button
               type="button"
               onClick={() => setSearchQuery("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
               aria-label="Suche zurücksetzen"
             >
-              <X size={15} />
+              <X size={14} />
             </button>
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 sm:pb-0 shrink-0">
-          {SORT_OPTIONS.map((opt) => (
-            <button
-              key={opt.key}
-              type="button"
-              onClick={() => setSortBy(opt.key)}
-              className={`px-3 py-2 rounded-full text-xs font-semibold whitespace-nowrap border transition-colors ${
-                sortBy === opt.key
-                  ? "bg-[#222631] border-gray-600 text-white"
-                  : "bg-[#1a1d24] border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
-              }`}
-            >
-              {opt.key === "BEHIND" && contentType === "MANGA"
-                ? "Offene Kapitel"
-                : opt.label}
-            </button>
-          ))}
+        {/* Sort & Filter Popover Trigger */}
+        <button
+          type="button"
+          onClick={() => setShowFilterMenu((v) => !v)}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold shrink-0 transition-colors ${
+            showFilterMenu || sortBy !== "RECENT" || onlyMalOpen
+              ? "bg-blue-600/20 border-blue-500/50 text-blue-300"
+              : "bg-[#1a1d24] border-gray-800 text-gray-300 hover:text-white"
+          }`}
+          title="Sortierung & Filter"
+        >
+          <ArrowUpDown size={14} />
+          <span>{activeSortLabel}</span>
+          {onlyMalOpen && (
+            <span className="w-2 h-2 rounded-full bg-amber-400" />
+          )}
+        </button>
+
+        {/* 1-Column / 2-Column Layout Toggle */}
+        <div className="flex items-center bg-[#1a1d24] border border-gray-800 rounded-xl p-0.5 shrink-0">
           <button
             type="button"
-            onClick={() => setOnlyMalOpen((prev) => !prev)}
-            className={`px-3 py-2 rounded-full text-xs font-semibold whitespace-nowrap border transition-colors ${
-              onlyMalOpen
-                ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
-                : "bg-[#1a1d24] border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
+            onClick={() => handleToggleColumns(1)}
+            aria-label="1 Spalte"
+            title="1 Spalte (Listenansicht)"
+            className={`p-1.5 rounded-lg transition-colors ${
+              viewColumns === 1
+                ? "bg-blue-600 text-white"
+                : "text-gray-400 hover:text-white"
             }`}
           >
-            AniList/MAL offen
+            <LayoutList size={15} />
+          </button>
+          <button
+            type="button"
+            onClick={() => handleToggleColumns(2)}
+            aria-label="2 Spalten"
+            title="2 Spalten (Kompaktansicht)"
+            className={`p-1.5 rounded-lg transition-colors ${
+              viewColumns === 2
+                ? "bg-blue-600 text-white"
+                : "text-gray-400 hover:text-white"
+            }`}
+          >
+            <LayoutGrid size={15} />
           </button>
         </div>
+
+        {/* Collapsible Sort & Filter Popover */}
+        {showFilterMenu && (
+          <div className="absolute right-0 top-full mt-2 z-30 w-64 rounded-2xl border border-gray-700 bg-[#161922] p-3 shadow-2xl flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                <SlidersHorizontal size={12} />
+                Sortierung
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowFilterMenu(false)}
+                className="text-gray-400 hover:text-white"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              {SORT_OPTIONS.map((opt) => {
+                const label =
+                  opt.key === "BEHIND" && contentType === "MANGA"
+                    ? "Offene Kapitel"
+                    : opt.label;
+                const active = sortBy === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => {
+                      setSortBy(opt.key);
+                      setShowFilterMenu(false);
+                    }}
+                    className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                      active
+                        ? "bg-blue-600 text-white"
+                        : "bg-[#1a1d24] text-gray-300 hover:text-white"
+                    }`}
+                  >
+                    <span>{label}</span>
+                    {active && <Check size={13} />}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="border-t border-gray-800 pt-2">
+              <button
+                type="button"
+                onClick={() => setOnlyMalOpen((prev) => !prev)}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${
+                  onlyMalOpen
+                    ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
+                    : "bg-[#1a1d24] border-gray-800 text-gray-300 hover:text-white"
+                }`}
+              >
+                <span>Nur AniList/MAL offen</span>
+                {onlyMalOpen && <Check size={13} />}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Status Pill-Tabs with live counts */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
         {STATUS_TABS.map((tab) => {
           const isActive = activeTab === tab.key;
           const count = statusCounts[tab.key];
@@ -542,7 +617,7 @@ export default function LibraryPage() {
               key={tab.key}
               type="button"
               onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap border transition-all ${
+              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap border transition-all ${
                 isActive
                   ? "bg-blue-600 border-blue-500 text-white shadow-sm"
                   : "bg-[#1a1d24] border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
@@ -554,23 +629,28 @@ export default function LibraryPage() {
         })}
       </div>
 
-      {/* Watchlist / Tracking Rows */}
+      {/* Watchlist / Tracking Rows or 2-Column Grid */}
       {isLoading ? (
-        <div className="flex flex-col gap-3">
+        <div
+          className={
+            viewColumns === 2
+              ? "grid grid-cols-2 gap-2.5"
+              : "flex flex-col gap-3"
+          }
+        >
           {Array(6)
             .fill(0)
             .map((_, i) => (
               <div
                 key={i}
-                className="flex items-center gap-3.5 p-3 rounded-2xl border border-gray-800 bg-[#1a1d24] animate-pulse"
+                className="flex items-center gap-3 p-3 rounded-2xl border border-gray-800 bg-[#1a1d24] animate-pulse"
               >
-                <div className="w-14 h-20 rounded-lg bg-gray-800 shrink-0" />
-                <div className="flex-1 space-y-2.5">
-                  <div className="h-4 w-2/3 rounded bg-gray-800" />
+                <div className="w-12 h-16 rounded-lg bg-gray-800 shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3.5 w-2/3 rounded bg-gray-800" />
                   <div className="h-1.5 w-full rounded-full bg-gray-800" />
-                  <div className="h-3 w-1/3 rounded bg-gray-800" />
+                  <div className="h-3 w-1/2 rounded bg-gray-800" />
                 </div>
-                <div className="w-20 h-8 rounded-full bg-gray-800 shrink-0" />
               </div>
             ))}
         </div>
@@ -579,6 +659,117 @@ export default function LibraryPage() {
           {searchQuery
             ? "Keine passenden Einträge in dieser Kategorie gefunden."
             : "Keine Werke in dieser Kategorie vorhanden."}
+        </div>
+      ) : viewColumns === 2 ? (
+        <div className="grid grid-cols-2 gap-2.5">
+          {visibleWorks.map((work) => {
+            const details = aniListDetails[work.work_id];
+            const globalOverride = globalOverrides[work.work_id];
+            const isPaused = pausedWorkIds.has(work.work_id);
+
+            const title =
+              details?.title?.english ||
+              details?.title?.romaji ||
+              `Werk #${work.work_id}`;
+            const coverSrc =
+              details?.coverImage?.large || details?.coverImage?.extraLarge;
+
+            const current = work.current_episode || 0;
+            const total = getTotalCount(work, details, globalOverride);
+            const progressPct = total
+              ? Math.min(100, Math.max(0, (current / total) * 100))
+              : current > 0
+              ? 100
+              : 0;
+
+            const behindCount = computeBehindCount(
+              work,
+              details,
+              globalOverride,
+              isPaused
+            );
+
+            const isCompleted =
+              work.status === "COMPLETED" ||
+              (total !== null && total > 0 && current >= total);
+
+            return (
+              <div
+                key={work.work_id}
+                className="flex flex-col justify-between gap-2.5 p-2.5 rounded-2xl border border-gray-800/90 bg-[#1a1d24] hover:border-gray-700 transition-colors"
+              >
+                <div className="flex items-start gap-2.5">
+                  <Link
+                    href={`/work/${work.work_id}`}
+                    className="relative w-12 h-16 rounded-lg overflow-hidden bg-gray-800 shrink-0"
+                  >
+                    {coverSrc ? (
+                      <Image
+                        src={coverSrc}
+                        alt={title}
+                        fill
+                        sizes="48px"
+                        className="object-cover"
+                      />
+                    ) : null}
+                    {behindCount > 0 && (
+                      <span className="absolute top-0.5 right-0.5 rounded bg-blue-600 px-1 py-0.2 text-[9px] font-bold text-white shadow">
+                        +{behindCount}
+                      </span>
+                    )}
+                  </Link>
+
+                  <div className="flex-1 min-w-0 flex flex-col gap-1">
+                    <Link
+                      href={`/work/${work.work_id}`}
+                      className="font-semibold text-xs text-white hover:text-blue-400 transition-colors line-clamp-2 leading-snug"
+                    >
+                      {title}
+                    </Link>
+                    <span className="text-[11px] font-semibold text-gray-400 tabular-nums">
+                      {unitPrefix} {current} / {total ?? "?"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${
+                      isCompleted ? "bg-green-500" : progressBarColor
+                    }`}
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-1.5">
+                  {isCompleted ? (
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-green-500/15 border border-green-500/30 px-2 py-1 text-[11px] font-semibold text-green-400">
+                      <Check size={12} />
+                      Fertig
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleQuickIncrement(work)}
+                      className="flex-1 rounded-lg bg-[#222631] hover:bg-blue-600 text-[11px] font-semibold text-white py-1 px-2 transition-colors whitespace-nowrap text-center"
+                    >
+                      + {unitPrefix} {current + 1}
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => openEditModal(work)}
+                    className="p-1.5 rounded-lg bg-[#222631] hover:bg-gray-700 text-gray-300 hover:text-white transition-colors shrink-0"
+                    aria-label="Schnell bearbeiten"
+                    title="Schnell bearbeiten"
+                  >
+                    <Edit2 size={13} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="flex flex-col gap-2.5">
