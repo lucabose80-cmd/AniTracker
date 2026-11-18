@@ -73,6 +73,20 @@ function formatMessageTime(isoTimestamp: string): string {
   }
 }
 
+function formatEpisodeBadge(item: ReviewListItem): string {
+  const unit = item.media_type === "MANGA" ? "Kap." : "Folge";
+  if (Array.isArray(item.episodes) && item.episodes.length > 1) {
+    return `${unit} ${item.episodes.join(", ")}`;
+  }
+  if (
+    typeof item.episode_end === "number" &&
+    item.episode_end > item.episode_num
+  ) {
+    return `${unit} ${item.episode_num}–${item.episode_end}`;
+  }
+  return `${unit} ${item.episode_num}`;
+}
+
 export default function WhatsAppReviewFeed({
   currentUserUid,
   userWorks,
@@ -80,19 +94,29 @@ export default function WhatsAppReviewFeed({
   onProgressUpdated,
 }: WhatsAppReviewFeedProps) {
   const isOnline = useAppStore((s) => s.isOnline);
+  const contentType = useAppStore((s) => s.contentType);
 
   const [activities, setActivities] = useState<ActivityFeed[]>([]);
   const [userProfiles, setUserProfiles] = useState<Record<string, UserProfile>>({});
   const [isLoadingFeed, setIsLoadingFeed] = useState(true);
 
-  // Filters
-  const [scopeFilter, setScopeFilter] = useState<"ALL" | "MY_WORKS">("ALL");
+  // Media filter (Alle Medien / Anime / Manga), synced when global header toggle changes
   const [mediaFilter, setMediaFilter] = useState<"ALL" | "ANIME" | "MANGA">("ALL");
 
   // Composer state
   const [title, setTitle] = useState("");
+  const [composerMediaType, setComposerMediaType] = useState<"ANIME" | "MANGA">(
+    contentType === "MANGA" ? "MANGA" : "ANIME"
+  );
   const [draftItems, setDraftItems] = useState<DraftReviewItem[]>([]);
   const [isSending, setIsSending] = useState(false);
+
+  // Sync composer media type with top header toggle when draft is empty
+  useEffect(() => {
+    if (draftItems.length === 0) {
+      setComposerMediaType(contentType === "MANGA" ? "MANGA" : "ANIME");
+    }
+  }, [contentType, draftItems.length]);
 
   // Picker Modal state
   const [isPickerOpen, setIsPickerOpen] = useState(false);
@@ -100,7 +124,11 @@ export default function WhatsAppReviewFeed({
   const [searchResults, setSearchResults] = useState<SelectableWork[]>([]);
   const [isSearchingAniList, setIsSearchingAniList] = useState(false);
   const [selectedWork, setSelectedWork] = useState<SelectableWork | null>(null);
+  const [epMode, setEpMode] = useState<"SINGLE" | "RANGE" | "MULTI">("SINGLE");
   const [epNum, setEpNum] = useState<number>(1);
+  const [epEndNum, setEpEndNum] = useState<number>(2);
+  const [multiEps, setMultiEps] = useState<number[]>([1]);
+  const [multiEpCandidate, setMultiEpCandidate] = useState<number>(2);
   const [reviewText, setReviewText] = useState("");
   const [rating, setRating] = useState<number | undefined>(undefined);
   const [updateProgress, setUpdateProgress] = useState(true);
@@ -138,7 +166,7 @@ export default function WhatsAppReviewFeed({
     };
   }, [currentUserUid]);
 
-  // Build quick-select list from user's CURRENT works
+  // Build quick-select list from user's CURRENT works matching composerMediaType
   const activeSelectableWorks = useMemo<SelectableWork[]>(() => {
     return userWorks
       .filter((w) => w.status === "CURRENT")
@@ -158,31 +186,34 @@ export default function WhatsAppReviewFeed({
           media_type: mediaType,
           current_episode: Number(w.current_episode) || 0,
         };
-      });
-  }, [userWorks, userAniListDetails]);
+      })
+      .filter((w) => w.media_type === composerMediaType);
+  }, [userWorks, userAniListDetails, composerMediaType]);
 
-  // All library works for local search fallback
+  // All library works for local search fallback matching composerMediaType
   const allLibrarySelectableWorks = useMemo<SelectableWork[]>(() => {
-    return userWorks.map((w) => {
-      const details = userAniListDetails[w.work_id];
-      const workTitle =
-        details?.title?.english ||
-        details?.title?.romaji ||
-        `Werk #${w.work_id}`;
-      const cover = details?.coverImage?.large || details?.coverImage?.extraLarge;
-      const mediaType: "ANIME" | "MANGA" =
-        details?.type === "MANGA" ? "MANGA" : "ANIME";
-      return {
-        work_id: w.work_id,
-        title: workTitle,
-        cover,
-        media_type: mediaType,
-        current_episode: Number(w.current_episode) || 0,
-      };
-    });
-  }, [userWorks, userAniListDetails]);
+    return userWorks
+      .map((w) => {
+        const details = userAniListDetails[w.work_id];
+        const workTitle =
+          details?.title?.english ||
+          details?.title?.romaji ||
+          `Werk #${w.work_id}`;
+        const cover = details?.coverImage?.large || details?.coverImage?.extraLarge;
+        const mediaType: "ANIME" | "MANGA" =
+          details?.type === "MANGA" ? "MANGA" : "ANIME";
+        return {
+          work_id: w.work_id,
+          title: workTitle,
+          cover,
+          media_type: mediaType,
+          current_episode: Number(w.current_episode) || 0,
+        };
+      })
+      .filter((w) => w.media_type === composerMediaType);
+  }, [userWorks, userAniListDetails, composerMediaType]);
 
-  // Search AniList when pickerSearch has >= 2 chars
+  // Search AniList when pickerSearch has >= 2 chars (only for composerMediaType)
   useEffect(() => {
     const q = pickerSearch.trim();
     if (!isPickerOpen || q.length < 2) {
@@ -194,34 +225,24 @@ export default function WhatsAppReviewFeed({
     const timer = setTimeout(async () => {
       setIsSearchingAniList(true);
       try {
-        const [animeRes, mangaRes] = await Promise.all([
-          fetchAniList(SEARCH_WORKS, { search: q, type: "ANIME", page: 1, perPage: 6 }),
-          fetchAniList(SEARCH_WORKS, { search: q, type: "MANGA", page: 1, perPage: 6 }),
-        ]);
+        const res = await fetchAniList(SEARCH_WORKS, {
+          search: q,
+          type: composerMediaType,
+          page: 1,
+          perPage: 10,
+        });
 
         const combined: SelectableWork[] = [];
         const userWorkById = new Map(userWorks.map((w) => [w.work_id, w]));
 
-        (animeRes?.Page?.media || []).forEach((m: any) => {
+        (res?.Page?.media || []).forEach((m: any) => {
           const idStr = m.id.toString();
           const existing = userWorkById.get(idStr);
           combined.push({
             work_id: idStr,
             title: m.title?.english || m.title?.romaji || "Unbekannt",
             cover: m.coverImage?.large || m.coverImage?.extraLarge,
-            media_type: "ANIME",
-            current_episode: existing ? Number(existing.current_episode) || 0 : 0,
-          });
-        });
-
-        (mangaRes?.Page?.media || []).forEach((m: any) => {
-          const idStr = m.id.toString();
-          const existing = userWorkById.get(idStr);
-          combined.push({
-            work_id: idStr,
-            title: m.title?.english || m.title?.romaji || "Unbekannt",
-            cover: m.coverImage?.large || m.coverImage?.extraLarge,
-            media_type: "MANGA",
+            media_type: composerMediaType,
             current_episode: existing ? Number(existing.current_episode) || 0 : 0,
           });
         });
@@ -235,38 +256,14 @@ export default function WhatsAppReviewFeed({
     }, 350);
 
     return () => clearTimeout(timer);
-  }, [pickerSearch, isPickerOpen, userWorks]);
+  }, [pickerSearch, isPickerOpen, userWorks, composerMediaType]);
 
-  const userWorkIdsSet = useMemo(
-    () => new Set(userWorks.map((w) => w.work_id)),
-    [userWorks]
-  );
-
-  // Filtered feed
+  // Filtered feed: ONLY show REVIEW_LIST and RATING activities
   const visibleActivities = useMemo(() => {
     return activities.filter((act) => {
-      // Support REVIEW_LIST, RATING, TOP9_UPDATE, and MANUAL_POST
       const isSupportedType =
-        act.action_type === "REVIEW_LIST" ||
-        act.action_type === "RATING" ||
-        act.action_type === "TOP9_UPDATE" ||
-        act.action_type === "MANUAL_POST";
+        act.action_type === "REVIEW_LIST" || act.action_type === "RATING";
       if (!isSupportedType) return false;
-
-      if (scopeFilter === "MY_WORKS") {
-        if (act.action_type === "REVIEW_LIST") {
-          const items = act.review_items || [];
-          const hasMyWork = items.some((item) => userWorkIdsSet.has(item.work_id));
-          if (!hasMyWork) return false;
-        } else if (Array.isArray(act.work_ids) && act.work_ids.length > 0) {
-          const hasMyWork = act.work_ids.some((wid) => userWorkIdsSet.has(wid));
-          if (!hasMyWork && (!act.work_id || !userWorkIdsSet.has(act.work_id))) {
-            return false;
-          }
-        } else if (!act.work_id || !userWorkIdsSet.has(act.work_id)) {
-          return false;
-        }
-      }
 
       if (mediaFilter !== "ALL") {
         if (act.action_type === "REVIEW_LIST") {
@@ -276,28 +273,22 @@ export default function WhatsAppReviewFeed({
         } else if (act.work_id) {
           const details = userAniListDetails[act.work_id];
           if (details?.type && details.type !== mediaFilter) return false;
-        } else if (Array.isArray(act.work_ids) && act.work_ids.length > 0) {
-          const knownDetails = act.work_ids
-            .map((wid) => userAniListDetails[wid])
-            .filter(Boolean);
-          if (
-            knownDetails.length > 0 &&
-            !knownDetails.some((d) => d?.type === mediaFilter)
-          ) {
-            return false;
-          }
         }
       }
 
       return true;
     });
-  }, [activities, scopeFilter, mediaFilter, userWorkIdsSet, userAniListDetails]);
+  }, [activities, mediaFilter, userAniListDetails]);
 
   const openPicker = () => {
     setSelectedWork(null);
     setPickerSearch("");
     setSearchResults([]);
+    setEpMode("SINGLE");
     setEpNum(1);
+    setEpEndNum(2);
+    setMultiEps([1]);
+    setMultiEpCandidate(2);
     setReviewText("");
     setRating(undefined);
     setUpdateProgress(true);
@@ -305,24 +296,84 @@ export default function WhatsAppReviewFeed({
   };
 
   const handleSelectWork = (work: SelectableWork) => {
+    const nextEp = work.current_episode > 0 ? work.current_episode + 1 : 1;
     setSelectedWork(work);
-    setEpNum(work.current_episode > 0 ? work.current_episode + 1 : 1);
+    setEpMode("SINGLE");
+    setEpNum(nextEp);
+    setEpEndNum(Math.max(nextEp + 1, work.current_episode > 0 ? work.current_episode + 5 : 10));
+    setMultiEps([nextEp]);
+    setMultiEpCandidate(nextEp + 1);
     setReviewText("");
     setRating(undefined);
     setUpdateProgress(true);
+  };
+
+  const handleSwitchEpMode = (mode: "SINGLE" | "RANGE" | "MULTI") => {
+    setEpMode(mode);
+    if (mode === "RANGE") {
+      const start = selectedWork && selectedWork.current_episode === 0 ? 1 : epNum;
+      const end = Math.max(start + 1, epEndNum, epNum);
+      setEpNum(start);
+      setEpEndNum(end);
+    } else if (mode === "MULTI") {
+      const base = Math.max(1, epNum || 1);
+      if (multiEps.length === 0) {
+        setMultiEps([base]);
+        setMultiEpCandidate(base + 1);
+      }
+    }
+  };
+
+  const handleAddMultiEp = (numToAdd?: number) => {
+    const val = Math.max(1, numToAdd ?? multiEpCandidate);
+    setMultiEps((prev) => {
+      const next = Array.from(new Set([...prev, val])).sort((a, b) => a - b);
+      const maxVal = next[next.length - 1] || val;
+      setMultiEpCandidate(maxVal + 1);
+      return next;
+    });
+  };
+
+  const handleRemoveMultiEp = (numToRemove: number) => {
+    setMultiEps((prev) => prev.filter((n) => n !== numToRemove));
   };
 
   const handleAddDraftItem = () => {
     if (!selectedWork) return;
     const trimmedText = reviewText.trim();
     if (!trimmedText && rating === undefined) return;
+    if (epMode === "MULTI" && multiEps.length === 0) return;
+
+    let finalEpNum = Math.max(1, epNum || 1);
+    let finalEpEnd: number | undefined = undefined;
+    let finalEpisodes: number[] | undefined = undefined;
+
+    if (epMode === "RANGE") {
+      const start = Math.max(1, Math.min(epNum || 1, epEndNum || 1));
+      const end = Math.max(start, epEndNum || start);
+      finalEpNum = start;
+      if (end > start) {
+        finalEpEnd = end;
+      }
+    } else if (epMode === "MULTI") {
+      const sorted = Array.from(new Set(multiEps.filter((n) => n >= 1))).sort(
+        (a, b) => a - b
+      );
+      if (sorted.length === 0) return;
+      finalEpNum = sorted[sorted.length - 1];
+      if (sorted.length > 1) {
+        finalEpisodes = sorted;
+      }
+    }
 
     const newItem: DraftReviewItem = {
       work_id: selectedWork.work_id,
       work_title: selectedWork.title,
       work_cover: selectedWork.cover,
       media_type: selectedWork.media_type,
-      episode_num: Math.max(1, epNum || 1),
+      episode_num: finalEpNum,
+      ...(finalEpEnd ? { episode_end: finalEpEnd } : {}),
+      ...(finalEpisodes ? { episodes: finalEpisodes } : {}),
       text: trimmedText,
       rating,
       updateProgress,
@@ -354,12 +405,18 @@ export default function WhatsAppReviewFeed({
         itemsToSave
       );
 
-      // Update episode progress where checked
+      // Update episode progress where checked (set to highest reviewed episode/chapter)
       const progressUpdates = draftItems.filter((item) => item.updateProgress);
       await Promise.all(
         progressUpdates.map(async (item) => {
-          await updateEpisodeProgress(currentUserUid, item.work_id, item.episode_num);
-          onProgressUpdated?.(item.work_id, item.episode_num);
+          const targetEp =
+            item.episode_end && item.episode_end > item.episode_num
+              ? item.episode_end
+              : Array.isArray(item.episodes) && item.episodes.length > 0
+              ? Math.max(...item.episodes)
+              : item.episode_num;
+          await updateEpisodeProgress(currentUserUid, item.work_id, targetEp);
+          onProgressUpdated?.(item.work_id, targetEp);
         })
       );
 
@@ -458,24 +515,51 @@ export default function WhatsAppReviewFeed({
       {/* WHATSAPP-STYLE COMPOSER */}
       {currentUserUid && (
         <div className="bg-[#111827] border border-white/10 rounded-2xl p-3.5 shadow-lg flex flex-col gap-3">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
               <MessageSquareText className="w-3.5 h-3.5" />
               Neue Review-Nachricht
             </span>
-            {draftItems.length > 0 && (
-              <span className="text-[11px] text-gray-400">
-                {draftItems.length}{" "}
-                {draftItems.length === 1 ? "Werk" : "Werke"} angehängt
-              </span>
-            )}
+
+            {/* Anime / Manga Separation Toggle for Composer */}
+            <div className="flex items-center gap-1 bg-[#0b101b] p-1 rounded-xl border border-white/10">
+              {(["ANIME", "MANGA"] as const).map((type) => {
+                const isActive = composerMediaType === type;
+                const isLocked =
+                  draftItems.length > 0 && composerMediaType !== type;
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    disabled={isLocked}
+                    title={
+                      isLocked
+                        ? "Ein Review-Post kann nur entweder Anime oder Manga enthalten."
+                        : undefined
+                    }
+                    onClick={() => setComposerMediaType(type)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                      isActive
+                        ? "bg-emerald-600 text-white"
+                        : isLocked
+                        ? "text-gray-600 cursor-not-allowed"
+                        : "text-gray-400 hover:text-white"
+                    }`}
+                  >
+                    {type === "ANIME" ? "Anime" : "Manga"}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Überschrift (optional, z. B. Peak Review)..."
+            placeholder={`Überschrift (optional, z. B. ${
+              composerMediaType === "MANGA" ? "Manga" : "Anime"
+            } Review)...`}
             className="w-full bg-[#0b101b] border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-emerald-500/60"
           />
 
@@ -502,8 +586,7 @@ export default function WhatsAppReviewFeed({
                         {item.work_title}
                       </span>
                       <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5">
-                        {item.media_type === "MANGA" ? "Kap." : "Folge"}{" "}
-                        {item.episode_num}
+                        {formatEpisodeBadge(item)}
                       </span>
                       {typeof item.rating === "number" && (
                         <span
@@ -542,7 +625,9 @@ export default function WhatsAppReviewFeed({
               className="flex-1 flex items-center justify-center gap-2 bg-[#1a2436] hover:bg-[#223047] border border-emerald-500/30 text-emerald-300 font-semibold text-sm py-2.5 px-4 rounded-xl transition-colors"
             >
               <Plus className="w-4 h-4" />
-              Werk hinzufügen
+              {composerMediaType === "MANGA"
+                ? "Manga hinzufügen"
+                : "Anime hinzufügen"}
             </button>
             <button
               type="button"
@@ -561,51 +646,22 @@ export default function WhatsAppReviewFeed({
         </div>
       )}
 
-      {/* FILTER PILLS */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
+      {/* MEDIA FILTER PILLS (Anime / Manga / Alle Medien) */}
+      <div className="flex items-center gap-1.5">
+        {(["ALL", "ANIME", "MANGA"] as const).map((type) => (
           <button
+            key={type}
             type="button"
-            onClick={() => setScopeFilter("ALL")}
-            className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
-              scopeFilter === "ALL"
+            onClick={() => setMediaFilter(type)}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-colors ${
+              mediaFilter === type
                 ? "bg-emerald-600 text-white"
                 : "bg-white/5 text-gray-400 hover:text-white"
             }`}
           >
-            Alle
+            {type === "ALL" ? "Alle" : type === "ANIME" ? "Anime" : "Manga"}
           </button>
-          {currentUserUid && (
-            <button
-              type="button"
-              onClick={() => setScopeFilter("MY_WORKS")}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
-                scopeFilter === "MY_WORKS"
-                  ? "bg-emerald-600 text-white"
-                  : "bg-white/5 text-gray-400 hover:text-white"
-              }`}
-            >
-              Meine Werke
-            </button>
-          )}
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          {(["ALL", "ANIME", "MANGA"] as const).map((type) => (
-            <button
-              key={type}
-              type="button"
-              onClick={() => setMediaFilter(type)}
-              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-colors ${
-                mediaFilter === type
-                  ? "bg-white text-black"
-                  : "bg-white/5 text-gray-400 hover:text-white"
-              }`}
-            >
-              {type === "ALL" ? "Alle Medien" : type === "ANIME" ? "Anime" : "Manga"}
-            </button>
-          ))}
-        </div>
+        ))}
       </div>
 
       {/* WHATSAPP-STYLE CHAT BUBBLES FEED */}
@@ -620,8 +676,7 @@ export default function WhatsAppReviewFeed({
         </div>
       ) : visibleActivities.length === 0 ? (
         <div className="text-center py-10 px-4 bg-[#111827]/60 rounded-2xl border border-white/5 text-gray-400 text-sm">
-          Noch keine passenden Reviews im Feed. Starte mit{" "}
-          <span className="text-emerald-400 font-semibold">+ Werk hinzufügen</span>!
+          Noch keine passenden Reviews im Feed. Starte oben mit einer neuen Review!
         </div>
       ) : (
         <div className="flex flex-col gap-3.5">
@@ -638,15 +693,12 @@ export default function WhatsAppReviewFeed({
             );
 
             return (
-              <div
-                key={activity.activity_id}
-                className={`flex flex-col ${isOwn ? "items-end" : "items-start"}`}
-              >
+              <div key={activity.activity_id} className="flex flex-col w-full">
                 <div
-                  className={`relative w-full max-w-[95%] sm:max-w-[88%] rounded-2xl p-3.5 border shadow-md ${
+                  className={`relative w-full rounded-2xl p-3.5 border shadow-md ${
                     isOwn
-                      ? "bg-[#142a26] border-emerald-500/25 rounded-tr-sm"
-                      : "bg-[#1a2230] border-white/10 rounded-tl-sm"
+                      ? "bg-[#142a26] border-emerald-500/25"
+                      : "bg-[#1a2230] border-white/10"
                   }`}
                 >
                   {/* Bubble Header */}
@@ -724,8 +776,7 @@ export default function WhatsAppReviewFeed({
                                     {item.work_title}
                                   </Link>
                                   <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5 shrink-0">
-                                    {item.media_type === "MANGA" ? "Kap." : "Folge"}{" "}
-                                    {item.episode_num}
+                                    {formatEpisodeBadge(item)}
                                   </span>
                                 </div>
 
@@ -752,24 +803,17 @@ export default function WhatsAppReviewFeed({
                       </div>
                     )}
 
-                  {/* RATING / TOP9_UPDATE / MANUAL_POST rendering */}
-                  {activity.action_type !== "REVIEW_LIST" && (
+                  {/* RATING rendering */}
+                  {activity.action_type === "RATING" && (
                     <div className="flex flex-col gap-2 text-xs text-gray-300">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        {activity.action_type === "RATING" && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                            ★ Bewertung
-                          </span>
-                        )}
-                        {activity.action_type === "TOP9_UPDATE" && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                            🏆 Top 9 / Bibliothek
-                          </span>
-                        )}
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                          ★ Bewertung
+                        </span>
                       </div>
 
                       {activity.details && (
-                        <p className="text-gray-200 whitespace-pre-wrap break-words leading-relaxed">
+                        <p className="text-[15px] font-medium text-white whitespace-pre-wrap break-words leading-snug">
                           {activity.details}
                         </p>
                       )}
@@ -784,19 +828,19 @@ export default function WhatsAppReviewFeed({
                         return wDetails ? (
                           <Link
                             href={`/work/${activity.work_id}`}
-                            className="flex items-center gap-2.5 bg-black/25 border border-white/5 hover:border-emerald-500/30 rounded-xl p-2 transition-colors"
+                            className="flex items-center gap-2.5 bg-black/20 border border-white/5 hover:border-emerald-500/30 rounded-xl p-2 transition-colors"
                           >
                             {wCover ? (
                               <img
                                 src={wCover}
                                 alt={wTitle || "Cover"}
-                                className="w-8 h-11 rounded object-cover shrink-0 bg-gray-800"
+                                className="w-8 h-11 rounded object-cover shrink-0 bg-gray-800 opacity-85"
                               />
                             ) : (
                               <div className="w-8 h-11 rounded bg-gray-800 shrink-0" />
                             )}
                             <div className="min-w-0 flex-1">
-                              <p className="text-xs font-bold text-white truncate">
+                              <p className="text-xs font-medium text-gray-300 truncate">
                                 {wTitle}
                               </p>
                               <span className="text-[11px] text-emerald-400 font-semibold">
@@ -813,40 +857,6 @@ export default function WhatsAppReviewFeed({
                           </Link>
                         );
                       })()}
-
-                      {Array.isArray(activity.work_ids) &&
-                        activity.work_ids.length > 0 && (
-                          <div className="grid grid-cols-3 gap-1.5 mt-1">
-                            {activity.work_ids.slice(0, 9).map((wid, idx) => {
-                              const wDetails = userAniListDetails[wid];
-                              const wTitle =
-                                wDetails?.title?.english ||
-                                wDetails?.title?.romaji ||
-                                `Werk #${wid}`;
-                              const wCover =
-                                wDetails?.coverImage?.large ||
-                                wDetails?.coverImage?.extraLarge;
-                              return (
-                                <Link
-                                  key={`${wid}-${idx}`}
-                                  href={`/work/${wid}`}
-                                  className="flex items-center gap-1.5 bg-black/25 border border-white/5 hover:border-emerald-500/30 rounded-lg p-1.5 transition-colors min-w-0"
-                                >
-                                  {wCover && (
-                                    <img
-                                      src={wCover}
-                                      alt={wTitle}
-                                      className="w-6 h-8 rounded object-cover shrink-0 bg-gray-800"
-                                    />
-                                  )}
-                                  <span className="text-[11px] text-gray-200 font-semibold truncate">
-                                    #{idx + 1} {wTitle}
-                                  </span>
-                                </Link>
-                              );
-                            })}
-                          </div>
-                        )}
                     </div>
                   )}
 
@@ -925,7 +935,9 @@ export default function WhatsAppReviewFeed({
           <div className="w-full sm:max-w-md bg-[#111827] border border-white/15 rounded-t-3xl sm:rounded-2xl p-4 pb-8 sm:pb-4 max-h-[85vh] overflow-y-auto flex flex-col gap-3 shadow-2xl">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-bold text-white">
-                {selectedWork ? "Review-Eintrag" : "Werk auswählen"}
+                {selectedWork
+                  ? "Review-Eintrag"
+                  : `${composerMediaType === "MANGA" ? "Manga" : "Anime"} auswählen`}
               </h3>
               <button
                 type="button"
@@ -944,7 +956,9 @@ export default function WhatsAppReviewFeed({
                     type="text"
                     value={pickerSearch}
                     onChange={(e) => setPickerSearch(e.target.value)}
-                    placeholder="In Bibliothek oder AniList suchen..."
+                    placeholder={`Nach ${
+                      composerMediaType === "MANGA" ? "Manga" : "Anime"
+                    } in Bibliothek oder AniList suchen...`}
                     className="w-full bg-[#0b101b] border border-white/10 rounded-xl pl-9 pr-3 py-2 text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-emerald-500/60"
                   />
                 </div>
@@ -989,7 +1003,7 @@ export default function WhatsAppReviewFeed({
                   {pickerSearch.trim().length >= 2 && (
                     <div className="flex flex-col gap-1.5 mt-2">
                       <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
-                        AniList Ergebnisse
+                        AniList Ergebnisse ({composerMediaType})
                         {isSearchingAniList && (
                           <Loader2 className="w-3 h-3 animate-spin" />
                         )}
@@ -1037,7 +1051,9 @@ export default function WhatsAppReviewFeed({
                       {selectedWork.title}
                     </p>
                     <p className="text-xs text-gray-400">
-                      {selectedWork.media_type}
+                      {selectedWork.media_type} • Aktueller Stand:{" "}
+                      {selectedWork.media_type === "MANGA" ? "Kap." : "Folge"}{" "}
+                      {selectedWork.current_episode}
                     </p>
                   </div>
                   <button
@@ -1049,36 +1065,242 @@ export default function WhatsAppReviewFeed({
                   </button>
                 </div>
 
-                {/* Episode / Chapter Counter */}
-                <div className="flex items-center justify-between bg-[#0b101b] px-3 py-2 rounded-xl border border-white/10">
-                  <span className="text-xs font-semibold text-gray-300">
-                    {selectedWork.media_type === "MANGA" ? "Kapitel" : "Folge"}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setEpNum((prev) => Math.max(1, prev - 1))}
-                      className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"
-                    >
-                      <Minus className="w-3.5 h-3.5" />
-                    </button>
-                    <input
-                      type="number"
-                      min={1}
-                      value={epNum}
-                      onChange={(e) =>
-                        setEpNum(Math.max(1, parseInt(e.target.value, 10) || 1))
-                      }
-                      className="w-14 text-center bg-transparent text-sm font-bold text-white focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setEpNum((prev) => prev + 1)}
-                      className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
+                {/* Episode / Chapter Selection Mode Switcher */}
+                <div className="flex flex-col gap-2 bg-[#0b101b] p-2.5 rounded-xl border border-white/10">
+                  <div className="grid grid-cols-3 gap-1 bg-[#111827] p-1 rounded-lg">
+                    {(
+                      [
+                        { id: "SINGLE", label: "Einzeln" },
+                        { id: "RANGE", label: "Von – Bis (Catch-up)" },
+                        { id: "MULTI", label: "Mehrere einzeln" },
+                      ] as const
+                    ).map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => handleSwitchEpMode(m.id)}
+                        className={`py-1.5 px-2 rounded-md text-[11px] font-bold transition-colors ${
+                          epMode === m.id
+                            ? "bg-emerald-600 text-white"
+                            : "text-gray-400 hover:text-white"
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
                   </div>
+
+                  {epMode === "SINGLE" && (
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-xs font-semibold text-gray-300">
+                        {selectedWork.media_type === "MANGA" ? "Kapitel" : "Folge"}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEpNum((prev) => Math.max(1, prev - 1))}
+                          className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"
+                        >
+                          <Minus className="w-3.5 h-3.5" />
+                        </button>
+                        <input
+                          type="number"
+                          min={1}
+                          value={epNum}
+                          onChange={(e) =>
+                            setEpNum(Math.max(1, parseInt(e.target.value, 10) || 1))
+                          }
+                          className="w-14 text-center bg-transparent text-sm font-bold text-white focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setEpNum((prev) => prev + 1)}
+                          className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {epMode === "RANGE" && (
+                    <div className="flex flex-col gap-2 pt-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex-1 flex flex-col gap-1">
+                          <span className="text-[11px] text-gray-400 font-semibold">
+                            Von {selectedWork.media_type === "MANGA" ? "Kap." : "Folge"}
+                          </span>
+                          <div className="flex items-center gap-1 bg-[#111827] border border-white/10 rounded-lg p-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEpNum((prev) => Math.max(1, prev - 1))
+                              }
+                              className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-white shrink-0"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <input
+                              type="number"
+                              min={1}
+                              value={epNum}
+                              onChange={(e) =>
+                                setEpNum(
+                                  Math.max(1, parseInt(e.target.value, 10) || 1)
+                                )
+                              }
+                              className="w-full text-center bg-transparent text-sm font-bold text-white focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const next = epNum + 1;
+                                setEpNum(next);
+                                if (epEndNum < next) setEpEndNum(next);
+                              }}
+                              className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-white shrink-0"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <span className="text-gray-500 font-bold pt-4">–</span>
+
+                        <div className="flex-1 flex flex-col gap-1">
+                          <span className="text-[11px] text-gray-400 font-semibold">
+                            Bis {selectedWork.media_type === "MANGA" ? "Kap." : "Folge"}
+                          </span>
+                          <div className="flex items-center gap-1 bg-[#111827] border border-white/10 rounded-lg p-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEpEndNum((prev) => Math.max(epNum, prev - 1))
+                              }
+                              className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-white shrink-0"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <input
+                              type="number"
+                              min={1}
+                              value={epEndNum}
+                              onChange={(e) =>
+                                setEpEndNum(
+                                  Math.max(1, parseInt(e.target.value, 10) || 1)
+                                )
+                              }
+                              className="w-full text-center bg-transparent text-sm font-bold text-white focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setEpEndNum((prev) => prev + 1)}
+                              className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-white shrink-0"
+                            >
+                              <Plus className="w-3 h-3" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => setEpNum(1)}
+                          className="text-[11px] px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-emerald-300 border border-white/10"
+                        >
+                          Ab {selectedWork.media_type === "MANGA" ? "Kap. 1" : "Folge 1"}
+                        </button>
+                        {selectedWork.current_episode > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEpNum(1);
+                              setEpEndNum(selectedWork.current_episode);
+                            }}
+                            className="text-[11px] px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-emerald-300 border border-white/10"
+                          >
+                            1 bis aktueller Stand ({selectedWork.current_episode})
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {epMode === "MULTI" && (
+                    <div className="flex flex-col gap-2 pt-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-gray-300">
+                          {selectedWork.media_type === "MANGA"
+                            ? "Kapitel hinzufügen"
+                            : "Folge hinzufügen"}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setMultiEpCandidate((prev) => Math.max(1, prev - 1))
+                            }
+                            className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <input
+                            type="number"
+                            min={1}
+                            value={multiEpCandidate}
+                            onChange={(e) =>
+                              setMultiEpCandidate(
+                                Math.max(1, parseInt(e.target.value, 10) || 1)
+                              )
+                            }
+                            className="w-12 text-center bg-[#111827] border border-white/10 rounded-lg py-1 text-sm font-bold text-white focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setMultiEpCandidate((prev) => prev + 1)}
+                            className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleAddMultiEp()}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold"
+                          >
+                            + Dazu
+                          </button>
+                        </div>
+                      </div>
+
+                      {multiEps.length > 0 ? (
+                        <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                          {multiEps.map((n) => (
+                            <span
+                              key={n}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 text-xs font-bold"
+                            >
+                              {selectedWork.media_type === "MANGA" ? "Kap." : "Folge"}{" "}
+                              {n}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveMultiEp(n)}
+                                className="hover:text-rose-300"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-amber-300/90">
+                          Bitte mindestens eine{" "}
+                          {selectedWork.media_type === "MANGA" ? "Kapitel" : "Folge"}
+                          -Nummer hinzufügen.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Review Text */}
@@ -1141,7 +1363,10 @@ export default function WhatsAppReviewFeed({
 
                 <button
                   type="button"
-                  disabled={!reviewText.trim() && rating === undefined}
+                  disabled={
+                    (!reviewText.trim() && rating === undefined) ||
+                    (epMode === "MULTI" && multiEps.length === 0)
+                  }
                   onClick={handleAddDraftItem}
                   className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold text-sm transition-colors"
                 >

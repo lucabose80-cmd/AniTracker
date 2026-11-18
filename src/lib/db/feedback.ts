@@ -21,6 +21,16 @@ function sanitizeReviewItem(item: ReviewListItem): ReviewListItem {
     episode_num: item.episode_num,
     text: item.text,
   };
+  if (
+    typeof item.episode_end === "number" &&
+    !Number.isNaN(item.episode_end) &&
+    item.episode_end > item.episode_num
+  ) {
+    sanitized.episode_end = item.episode_end;
+  }
+  if (Array.isArray(item.episodes) && item.episodes.length > 0) {
+    sanitized.episodes = item.episodes;
+  }
   if (item.work_cover !== undefined && item.work_cover !== "") {
     sanitized.work_cover = item.work_cover;
   }

@@ -120,6 +120,8 @@ export interface ReviewListItem {
   work_cover?: string;
   media_type: "ANIME" | "MANGA";
   episode_num: number;
+  episode_end?: number; // Optional end of range (e.g. Chapter 1-70)
+  episodes?: number[];  // Optional list of individual episodes/chapters (e.g. [5, 6, 7])
   text: string;
   rating?: number; // 1-10
 }
