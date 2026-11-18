@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { User as UserIcon, Settings, LogOut, LogIn, Bell, Star } from "lucide-react";
 import { auth } from "@/lib/firebase";
@@ -269,7 +269,7 @@ export default function ProfilePage() {
           )}
         </div>
         <div className="text-center">
-          <h3 className="text-lg font-bold">{dbUser?.username || user?.displayName || "WeebCheck User"}</h3>
+          <h3 className="text-lg font-bold">{dbUser?.username || user?.displayName || "AniPulse User"}</h3>
           <p className="text-sm text-gray-400">{user?.email || "Nicht angemeldet"}</p>
         </div>
 

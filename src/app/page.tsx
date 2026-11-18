@@ -208,15 +208,31 @@ export default function Home() {
     );
   };
 
+  const pausedActiveCount = useMemo(() => {
+    return userWorks.filter(
+      (w) => w.status === "CURRENT" && Boolean(pausedWorksMap[w.work_id])
+    ).length;
+  }, [userWorks, pausedWorksMap]);
+
   return (
     <div className="flex flex-col gap-6 px-4 pt-5 pb-24 max-w-3xl mx-auto w-full">
       {/* TOP SECTION: HEUTE & DEMNÄCHST IM KALENDER */}
       <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-bold text-white flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-emerald-400" />
-            Heute &amp; Demnächst im Kalender
-          </h2>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-emerald-400" />
+              Heute &amp; Demnächst im Kalender
+            </h2>
+            {pausedActiveCount > 0 && (
+              <Link
+                href="/calendar"
+                className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 border border-amber-500/35 px-2 py-0.5 text-[10px] font-bold text-amber-300 hover:bg-amber-500/25 transition"
+              >
+                {pausedActiveCount} auf Pause
+              </Link>
+            )}
+          </div>
           <Link
             href="/calendar"
             className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-0.5 transition-colors shrink-0"

@@ -58,7 +58,7 @@ export function ServiceWorkerManager() {
               user_id: user.uid,
               actor_id: 'SYSTEM',
               actor_name: `System Update (v${remoteVersion})`,
-              actor_avatar: '/weebcheck-192x192.png',
+              actor_avatar: '/anipulse-192x192.png',
               type: 'APP_UPDATE',
               text: `Neu: v${remoteVersion} ist da! Klicke hier zum Aktualisieren.`,
               timestamp: new Date().toISOString(),

@@ -123,9 +123,14 @@ export function SplashScreen({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        <div className="flex flex-col items-center space-y-8 relative z-10">
+        <div className="flex flex-col items-center space-y-6 relative z-10">
+          <img
+            src="/anipulse-192x192.png"
+            alt="AniPulse Logo"
+            className="w-20 h-20 rounded-2xl shadow-[0_0_40px_-5px_rgba(37,99,235,0.6)] border border-blue-500/30 object-cover"
+          />
           <h1 className="text-5xl font-extrabold tracking-tighter text-white">
-            <span className="text-blue-600">Weeb</span>Check
+            <span className="bg-gradient-to-r from-cyan-400 via-blue-500 to-indigo-500 bg-clip-text text-transparent">Ani</span>Pulse
           </h1>
           <p className="text-gray-400 text-sm max-w-xs text-center">
             Dein Tracker für Anime, Manga und Manhwa mit tiefgehenden Bewertungen.

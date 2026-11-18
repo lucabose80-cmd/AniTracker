@@ -695,6 +695,29 @@ export default function LibraryPage() {
                     <span className="text-[11px] font-semibold text-gray-400 tabular-nums">
                       {unitPrefix} {current} / {total ?? "?"}
                     </span>
+                    {isPaused && (
+                      <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                        <span className="inline-flex items-center rounded bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.2 text-[9px] font-bold text-amber-300">
+                          Auf Pause
+                        </span>
+                        <button
+                          type="button"
+                          onClick={async (e) => {
+                            e.preventDefault();
+                            const { unpauseWork } = await import("@/lib/db/pauses");
+                            await unpauseWork(work.work_id);
+                            setPausedWorkIds((prev) => {
+                              const next = new Set(prev);
+                              next.delete(work.work_id);
+                              return next;
+                            });
+                          }}
+                          className="text-[9px] font-bold text-emerald-400 hover:underline"
+                        >
+                          Aufheben
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -821,10 +844,33 @@ export default function LibraryPage() {
                   </div>
 
                   <div className="flex items-center flex-wrap gap-2">
-                    {nextReleaseText && (
-                      <span className="text-xs text-gray-400 truncate">
-                        {nextReleaseText}
-                      </span>
+                    {isPaused ? (
+                      <div className="flex items-center gap-1.5">
+                        <span className="inline-flex items-center rounded-full bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-300">
+                          Auf Pause / Hiatus
+                        </span>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            const { unpauseWork } = await import("@/lib/db/pauses");
+                            await unpauseWork(work.work_id);
+                            setPausedWorkIds((prev) => {
+                              const next = new Set(prev);
+                              next.delete(work.work_id);
+                              return next;
+                            });
+                          }}
+                          className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 hover:underline"
+                        >
+                          Pause für alle aufheben
+                        </button>
+                      </div>
+                    ) : (
+                      nextReleaseText && (
+                        <span className="text-xs text-gray-400 truncate">
+                          {nextReleaseText}
+                        </span>
+                      )
                     )}
                     {behindCount > 0 && (
                       <span className="inline-flex items-center rounded-full bg-blue-500/15 border border-blue-500/30 px-2 py-0.5 text-[10px] font-semibold text-blue-400">

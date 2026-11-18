@@ -19,16 +19,17 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "WeebCheck",
+  title: "AniPulse",
   description: "Dein Tracker für Anime, Manga und Manhwa mit tiefgehenden Bewertungen.",
   manifest: "/manifest.json",
   icons: {
+    icon: "/anipulse-192x192.png",
     apple: "/apple-touch-icon.png",
   },
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "WeebCheck",
+    title: "AniPulse",
   },
 };
 

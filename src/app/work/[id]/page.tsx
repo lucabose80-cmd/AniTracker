@@ -581,6 +581,28 @@ export default function WorkDetailPage() {
           </div>
         )}
 
+        {/* GLOBAL PAUSE / HIATUS BANNER (Visible to all users, any user can unpause for everyone) */}
+        {isWorkPaused && (
+          <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-amber-300">
+                Global auf Pause / Hiatus ({formatPauseStatusLabel(pausedUntilIso)})
+              </span>
+              <span className="text-[11px] text-amber-200/80 mt-0.5">
+                Gilt für alle Nutzer in AniPulse. Jeder Nutzer kann die Pause hier für alle beenden, sobald es weitergeht.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={handleUnpause}
+              disabled={isSaving}
+              className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow transition shrink-0"
+            >
+              Pause für alle aufheben
+            </button>
+          </div>
+        )}
+
         <p className={`mt-2 text-sm text-gray-300 ${work.startDate?.year ? '' : 'mt-4'} line-clamp-4`} dangerouslySetInnerHTML={{ __html: work.description || "" }} />
 
         {/* EPISODE TRACKING */}
@@ -615,11 +637,13 @@ export default function WorkDetailPage() {
                 style={{ MozAppearance: 'textfield' }}
               />
               <span className="text-sm text-gray-500 ml-1">/ {calculatedMaxEps !== 9999 ? calculatedMaxEps : "?"}</span>
-              {inLibrary && (
-                <button onClick={() => setShowSettingsModal(true)} className="ml-3 text-gray-500 hover:text-white transition bg-gray-800 rounded p-1">
-                  <Settings size={14} />
-                </button>
-              )}
+              <button
+                onClick={() => setShowSettingsModal(true)}
+                title="Release-Zeiten, Takt & Pause für alle anpassen"
+                className="ml-3 text-gray-400 hover:text-white transition bg-gray-800 rounded p-1.5"
+              >
+                <Settings size={14} />
+              </button>
             </span>
             <button 
               onClick={() => handleUpdateEpisode(1)}
@@ -869,7 +893,7 @@ export default function WorkDetailPage() {
                 <button 
                   onClick={async () => {
                     const user = auth?.currentUser;
-                    if (user && inLibrary) {
+                    if (user) {
                       if (manualMaxEpisode === "") await clearManualMaxEpisode(id);
                       const effectiveDay =
                         customDay === -1
@@ -900,14 +924,16 @@ export default function WorkDetailPage() {
                           : (null as any)
                       );
 
-                      // Update synchro_offset_episodes in DB (manual_available_eps is now global)
-                      await saveUserWork(user.uid, id, { 
-                        synchro_offset_episodes: synchroOffset === "" ? 0 : synchroOffset,
-                      });
+                      if (inLibrary) {
+                        // Update synchro_offset_episodes in DB (manual_available_eps is now global)
+                        await saveUserWork(user.uid, id, { 
+                          synchro_offset_episodes: synchroOffset === "" ? 0 : synchroOffset,
+                        });
+                      }
                       
                       setHasCustomOverride(customDay !== -1);
                       setShowSettingsModal(false);
-                      setSaveMessage("Einstellungen gespeichert!");
+                      setSaveMessage("Einstellungen für alle gespeichert!");
                       setTimeout(() => setSaveMessage(""), 3000);
                     }
                   }}
