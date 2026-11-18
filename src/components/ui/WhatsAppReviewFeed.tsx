@@ -120,7 +120,9 @@ export default function WhatsAppReviewFeed({
         if (cancelled) return;
         const profileMap: Record<string, UserProfile> = {};
         profiles.forEach((p) => {
-          profileMap[p.uid] = p;
+          if (p.uid) {
+            profileMap[p.uid] = p;
+          }
         });
         setUserProfiles(profileMap);
         setActivities(feedData);
@@ -134,7 +136,7 @@ export default function WhatsAppReviewFeed({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [currentUserUid]);
 
   // Build quick-select list from user's CURRENT works
   const activeSelectableWorks = useMemo<SelectableWork[]>(() => {
@@ -313,7 +315,7 @@ export default function WhatsAppReviewFeed({
   const handleAddDraftItem = () => {
     if (!selectedWork) return;
     const trimmedText = reviewText.trim();
-    if (!trimmedText) return;
+    if (!trimmedText && rating === undefined) return;
 
     const newItem: DraftReviewItem = {
       work_id: selectedWork.work_id,
@@ -489,23 +491,23 @@ export default function WhatsAppReviewFeed({
                     <img
                       src={item.work_cover}
                       alt={item.work_title}
-                      className="w-9 h-12 rounded object-cover shrink-0 bg-gray-800"
+                      className="w-8 h-11 rounded object-cover shrink-0 bg-gray-800 opacity-90"
                     />
                   ) : (
-                    <div className="w-9 h-12 rounded bg-gray-800 shrink-0" />
+                    <div className="w-8 h-11 rounded bg-gray-800 shrink-0" />
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-xs font-bold text-white truncate max-w-[180px]">
+                    <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-gray-400">
+                      <span className="font-medium text-gray-400 truncate max-w-[180px]">
                         {item.work_title}
                       </span>
-                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white/10 text-gray-200">
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5">
                         {item.media_type === "MANGA" ? "Kap." : "Folge"}{" "}
                         {item.episode_num}
                       </span>
                       {typeof item.rating === "number" && (
                         <span
-                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${getRatingBadgeClass(
+                          className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${getRatingBadgeClass(
                             item.rating
                           )}`}
                         >
@@ -513,9 +515,11 @@ export default function WhatsAppReviewFeed({
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-gray-300 mt-1 break-words">
-                      {item.text}
-                    </p>
+                    {item.text && (
+                      <p className="text-sm sm:text-[15px] font-medium text-white mt-1 break-words leading-snug">
+                        {item.text}
+                      </p>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -681,7 +685,7 @@ export default function WhatsAppReviewFeed({
 
                   {/* Optional Bold Title */}
                   {activity.text && activity.text.trim() !== "" && (
-                    <p className="text-sm font-bold text-white mb-2.5 leading-snug">
+                    <p className="text-base font-bold text-white mb-2.5 leading-snug">
                       {activity.text}
                     </p>
                   )}
@@ -689,55 +693,60 @@ export default function WhatsAppReviewFeed({
                   {/* REVIEW_LIST Items */}
                   {activity.action_type === "REVIEW_LIST" &&
                     Array.isArray(activity.review_items) && (
-                      <div className="flex flex-col gap-2">
+                      <div className="flex flex-col gap-2.5">
                         {activity.review_items.map((item, idx) => (
                           <div
                             key={`${item.work_id}-${item.episode_num}-${idx}`}
-                            className="flex items-start gap-2.5 bg-black/25 border border-white/5 rounded-xl p-2"
+                            className="flex items-start gap-2.5 bg-black/20 border border-white/5 rounded-xl p-2.5"
                           >
                             <Link
                               href={`/work/${item.work_id}`}
-                              className="shrink-0 block"
+                              className="shrink-0 block mt-0.5"
                             >
                               {item.work_cover ? (
                                 <img
                                   src={item.work_cover}
                                   alt={item.work_title}
-                                  className="w-9 h-12 rounded object-cover bg-gray-800 hover:opacity-90 transition-opacity"
+                                  className="w-8 h-11 rounded object-cover bg-gray-800 opacity-85 hover:opacity-100 transition-opacity"
                                 />
                               ) : (
-                                <div className="w-9 h-12 rounded bg-gray-800" />
+                                <div className="w-8 h-11 rounded bg-gray-800" />
                               )}
                             </Link>
 
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <Link
-                                  href={`/work/${item.work_id}`}
-                                  className="text-xs font-bold text-white hover:text-emerald-300 transition-colors truncate max-w-[180px]"
-                                >
-                                  {item.work_title}
-                                </Link>
-                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-white/10 text-gray-200">
-                                  {item.media_type === "MANGA" ? "Kap." : "Folge"}{" "}
-                                  {item.episode_num}
-                                </span>
-                              </div>
-                              <p className="text-xs text-gray-200 mt-1 whitespace-pre-wrap break-words leading-relaxed">
-                                {item.text}
-                              </p>
-                            </div>
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                  <Link
+                                    href={`/work/${item.work_id}`}
+                                    className="text-[11px] font-medium text-gray-400 hover:text-emerald-300 transition-colors truncate max-w-[180px]"
+                                  >
+                                    {item.work_title}
+                                  </Link>
+                                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5 shrink-0">
+                                    {item.media_type === "MANGA" ? "Kap." : "Folge"}{" "}
+                                    {item.episode_num}
+                                  </span>
+                                </div>
 
-                            {typeof item.rating === "number" && (
-                              <span
-                                className={`shrink-0 text-[11px] font-bold px-2 py-0.5 rounded-lg border flex items-center gap-0.5 ${getRatingBadgeClass(
-                                  item.rating
-                                )}`}
-                              >
-                                <Star className="w-3 h-3 fill-current" />
-                                {item.rating}/10
-                              </span>
-                            )}
+                                {typeof item.rating === "number" && (
+                                  <span
+                                    className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-md border flex items-center gap-0.5 ${getRatingBadgeClass(
+                                      item.rating
+                                    )}`}
+                                  >
+                                    <Star className="w-2.5 h-2.5 fill-current" />
+                                    {item.rating}/10
+                                  </span>
+                                )}
+                              </div>
+
+                              {item.text && (
+                                <p className="text-[15px] sm:text-base font-medium text-white mt-1 whitespace-pre-wrap break-words leading-snug">
+                                  {item.text}
+                                </p>
+                              )}
+                            </div>
                           </div>
                         ))}
                       </div>

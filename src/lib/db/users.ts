@@ -30,7 +30,11 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   const docSnap = await getDoc(docRef);
 
   if (docSnap && docSnap.exists()) {
-    return docSnap.data() as UserProfile;
+    const data = docSnap.data() as UserProfile;
+    return {
+      ...data,
+      uid: data.uid || docSnap.id,
+    };
   }
   return null;
 }
@@ -39,8 +43,12 @@ export async function getAllUserProfiles(): Promise<UserProfile[]> {
   if (!db) return [];
   const snapshot = await getDocs(collection(db, "users"));
   const profiles: UserProfile[] = [];
-  snapshot.forEach((doc) => {
-    profiles.push(doc.data() as UserProfile);
+  snapshot.forEach((docSnap) => {
+    const data = docSnap.data() as UserProfile;
+    profiles.push({
+      ...data,
+      uid: data.uid || docSnap.id,
+    });
   });
   return profiles;
 }
@@ -74,6 +82,7 @@ export async function updateUserProfileData(uid: string, username: string, avata
   if (!db) return;
   const docRef = doc(db, "users", uid);
   await setDoc(docRef, {
+    uid,
     username,
     avatar_url
   }, { merge: true });
