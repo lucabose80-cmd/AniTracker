@@ -122,6 +122,8 @@ export interface ReviewListItem {
   episode_num: number;
   episode_end?: number; // Optional end of range (e.g. Chapter 1-70)
   episodes?: number[];  // Optional list of individual episodes/chapters (e.g. [5, 6, 7])
+  previous_episode?: number; // User's progress before this review was submitted (for rollback on delete/edit)
+  applied_episode?: number;  // Progress value set by this review item
   text: string;
   rating?: number; // 1-10
 }

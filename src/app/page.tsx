@@ -8,7 +8,12 @@ import { de } from "date-fns/locale";
 import { auth } from "@/lib/firebase";
 import { fetchAniListBatch } from "@/lib/anilist";
 import { getAllUserWorks, updateEpisodeProgress } from "@/lib/db/works";
-import { CalendarOverride, getCalendarOverrides } from "@/lib/db/calendar";
+import {
+  CalendarOverride,
+  computeWorkReleaseInfo,
+  getCalendarOverrides,
+} from "@/lib/db/calendar";
+import { getPausedWorksMap, WorkPauseRecord } from "@/lib/db/pauses";
 import { UserWork } from "@/types/database";
 import { useAppStore } from "@/lib/store";
 import WhatsAppReviewFeed from "@/components/ui/WhatsAppReviewFeed";
@@ -22,77 +27,20 @@ interface CalendarStripItem {
   airingLabel: string;
   airingEpisode?: number;
   nextUserEpisode: number;
+  isPaused?: boolean;
+  pauseLabel?: string;
 }
 
-function computeNextAiringAt(
-  media: any,
-  over?: CalendarOverride
-): number | undefined {
-  if (over?.airingAt) {
-    return over.airingAt;
-  }
-
-  if (over?.weeklyDay !== undefined && over?.weeklyTime !== undefined) {
-    const [hours, minutes] = over.weeklyTime.split(":").map(Number);
-    if (Number.isNaN(hours) || Number.isNaN(minutes)) return undefined;
-
-    const now = new Date();
-    const date = new Date();
-    date.setHours(hours, minutes, 0, 0);
-    const currentDay = date.getDay();
-
-    let diff = over.weeklyDay - currentDay;
-    if (diff < 0) diff += 7;
-    if (diff === 0 && date.getTime() < now.getTime()) {
-      diff += 7;
-    }
-
-    date.setDate(date.getDate() + diff);
-    let computedAiringAt = Math.floor(date.getTime() / 1000);
-
-    const freqWeeks = over.releaseFrequency || 1;
-    const anchor = over.startDate
-      ? new Date(over.startDate).getTime() / 1000
-      : over.lastIncrementedAt || 0;
-
-    if (anchor > 0 && freqWeeks > 1) {
-      const startD = new Date(anchor * 1000);
-      const diffStart = startD.getDay() === 0 ? 6 : startD.getDay() - 1;
-      startD.setDate(startD.getDate() - diffStart);
-      startD.setHours(0, 0, 0, 0);
-
-      const compD = new Date(computedAiringAt * 1000);
-      const diffComp = compD.getDay() === 0 ? 6 : compD.getDay() - 1;
-      compD.setDate(compD.getDate() - diffComp);
-      compD.setHours(0, 0, 0, 0);
-
-      const diffWeeks = Math.round(
-        (compD.getTime() - startD.getTime()) / (7 * 24 * 3600 * 1000)
-      );
-      let weeksToAdd = 0;
-      if (diffWeeks < 0) {
-        weeksToAdd = Math.abs(diffWeeks);
-      } else {
-        const remainder = diffWeeks % freqWeeks;
-        if (remainder !== 0) {
-          weeksToAdd = freqWeeks - remainder;
-        }
-      }
-      computedAiringAt += weeksToAdd * 7 * 24 * 3600;
-    }
-
-    return computedAiringAt;
-  }
-
-  if (media?.nextAiringEpisode?.airingAt) {
-    return media.nextAiringEpisode.airingAt;
-  }
-
-  return undefined;
-}
-
-function formatAiringLabel(airingAtSec: number): string {
+function formatAiringLabel(
+  airingAtSec: number,
+  isFlexible?: boolean,
+  flexibleRangeLabel?: string
+): string {
   const date = new Date(airingAtSec * 1000);
+  if (isFlexible && flexibleRangeLabel) {
+    if (isToday(date)) return `Heute (${flexibleRangeLabel})`;
+    return flexibleRangeLabel;
+  }
   const timeStr = format(date, "HH:mm");
   if (isToday(date)) return `Heute ${timeStr}`;
   if (isTomorrow(date)) return `Morgen ${timeStr}`;
@@ -113,6 +61,9 @@ export default function Home() {
   const [calendarOverrides, setCalendarOverrides] = useState<
     Record<string, CalendarOverride>
   >({});
+  const [pausedWorksMap, setPausedWorksMap] = useState<
+    Record<string, WorkPauseRecord>
+  >({});
   const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
   const [justIncrementedIds, setJustIncrementedIds] = useState<Set<string>>(
     new Set()
@@ -126,18 +77,21 @@ export default function Home() {
         setUserWorks([]);
         setUserAniListDetails({});
         setCalendarOverrides({});
+        setPausedWorksMap({});
         return;
       }
 
       setCurrentUserUid(user.uid);
       setIsLoadingCalendar(true);
       try {
-        const [works, overrides] = await Promise.all([
+        const [works, overrides, pauses] = await Promise.all([
           getAllUserWorks(user.uid),
           getCalendarOverrides(),
+          getPausedWorksMap().catch(() => ({})),
         ]);
         setUserWorks(works);
         setCalendarOverrides(overrides);
+        setPausedWorksMap(pauses);
 
         const idsToFetch = works
           .map((w) => parseInt(w.work_id, 10))
@@ -172,8 +126,22 @@ export default function Home() {
         if (!media) return null;
 
         const over = calendarOverrides[w.work_id];
-        const airingAt = computeNextAiringAt(media, over);
-        if (!airingAt || airingAt > maxWindowSec) return null;
+        const pauseInfo = pausedWorksMap[w.work_id];
+        const releaseInfo = computeWorkReleaseInfo({
+          media,
+          override: over,
+          pauseInfo,
+          userWork: w,
+        });
+
+        // Skip works that are paused for this 7-day window or have no schedule in the next 7 days
+        if (
+          !releaseInfo.hasSchedule ||
+          !releaseInfo.airingAt ||
+          releaseInfo.airingAt > maxWindowSec
+        ) {
+          return null;
+        }
 
         const mediaType: "ANIME" | "MANGA" =
           media.type === "MANGA" ? "MANGA" : "ANIME";
@@ -187,15 +155,21 @@ export default function Home() {
             `Werk #${w.work_id}`,
           cover: media.coverImage?.large || media.coverImage?.extraLarge,
           media_type: mediaType,
-          airingAt,
-          airingLabel: formatAiringLabel(airingAt),
-          airingEpisode: media.nextAiringEpisode?.episode,
+          airingAt: releaseInfo.airingAt,
+          airingLabel: formatAiringLabel(
+            releaseInfo.airingAt,
+            releaseInfo.isFlexible,
+            releaseInfo.flexibleRangeLabel
+          ),
+          airingEpisode: releaseInfo.nextEpisodeNumber,
           nextUserEpisode: currentEp + 1,
+          isPaused: releaseInfo.isPaused,
+          pauseLabel: releaseInfo.pauseLabel,
         } as CalendarStripItem;
       })
       .filter((item): item is CalendarStripItem => item !== null)
       .sort((a, b) => a.airingAt - b.airingAt);
-  }, [userWorks, userAniListDetails, calendarOverrides]);
+  }, [userWorks, userAniListDetails, calendarOverrides, pausedWorksMap]);
 
   const handleQuickIncrement = async (workId: string, nextEp: number) => {
     if (!currentUserUid) return;

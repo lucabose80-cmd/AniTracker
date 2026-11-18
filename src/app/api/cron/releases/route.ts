@@ -77,37 +77,95 @@ export async function GET(req: Request) {
     const schedules = json.data?.Page?.airingSchedules || [];
 
     const customSchedules: any[] = [];
-    const overridesSnap = await adminDb.collection("calendar_overrides").get();
+    const [overridesSnap, pausesSnap] = await Promise.all([
+      adminDb.collection("calendar_overrides").get(),
+      adminDb.collection("work_pauses").get(),
+    ]);
+
+    const nowIso = new Date().toISOString();
+    const pausedWorkIds = new Set<string>();
+    for (const pDoc of pausesSnap.docs) {
+      const pData = pDoc.data();
+      if (pData?.paused && typeof pData.paused_until === "string" && pData.paused_until > nowIso) {
+        pausedWorkIds.add(pData.work_id || pDoc.id);
+      }
+    }
+
+    // Filter out AniList schedules for paused works as well
+    const activeSchedules = schedules.filter(
+      (s: any) => !pausedWorkIds.has(String(s.mediaId))
+    );
+    schedules.length = 0;
+    schedules.push(...activeSchedules);
     
     for (const doc of overridesSnap.docs) {
+      const workId = doc.id;
+      if (pausedWorkIds.has(workId)) continue;
+
       const over = doc.data();
-      if (over.weeklyDay !== undefined && over.weeklyTime !== undefined) {
+      const freqWeeks = Math.max(1, Number(over.releaseFrequency) || 1);
+      const lastInc = Number(over.lastIncrementedAt) || 0;
+      const threshold = freqWeeks * 7 * 24 * 3600 - 3600;
+
+      // If startDate is in the future, do not auto-increment yet
+      if (typeof over.startDate === "string" && over.startDate) {
+        const startSec = Math.floor(new Date(over.startDate).getTime() / 1000);
+        if (!Number.isNaN(startSec) && now < startSec) {
+          continue;
+        }
+      }
+
+      const targetDay =
+        over.rhythmType === "flexible" && over.flexibleDayRange?.minDay !== undefined
+          ? Number(over.flexibleDayRange.minDay)
+          : over.weeklyDay !== undefined
+          ? Number(over.weeklyDay)
+          : undefined;
+      const targetTimeStr = over.weeklyTime || "18:00";
+
+      let shouldTriggerNow = false;
+
+      if (typeof over.airingAt === "number" && over.airingAt > 0) {
+        if (over.airingAt >= oneHourAgo && over.airingAt <= now && now - lastInc >= 3600) {
+          shouldTriggerNow = true;
+        }
+      }
+
+      if (!shouldTriggerNow && targetDay !== undefined && !Number.isNaN(targetDay)) {
         // Convert to Europe/Berlin timezone so German release times match Vercel's UTC clock
-        const berlinDate = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Berlin" }));
+        const berlinDate = new Date(
+          new Date().toLocaleString("en-US", { timeZone: "Europe/Berlin" })
+        );
         const currentDay = berlinDate.getDay();
         const currentHour = berlinDate.getHours();
         const currentMinute = berlinDate.getMinutes();
-        const [targetHour, targetMinute] = over.weeklyTime.split(':').map(Number);
-        
-        if (currentDay === over.weeklyDay) {
+        const [rawH, rawM] = targetTimeStr.split(":").map(Number);
+        const targetHour = Number.isNaN(rawH) ? 18 : rawH;
+        const targetMinute = Number.isNaN(rawM) ? 0 : rawM;
+
+        if (currentDay === targetDay) {
           const currentTimeMin = currentHour * 60 + currentMinute;
           const targetTimeMin = targetHour * 60 + targetMinute;
-          
+
           if (currentTimeMin >= targetTimeMin && currentTimeMin < targetTimeMin + 60) {
-            const freqWeeks = over.releaseFrequency || 1;
-            const lastInc = over.lastIncrementedAt || 0;
-            const threshold = (freqWeeks * 7 * 24 * 3600) - 3600;
-            
             if (now - lastInc >= threshold) {
-              const newEps = (over.manualAvailableEps || 0) + 1;
-              await adminDb.collection("calendar_overrides").doc(doc.id).update({
-                manualAvailableEps: newEps,
-                lastIncrementedAt: now
-              });
-              customSchedules.push({ mediaId: doc.id, episode: newEps, type: "MANGA" });
+              shouldTriggerNow = true;
             }
           }
         }
+      }
+
+      if (shouldTriggerNow) {
+        const newEps = (Number(over.manualAvailableEps) || 0) + 1;
+        const nextUpdate: Record<string, any> = {
+          manualAvailableEps: newEps,
+          lastIncrementedAt: now,
+        };
+        if (typeof over.airingAt === "number" && over.airingAt > 0 && freqWeeks >= 1) {
+          nextUpdate.airingAt = over.airingAt + freqWeeks * 7 * 24 * 3600;
+        }
+        await adminDb.collection("calendar_overrides").doc(doc.id).update(nextUpdate);
+        customSchedules.push({ mediaId: doc.id, episode: newEps, type: "MANGA" });
       }
     }
 

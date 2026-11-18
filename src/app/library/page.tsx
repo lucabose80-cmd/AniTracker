@@ -27,7 +27,11 @@ import {
   updateEpisodeProgress,
   updateUserWorkStatus,
 } from "@/lib/db/works";
-import { CalendarOverride, getCalendarOverrides } from "@/lib/db/calendar";
+import {
+  CalendarOverride,
+  computeWorkReleaseInfo,
+  getCalendarOverrides,
+} from "@/lib/db/calendar";
 import { getPausedWorkIds } from "@/lib/db/pauses";
 
 type SortOption = "RECENT" | "TITLE" | "BEHIND";
@@ -53,40 +57,13 @@ function computeBehindCount(
   globalOverride?: CalendarOverride,
   isPaused?: boolean
 ): number {
-  if (!details || isPaused || work.status === "PAUSED" || work.status === "COMPLETED" || work.status === "DROPPED") {
-    return 0;
-  }
-
-  const currentEp = work.current_episode || 0;
-  let totalEps = 9999;
-
-  if (globalOverride?.manualMaxEpisode !== undefined && globalOverride?.manualMaxEpisode !== null) {
-    totalEps = globalOverride.manualMaxEpisode;
-  } else if (work.manual_max_episode !== undefined && work.manual_max_episode !== null) {
-    totalEps = work.manual_max_episode;
-  }
-
-  let maxAiredEp = 0;
-  if (globalOverride?.manualAvailableEps !== undefined && globalOverride?.manualAvailableEps !== null) {
-    maxAiredEp = globalOverride.manualAvailableEps;
-  } else if (work.manual_available_eps !== undefined && work.manual_available_eps !== null) {
-    maxAiredEp = Number(work.manual_available_eps);
-  } else if (details?.type === "MANGA") {
-    maxAiredEp = totalEps !== 9999 ? totalEps : (details?.chapters || 0);
-  } else if (details?.status === "RELEASING" && details?.nextAiringEpisode?.episode) {
-    maxAiredEp = details.nextAiringEpisode.episode - 1;
-  } else if (details?.status === "RELEASING") {
-    maxAiredEp = currentEp;
-  } else if (details?.status === "FINISHED") {
-    maxAiredEp = totalEps !== 9999 ? totalEps : (details?.episodes || 0);
-  }
-
-  const offset = work.synchro_offset_episodes || 0;
-  if (globalOverride?.manualAvailableEps == null && work.manual_available_eps == null) {
-    maxAiredEp = Math.max(0, maxAiredEp - offset);
-  }
-
-  return Math.max(0, maxAiredEp - currentEp);
+  const releaseInfo = computeWorkReleaseInfo({
+    media: details,
+    override: globalOverride,
+    pauseInfo: isPaused ? { paused: true, paused_until: "9999-12-31T23:59:59.999Z" } : null,
+    userWork: work,
+  });
+  return releaseInfo.behindCount;
 }
 
 function getTotalCount(
@@ -110,34 +87,11 @@ function getNextReleaseTimestampMs(
   details: any,
   globalOverride?: CalendarOverride
 ): number | null {
-  const now = Date.now();
-
-  if (globalOverride?.airingAt && globalOverride.airingAt * 1000 > now) {
-    return globalOverride.airingAt * 1000;
-  }
-
-  if (details?.nextAiringEpisode?.airingAt) {
-    return details.nextAiringEpisode.airingAt * 1000;
-  }
-
-  if (globalOverride?.weeklyDay !== undefined && globalOverride?.weeklyTime) {
-    const [hoursStr, minutesStr] = globalOverride.weeklyTime.split(":");
-    const hours = parseInt(hoursStr, 10);
-    const minutes = parseInt(minutesStr, 10);
-    if (!Number.isNaN(hours) && !Number.isNaN(minutes)) {
-      const candidate = new Date();
-      const currentDay = candidate.getDay();
-      let daysUntil = (globalOverride.weeklyDay - currentDay + 7) % 7;
-      candidate.setHours(hours, minutes, 0, 0);
-      if (daysUntil === 0 && candidate.getTime() <= now) {
-        daysUntil = 7;
-      }
-      candidate.setDate(candidate.getDate() + daysUntil);
-      return candidate.getTime();
-    }
-  }
-
-  return null;
+  const releaseInfo = computeWorkReleaseInfo({
+    media: details,
+    override: globalOverride,
+  });
+  return releaseInfo.airingAt ? releaseInfo.airingAt * 1000 : null;
 }
 
 function formatNextReleaseLabel(
@@ -150,19 +104,27 @@ function formatNextReleaseLabel(
   if (work.status === "DROPPED") return "Abgebrochen";
   if (work.status === "COMPLETED") return "Abgeschlossen";
 
-  const nextMs = getNextReleaseTimestampMs(details, globalOverride);
-  if (!nextMs) {
+  const releaseInfo = computeWorkReleaseInfo({
+    media: details,
+    override: globalOverride,
+    userWork: work,
+  });
+
+  if (!releaseInfo.hasSchedule || !releaseInfo.airingAt) {
     if (details?.status === "FINISHED") return "Abgeschlossen";
     if (details?.status === "NOT_YET_RELEASED") return "Noch nicht gestartet";
     return null;
   }
 
+  const nextMs = releaseInfo.airingAt * 1000;
   const nextDate = new Date(nextMs);
   const now = new Date();
-  const timeStr = nextDate.toLocaleTimeString("de-DE", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const timeStr = releaseInfo.isFlexible && releaseInfo.flexibleRangeLabel
+    ? releaseInfo.flexibleRangeLabel
+    : nextDate.toLocaleTimeString("de-DE", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
 
   const isSameDay = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() &&
@@ -170,13 +132,17 @@ function formatNextReleaseLabel(
     a.getDate() === b.getDate();
 
   if (isSameDay(nextDate, now)) {
-    return `Heute ${timeStr}`;
+    return releaseInfo.isFlexible && releaseInfo.flexibleRangeLabel
+      ? `Heute (${releaseInfo.flexibleRangeLabel})`
+      : `Heute ${timeStr}`;
   }
 
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
   if (isSameDay(nextDate, tomorrow)) {
-    return `Morgen ${timeStr}`;
+    return releaseInfo.isFlexible && releaseInfo.flexibleRangeLabel
+      ? `Morgen (${releaseInfo.flexibleRangeLabel})`
+      : `Morgen ${timeStr}`;
   }
 
   const datePart = nextDate.toLocaleDateString("de-DE", {

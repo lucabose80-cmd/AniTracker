@@ -16,14 +16,34 @@ import {
   Loader2,
   MessageSquareText,
   Minus,
+  Edit2,
+  MessageCircle,
+  ArrowLeftRight,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
-import { ActivityFeed, ReviewListItem, UserProfile, UserWork } from "@/types/database";
-import { getGlobalFeed } from "@/lib/db/feed";
+import {
+  ActivityComment,
+  ActivityFeed,
+  EpisodeFeedback,
+  ReviewListItem,
+  UserProfile,
+  UserWork,
+} from "@/types/database";
+import {
+  addActivityComment,
+  deleteActivityComment,
+  getActivityComments,
+  getGlobalFeed,
+} from "@/lib/db/feed";
 import { getAllUserProfiles } from "@/lib/db/users";
 import {
   createReviewList,
   deleteReviewList,
+  getAllEpisodeFeedback,
+  getReviewItemTargetEpisode,
   toggleActivityReaction,
+  updateReviewList,
 } from "@/lib/db/feedback";
 import { updateEpisodeProgress } from "@/lib/db/works";
 import { fetchAniList, SEARCH_WORKS } from "@/lib/anilist";
@@ -41,6 +61,17 @@ interface SelectableWork {
   cover?: string;
   media_type: "ANIME" | "MANGA";
   current_episode: number;
+}
+
+interface ComparisonEntry {
+  user_id: string;
+  username: string;
+  avatar_url?: string;
+  episode_label: string;
+  rating?: number;
+  text: string;
+  timestamp: string;
+  source_id: string;
 }
 
 interface WhatsAppReviewFeedProps {
@@ -87,6 +118,41 @@ function formatEpisodeBadge(item: ReviewListItem): string {
   return `${unit} ${item.episode_num}`;
 }
 
+function doReviewItemsOverlap(
+  a: { episode_num: number; episode_end?: number; episodes?: number[] },
+  b: { episode_num: number; episode_end?: number; episodes?: number[] }
+): boolean {
+  const getSet = (item: {
+    episode_num: number;
+    episode_end?: number;
+    episodes?: number[];
+  }): Set<number> => {
+    if (Array.isArray(item.episodes) && item.episodes.length > 0) {
+      return new Set(item.episodes);
+    }
+    if (
+      typeof item.episode_end === "number" &&
+      item.episode_end > item.episode_num
+    ) {
+      const s = new Set<number>();
+      // Cap range expansion at 300 to avoid large sets
+      const end = Math.min(item.episode_end, item.episode_num + 300);
+      for (let i = item.episode_num; i <= end; i++) {
+        s.add(i);
+      }
+      return s;
+    }
+    return new Set([item.episode_num]);
+  };
+
+  const setA = getSet(a);
+  const setB = getSet(b);
+  for (const ep of setA) {
+    if (setB.has(ep)) return true;
+  }
+  return false;
+}
+
 export default function WhatsAppReviewFeed({
   currentUserUid,
   userWorks,
@@ -97,13 +163,21 @@ export default function WhatsAppReviewFeed({
   const contentType = useAppStore((s) => s.contentType);
 
   const [activities, setActivities] = useState<ActivityFeed[]>([]);
-  const [userProfiles, setUserProfiles] = useState<Record<string, UserProfile>>({});
+  const [allFeedback, setAllFeedback] = useState<EpisodeFeedback[]>([]);
+  const [userProfiles, setUserProfiles] = useState<Record<string, UserProfile>>(
+    {}
+  );
   const [isLoadingFeed, setIsLoadingFeed] = useState(true);
 
-  // Media filter (Alle Medien / Anime / Manga), synced when global header toggle changes
-  const [mediaFilter, setMediaFilter] = useState<"ALL" | "ANIME" | "MANGA">("ALL");
+  // Media filter (Alle Medien / Anime / Manga)
+  const [mediaFilter, setMediaFilter] = useState<"ALL" | "ANIME" | "MANGA">(
+    "ALL"
+  );
 
-  // Composer state
+  // Composer & Edit state
+  const [editingActivityId, setEditingActivityId] = useState<string | null>(
+    null
+  );
   const [title, setTitle] = useState("");
   const [composerMediaType, setComposerMediaType] = useState<"ANIME" | "MANGA">(
     contentType === "MANGA" ? "MANGA" : "ANIME"
@@ -111,15 +185,18 @@ export default function WhatsAppReviewFeed({
   const [draftItems, setDraftItems] = useState<DraftReviewItem[]>([]);
   const [isSending, setIsSending] = useState(false);
 
-  // Sync composer media type with top header toggle when draft is empty
+  // Sync composer media type with top header toggle when draft is empty and not editing
   useEffect(() => {
-    if (draftItems.length === 0) {
+    if (draftItems.length === 0 && !editingActivityId) {
       setComposerMediaType(contentType === "MANGA" ? "MANGA" : "ANIME");
     }
-  }, [contentType, draftItems.length]);
+  }, [contentType, draftItems.length, editingActivityId]);
 
-  // Picker Modal state
+  // Picker Modal state (supports both adding new draft items and editing an existing draft item by index)
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [editingDraftIndex, setEditingDraftIndex] = useState<number | null>(
+    null
+  );
   const [pickerSearch, setPickerSearch] = useState("");
   const [searchResults, setSearchResults] = useState<SelectableWork[]>([]);
   const [isSearchingAniList, setIsSearchingAniList] = useState(false);
@@ -134,16 +211,41 @@ export default function WhatsAppReviewFeed({
   const [updateProgress, setUpdateProgress] = useState(true);
 
   // Emoji picker toggle per activity
-  const [openReactionForId, setOpenReactionForId] = useState<string | null>(null);
+  const [openReactionForId, setOpenReactionForId] = useState<string | null>(
+    null
+  );
+
+  // Text Comments / Opinions state per activity
+  const [openCommentsForIds, setOpenCommentsForIds] = useState<
+    Record<string, boolean>
+  >({});
+  const [commentsByActivity, setCommentsByActivity] = useState<
+    Record<string, ActivityComment[]>
+  >({});
+  const [loadingCommentsForIds, setLoadingCommentsForIds] = useState<
+    Record<string, boolean>
+  >({});
+  const [commentInputByActivity, setCommentInputByActivity] = useState<
+    Record<string, string>
+  >({});
+  const [sendingCommentForIds, setSendingCommentForIds] = useState<
+    Record<string, boolean>
+  >({});
+
+  // Expanded Comparison detail toggle per activity item key
+  const [openComparisonKey, setOpenComparisonKey] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     let cancelled = false;
     async function loadFeed() {
       setIsLoadingFeed(true);
       try {
-        const [feedData, profiles] = await Promise.all([
+        const [feedData, profiles, feedbackList] = await Promise.all([
           getGlobalFeed(60),
           getAllUserProfiles(),
+          getAllEpisodeFeedback(300),
         ]);
         if (cancelled) return;
         const profileMap: Record<string, UserProfile> = {};
@@ -154,6 +256,7 @@ export default function WhatsAppReviewFeed({
         });
         setUserProfiles(profileMap);
         setActivities(feedData);
+        setAllFeedback(feedbackList);
       } catch (err) {
         console.error("Failed to load WhatsApp review feed:", err);
       } finally {
@@ -176,7 +279,8 @@ export default function WhatsAppReviewFeed({
           details?.title?.english ||
           details?.title?.romaji ||
           `Werk #${w.work_id}`;
-        const cover = details?.coverImage?.large || details?.coverImage?.extraLarge;
+        const cover =
+          details?.coverImage?.large || details?.coverImage?.extraLarge;
         const mediaType: "ANIME" | "MANGA" =
           details?.type === "MANGA" ? "MANGA" : "ANIME";
         return {
@@ -199,7 +303,8 @@ export default function WhatsAppReviewFeed({
           details?.title?.english ||
           details?.title?.romaji ||
           `Werk #${w.work_id}`;
-        const cover = details?.coverImage?.large || details?.coverImage?.extraLarge;
+        const cover =
+          details?.coverImage?.large || details?.coverImage?.extraLarge;
         const mediaType: "ANIME" | "MANGA" =
           details?.type === "MANGA" ? "MANGA" : "ANIME";
         return {
@@ -243,7 +348,9 @@ export default function WhatsAppReviewFeed({
             title: m.title?.english || m.title?.romaji || "Unbekannt",
             cover: m.coverImage?.large || m.coverImage?.extraLarge,
             media_type: composerMediaType,
-            current_episode: existing ? Number(existing.current_episode) || 0 : 0,
+            current_episode: existing
+              ? Number(existing.current_episode) || 0
+              : 0,
           });
         });
 
@@ -268,7 +375,9 @@ export default function WhatsAppReviewFeed({
       if (mediaFilter !== "ALL") {
         if (act.action_type === "REVIEW_LIST") {
           const items = act.review_items || [];
-          const hasMedia = items.some((item) => item.media_type === mediaFilter);
+          const hasMedia = items.some(
+            (item) => item.media_type === mediaFilter
+          );
           if (!hasMedia) return false;
         } else if (act.work_id) {
           const details = userAniListDetails[act.work_id];
@@ -280,7 +389,84 @@ export default function WhatsAppReviewFeed({
     });
   }, [activities, mediaFilter, userAniListDetails]);
 
-  const openPicker = () => {
+  // Helper to find other users' reviews/ratings for the same work & overlapping episode/chapter
+  const getComparisonsForItem = (
+    activityId: string,
+    authorId: string,
+    item: ReviewListItem
+  ): ComparisonEntry[] => {
+    const byUser = new Map<string, ComparisonEntry>();
+    const unit = item.media_type === "MANGA" ? "Kap." : "Folge";
+
+    // 1. Check all REVIEW_LIST activities in the feed
+    for (const act of activities) {
+      if (
+        act.activity_id === activityId ||
+        act.user_id === authorId ||
+        act.action_type !== "REVIEW_LIST" ||
+        !Array.isArray(act.review_items)
+      ) {
+        continue;
+      }
+      for (const otherItem of act.review_items) {
+        if (otherItem.work_id !== item.work_id) continue;
+        if (doReviewItemsOverlap(item, otherItem)) {
+          const profile = userProfiles[act.user_id];
+          const existing = byUser.get(act.user_id);
+          if (!existing || act.timestamp > existing.timestamp) {
+            byUser.set(act.user_id, {
+              user_id: act.user_id,
+              username: profile?.username || "Unbekannt",
+              avatar_url: profile?.avatar_url,
+              episode_label: formatEpisodeBadge(otherItem),
+              rating: otherItem.rating,
+              text: otherItem.text,
+              timestamp: act.timestamp,
+              source_id: act.activity_id,
+            });
+          }
+        }
+      }
+    }
+
+    // 2. Also check global episode_feedback collection (in case rated on Work Detail page or older posts)
+    for (const fb of allFeedback) {
+      if (fb.user_id === authorId || fb.work_id !== item.work_id) continue;
+      if (fb.activity_id && fb.activity_id === activityId) continue;
+      if (
+        doReviewItemsOverlap(item, {
+          episode_num: fb.episode_num,
+        })
+      ) {
+        const profile = userProfiles[fb.user_id];
+        const existing = byUser.get(fb.user_id);
+        if (!existing || fb.timestamp > existing.timestamp) {
+          byUser.set(fb.user_id, {
+            user_id: fb.user_id,
+            username: profile?.username || "Unbekannt",
+            avatar_url: profile?.avatar_url,
+            episode_label: `${unit} ${fb.episode_num}`,
+            rating: fb.rating,
+            text: fb.text,
+            timestamp: fb.timestamp,
+            source_id: fb.feedback_id,
+          });
+        }
+      }
+    }
+
+    // Sort so currentUserUid appears first if present
+    return Array.from(byUser.values()).sort((a, b) => {
+      if (currentUserUid) {
+        if (a.user_id === currentUserUid) return -1;
+        if (b.user_id === currentUserUid) return 1;
+      }
+      return b.timestamp.localeCompare(a.timestamp);
+    });
+  };
+
+  const openPickerForNew = () => {
+    setEditingDraftIndex(null);
     setSelectedWork(null);
     setPickerSearch("");
     setSearchResults([]);
@@ -295,12 +481,59 @@ export default function WhatsAppReviewFeed({
     setIsPickerOpen(true);
   };
 
+  const openPickerForEditDraftItem = (idx: number) => {
+    const item = draftItems[idx];
+    if (!item) return;
+
+    const existingUserWork = userWorks.find((w) => w.work_id === item.work_id);
+    setEditingDraftIndex(idx);
+    setSelectedWork({
+      work_id: item.work_id,
+      title: item.work_title,
+      cover: item.work_cover,
+      media_type: item.media_type,
+      current_episode: existingUserWork
+        ? Number(existingUserWork.current_episode) || 0
+        : item.episode_num,
+    });
+
+    if (Array.isArray(item.episodes) && item.episodes.length > 1) {
+      setEpMode("MULTI");
+      setMultiEps(item.episodes);
+      setMultiEpCandidate(Math.max(...item.episodes) + 1);
+      setEpNum(item.episode_num);
+      setEpEndNum(item.episode_num + 1);
+    } else if (
+      typeof item.episode_end === "number" &&
+      item.episode_end > item.episode_num
+    ) {
+      setEpMode("RANGE");
+      setEpNum(item.episode_num);
+      setEpEndNum(item.episode_end);
+      setMultiEps([item.episode_num]);
+      setMultiEpCandidate(item.episode_end + 1);
+    } else {
+      setEpMode("SINGLE");
+      setEpNum(item.episode_num);
+      setEpEndNum(item.episode_num + 1);
+      setMultiEps([item.episode_num]);
+      setMultiEpCandidate(item.episode_num + 1);
+    }
+
+    setReviewText(item.text || "");
+    setRating(item.rating);
+    setUpdateProgress(item.updateProgress);
+    setIsPickerOpen(true);
+  };
+
   const handleSelectWork = (work: SelectableWork) => {
     const nextEp = work.current_episode > 0 ? work.current_episode + 1 : 1;
     setSelectedWork(work);
     setEpMode("SINGLE");
     setEpNum(nextEp);
-    setEpEndNum(Math.max(nextEp + 1, work.current_episode > 0 ? work.current_episode + 5 : 10));
+    setEpEndNum(
+      Math.max(nextEp + 1, work.current_episode > 0 ? work.current_episode + 5 : 10)
+    );
     setMultiEps([nextEp]);
     setMultiEpCandidate(nextEp + 1);
     setReviewText("");
@@ -311,7 +544,8 @@ export default function WhatsAppReviewFeed({
   const handleSwitchEpMode = (mode: "SINGLE" | "RANGE" | "MULTI") => {
     setEpMode(mode);
     if (mode === "RANGE") {
-      const start = selectedWork && selectedWork.current_episode === 0 ? 1 : epNum;
+      const start =
+        selectedWork && selectedWork.current_episode === 0 ? 1 : epNum;
       const end = Math.max(start + 1, epEndNum, epNum);
       setEpNum(start);
       setEpEndNum(end);
@@ -366,6 +600,9 @@ export default function WhatsAppReviewFeed({
       }
     }
 
+    const prevItem =
+      editingDraftIndex !== null ? draftItems[editingDraftIndex] : undefined;
+
     const newItem: DraftReviewItem = {
       work_id: selectedWork.work_id,
       work_title: selectedWork.title,
@@ -374,17 +611,49 @@ export default function WhatsAppReviewFeed({
       episode_num: finalEpNum,
       ...(finalEpEnd ? { episode_end: finalEpEnd } : {}),
       ...(finalEpisodes ? { episodes: finalEpisodes } : {}),
+      ...(typeof prevItem?.previous_episode === "number"
+        ? { previous_episode: prevItem.previous_episode }
+        : {}),
       text: trimmedText,
       rating,
       updateProgress,
     };
 
-    setDraftItems((prev) => [...prev, newItem]);
+    if (editingDraftIndex !== null) {
+      setDraftItems((prev) =>
+        prev.map((it, idx) => (idx === editingDraftIndex ? newItem : it))
+      );
+    } else {
+      setDraftItems((prev) => [...prev, newItem]);
+    }
+    setEditingDraftIndex(null);
     setIsPickerOpen(false);
   };
 
   const handleRemoveDraftItem = (index: number) => {
     setDraftItems((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleStartEditActivity = (activity: ActivityFeed) => {
+    if (activity.action_type !== "REVIEW_LIST") return;
+    const items = activity.review_items || [];
+    const firstMediaType = items[0]?.media_type || "ANIME";
+    setEditingActivityId(activity.activity_id);
+    setComposerMediaType(firstMediaType);
+    setTitle(activity.text || "");
+    setDraftItems(
+      items.map((item) => ({
+        ...item,
+        updateProgress: true,
+      }))
+    );
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleCancelEditActivity = () => {
+    setEditingActivityId(null);
+    setTitle("");
+    setDraftItems([]);
   };
 
   const handleSendReviewList = async () => {
@@ -396,39 +665,112 @@ export default function WhatsAppReviewFeed({
 
     setIsSending(true);
     try {
+      // Map current user progress per work_id before applying this review list
+      const currentProgressByWork = new Map<string, number>();
+      userWorks.forEach((w) => {
+        currentProgressByWork.set(w.work_id, Number(w.current_episode) || 0);
+      });
+
       const itemsToSave: ReviewListItem[] = draftItems.map(
-        ({ updateProgress: _up, ...rest }) => rest
-      );
-      const created = await createReviewList(
-        currentUserUid,
-        title.trim(),
-        itemsToSave
+        ({ updateProgress: shouldUpdate, ...rest }) => {
+          const targetEp = getReviewItemTargetEpisode(rest);
+          const prevEp =
+            typeof rest.previous_episode === "number"
+              ? rest.previous_episode
+              : currentProgressByWork.get(rest.work_id) ?? 0;
+
+          if (shouldUpdate) {
+            return {
+              ...rest,
+              previous_episode: prevEp,
+              applied_episode: targetEp,
+            };
+          }
+          return rest;
+        }
       );
 
-      // Update episode progress where checked (set to highest reviewed episode/chapter)
-      const progressUpdates = draftItems.filter((item) => item.updateProgress);
-      await Promise.all(
-        progressUpdates.map(async (item) => {
-          const targetEp =
-            item.episode_end && item.episode_end > item.episode_num
-              ? item.episode_end
-              : Array.isArray(item.episodes) && item.episodes.length > 0
-              ? Math.max(...item.episodes)
-              : item.episode_num;
+      if (editingActivityId) {
+        const oldActivity = activities.find(
+          (a) => a.activity_id === editingActivityId
+        );
+        const oldItems = oldActivity?.review_items || [];
+        const newWorkIds = new Set(itemsToSave.map((i) => i.work_id));
+
+        const updated = await updateReviewList(
+          editingActivityId,
+          currentUserUid,
+          title.trim(),
+          itemsToSave
+        );
+
+        // If an item was removed during editing, roll back its episode progress
+        for (const removedItem of oldItems) {
+          if (!newWorkIds.has(removedItem.work_id)) {
+            const rollbackEp =
+              typeof removedItem.previous_episode === "number"
+                ? removedItem.previous_episode
+                : Math.max(0, removedItem.episode_num - 1);
+            await updateEpisodeProgress(
+              currentUserUid,
+              removedItem.work_id,
+              rollbackEp
+            );
+            onProgressUpdated?.(removedItem.work_id, rollbackEp);
+          }
+        }
+
+        // Update progress for current items where checked
+        const progressUpdates = draftItems.filter((item) => item.updateProgress);
+        for (const item of progressUpdates) {
+          const targetEp = getReviewItemTargetEpisode(item);
           await updateEpisodeProgress(currentUserUid, item.work_id, targetEp);
           onProgressUpdated?.(item.work_id, targetEp);
-        })
-      );
+        }
 
-      if (created) {
-        setActivities((prev) => [created, ...prev]);
+        if (updated) {
+          setActivities((prev) =>
+            prev.map((a) =>
+              a.activity_id === editingActivityId ? updated : a
+            )
+          );
+        }
+
+        // Refresh global feedback list for comparisons
+        getAllEpisodeFeedback(300).then(setAllFeedback).catch(() => {});
+
+        setEditingActivityId(null);
+        setTitle("");
+        setDraftItems([]);
+      } else {
+        const created = await createReviewList(
+          currentUserUid,
+          title.trim(),
+          itemsToSave
+        );
+
+        // Update episode progress where checked (set to highest reviewed episode/chapter)
+        const progressUpdates = draftItems.filter((item) => item.updateProgress);
+        await Promise.all(
+          progressUpdates.map(async (item) => {
+            const targetEp = getReviewItemTargetEpisode(item);
+            await updateEpisodeProgress(currentUserUid, item.work_id, targetEp);
+            onProgressUpdated?.(item.work_id, targetEp);
+          })
+        );
+
+        if (created) {
+          setActivities((prev) => [created, ...prev]);
+        }
+
+        getAllEpisodeFeedback(300).then(setAllFeedback).catch(() => {});
+
+        setTitle("");
+        setDraftItems([]);
       }
-
-      setTitle("");
-      setDraftItems([]);
     } catch (err) {
-      console.error("Failed to send review list:", err);
-      alert("Fehler beim Senden der Review-Nachricht.");
+      console.error("Failed to send/update review list:", err);
+      alert("Fehler beim Speichern der Review-Nachricht.");
     } finally {
       setIsSending(false);
     }
@@ -436,11 +778,69 @@ export default function WhatsAppReviewFeed({
 
   const handleDeleteActivity = async (activityId: string) => {
     if (!currentUserUid) return;
-    if (!window.confirm("Diese Review-Nachricht wirklich löschen?")) return;
+    if (
+      !window.confirm(
+        "Diese Review-Nachricht wirklich löschen? Dein Folgen-/Kapitel-Fortschritt wird dabei wieder auf den vorherigen Stand zurückgesetzt."
+      )
+    ) {
+      return;
+    }
 
     try {
-      await deleteReviewList(activityId, currentUserUid);
+      const targetActivity = activities.find(
+        (a) => a.activity_id === activityId
+      );
+      const deletedItems = await deleteReviewList(activityId, currentUserUid);
+      const itemsForRollback =
+        deletedItems.length > 0
+          ? deletedItems
+          : targetActivity?.review_items || [];
+
+      // Roll back episode/chapter progress per work_id (take earliest previous_episode if multiple items for same work)
+      const rollbackByWork = new Map<string, number>();
+      for (const item of itemsForRollback) {
+        let restoredEp: number | undefined = undefined;
+        if (
+          typeof item.previous_episode === "number" &&
+          !Number.isNaN(item.previous_episode)
+        ) {
+          restoredEp = Math.max(0, item.previous_episode);
+        } else {
+          // Fallback for older posts created before previous_episode field existed
+          const currentUserWork = userWorks.find(
+            (w) => w.work_id === item.work_id
+          );
+          const appliedEp =
+            item.applied_episode ?? getReviewItemTargetEpisode(item);
+          if (!currentUserWork || currentUserWork.current_episode === appliedEp) {
+            restoredEp = Math.max(0, item.episode_num - 1);
+          }
+        }
+
+        if (restoredEp !== undefined) {
+          const existing = rollbackByWork.get(item.work_id);
+          if (existing === undefined || restoredEp < existing) {
+            rollbackByWork.set(item.work_id, restoredEp);
+          }
+        }
+      }
+
+      await Promise.all(
+        Array.from(rollbackByWork.entries()).map(
+          async ([workId, restoredEp]) => {
+            await updateEpisodeProgress(currentUserUid, workId, restoredEp);
+            onProgressUpdated?.(workId, restoredEp);
+          }
+        )
+      );
+
       setActivities((prev) => prev.filter((a) => a.activity_id !== activityId));
+      setAllFeedback((prev) =>
+        prev.filter((fb) => fb.activity_id !== activityId)
+      );
+      if (editingActivityId === activityId) {
+        handleCancelEditActivity();
+      }
     } catch (err) {
       console.error("Failed to delete review list:", err);
       alert("Fehler beim Löschen.");
@@ -457,7 +857,9 @@ export default function WhatsAppReviewFeed({
       prev.map((act) => {
         if (act.activity_id !== activityId) return act;
         previousReactions = act.reactions || {};
-        const nextReactions: Record<string, string[]> = { ...previousReactions };
+        const nextReactions: Record<string, string[]> = {
+          ...previousReactions,
+        };
         const users = Array.isArray(nextReactions[emoji])
           ? [...nextReactions[emoji]]
           : [];
@@ -491,7 +893,6 @@ export default function WhatsAppReviewFeed({
       );
     } catch (err) {
       console.error("Failed to toggle reaction:", err);
-      // Revert on error
       setActivities((prev) =>
         prev.map((act) =>
           act.activity_id === activityId
@@ -499,6 +900,88 @@ export default function WhatsAppReviewFeed({
             : act
         )
       );
+    }
+  };
+
+  const handleToggleCommentsSection = async (activityId: string) => {
+    const isCurrentlyOpen = Boolean(openCommentsForIds[activityId]);
+    setOpenCommentsForIds((prev) => ({
+      ...prev,
+      [activityId]: !isCurrentlyOpen,
+    }));
+
+    if (!isCurrentlyOpen && !commentsByActivity[activityId]) {
+      setLoadingCommentsForIds((prev) => ({ ...prev, [activityId]: true }));
+      try {
+        const loaded = await getActivityComments(activityId);
+        setCommentsByActivity((prev) => ({ ...prev, [activityId]: loaded }));
+      } catch (err) {
+        console.error("Failed to load activity comments:", err);
+      } finally {
+        setLoadingCommentsForIds((prev) => ({ ...prev, [activityId]: false }));
+      }
+    }
+  };
+
+  const handleSendComment = async (activityId: string) => {
+    if (!currentUserUid) return;
+    const rawText = (commentInputByActivity[activityId] || "").trim();
+    if (!rawText || sendingCommentForIds[activityId]) return;
+
+    setSendingCommentForIds((prev) => ({ ...prev, [activityId]: true }));
+    try {
+      const created = await addActivityComment(
+        activityId,
+        currentUserUid,
+        rawText
+      );
+      if (created) {
+        setCommentsByActivity((prev) => ({
+          ...prev,
+          [activityId]: [...(prev[activityId] || []), created],
+        }));
+        setActivities((prev) =>
+          prev.map((act) =>
+            act.activity_id === activityId
+              ? { ...act, comments_count: (act.comments_count || 0) + 1 }
+              : act
+          )
+        );
+        setCommentInputByActivity((prev) => ({ ...prev, [activityId]: "" }));
+      }
+    } catch (err) {
+      console.error("Failed to add comment:", err);
+      alert("Kommentar konnte nicht gesendet werden.");
+    } finally {
+      setSendingCommentForIds((prev) => ({ ...prev, [activityId]: false }));
+    }
+  };
+
+  const handleDeleteComment = async (
+    activityId: string,
+    commentId: string
+  ) => {
+    if (!currentUserUid) return;
+    try {
+      await deleteActivityComment(commentId, activityId);
+      setCommentsByActivity((prev) => ({
+        ...prev,
+        [activityId]: (prev[activityId] || []).filter(
+          (c) => c.comment_id !== commentId
+        ),
+      }));
+      setActivities((prev) =>
+        prev.map((act) =>
+          act.activity_id === activityId
+            ? {
+                ...act,
+                comments_count: Math.max(0, (act.comments_count || 1) - 1),
+              }
+            : act
+        )
+      );
+    } catch (err) {
+      console.error("Failed to delete comment:", err);
     }
   };
 
@@ -512,44 +995,75 @@ export default function WhatsAppReviewFeed({
 
   return (
     <section className="flex flex-col gap-4">
-      {/* WHATSAPP-STYLE COMPOSER */}
+      {/* WHATSAPP-STYLE COMPOSER (New or Editing Existing Post) */}
       {currentUserUid && (
-        <div className="bg-[#111827] border border-white/10 rounded-2xl p-3.5 shadow-lg flex flex-col gap-3">
+        <div
+          className={`bg-[#111827] border rounded-2xl p-3.5 shadow-lg flex flex-col gap-3 ${
+            editingActivityId
+              ? "border-amber-500/50 ring-1 ring-amber-500/20"
+              : "border-white/10"
+          }`}
+        >
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-              <MessageSquareText className="w-3.5 h-3.5" />
-              Neue Review-Nachricht
+            <span
+              className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${
+                editingActivityId ? "text-amber-400" : "text-emerald-400"
+              }`}
+            >
+              {editingActivityId ? (
+                <>
+                  <Edit2 className="w-3.5 h-3.5" />
+                  Review bearbeiten
+                </>
+              ) : (
+                <>
+                  <MessageSquareText className="w-3.5 h-3.5" />
+                  Neue Review-Nachricht
+                </>
+              )}
             </span>
 
-            {/* Anime / Manga Separation Toggle for Composer */}
-            <div className="flex items-center gap-1 bg-[#0b101b] p-1 rounded-xl border border-white/10">
-              {(["ANIME", "MANGA"] as const).map((type) => {
-                const isActive = composerMediaType === type;
-                const isLocked =
-                  draftItems.length > 0 && composerMediaType !== type;
-                return (
-                  <button
-                    key={type}
-                    type="button"
-                    disabled={isLocked}
-                    title={
-                      isLocked
-                        ? "Ein Review-Post kann nur entweder Anime oder Manga enthalten."
-                        : undefined
-                    }
-                    onClick={() => setComposerMediaType(type)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
-                      isActive
-                        ? "bg-emerald-600 text-white"
-                        : isLocked
-                        ? "text-gray-600 cursor-not-allowed"
-                        : "text-gray-400 hover:text-white"
-                    }`}
-                  >
-                    {type === "ANIME" ? "Anime" : "Manga"}
-                  </button>
-                );
-              })}
+            <div className="flex items-center gap-2">
+              {editingActivityId && (
+                <button
+                  type="button"
+                  onClick={handleCancelEditActivity}
+                  className="px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-semibold transition"
+                >
+                  Abbrechen
+                </button>
+              )}
+
+              {/* Anime / Manga Separation Toggle for Composer */}
+              <div className="flex items-center gap-1 bg-[#0b101b] p-1 rounded-xl border border-white/10">
+                {(["ANIME", "MANGA"] as const).map((type) => {
+                  const isActive = composerMediaType === type;
+                  const isLocked =
+                    draftItems.length > 0 && composerMediaType !== type;
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      disabled={isLocked}
+                      title={
+                        isLocked
+                          ? "Ein Review-Post kann nur entweder Anime oder Manga enthalten."
+                          : undefined
+                      }
+                      onClick={() => setComposerMediaType(type)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
+                        isActive
+                          ? "bg-emerald-600 text-white"
+                          : isLocked
+                          ? "text-gray-600 cursor-not-allowed"
+                          : "text-gray-400 hover:text-white"
+                      }`}
+                    >
+                      {type === "ANIME" ? "Anime" : "Manga"}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -604,14 +1118,26 @@ export default function WhatsAppReviewFeed({
                       </p>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveDraftItem(idx)}
-                    aria-label="Eintrag entfernen"
-                    className="text-gray-400 hover:text-rose-400 p-1 rounded-lg transition-colors shrink-0"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => openPickerForEditDraftItem(idx)}
+                      aria-label="Eintrag bearbeiten"
+                      title="Eintrag bearbeiten"
+                      className="text-gray-400 hover:text-emerald-400 p-1 rounded-lg transition-colors"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveDraftItem(idx)}
+                      aria-label="Eintrag entfernen"
+                      title="Eintrag entfernen"
+                      className="text-gray-400 hover:text-rose-400 p-1 rounded-lg transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -621,7 +1147,7 @@ export default function WhatsAppReviewFeed({
           <div className="flex items-center gap-2 pt-1">
             <button
               type="button"
-              onClick={openPicker}
+              onClick={openPickerForNew}
               className="flex-1 flex items-center justify-center gap-2 bg-[#1a2436] hover:bg-[#223047] border border-emerald-500/30 text-emerald-300 font-semibold text-sm py-2.5 px-4 rounded-xl transition-colors"
             >
               <Plus className="w-4 h-4" />
@@ -633,14 +1159,18 @@ export default function WhatsAppReviewFeed({
               type="button"
               onClick={handleSendReviewList}
               disabled={draftItems.length === 0 || isSending}
-              className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold text-sm py-2.5 px-4 rounded-xl transition-colors shrink-0"
+              className={`flex items-center justify-center gap-1.5 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold text-sm py-2.5 px-4 rounded-xl transition-colors shrink-0 ${
+                editingActivityId
+                  ? "bg-amber-600 hover:bg-amber-500"
+                  : "bg-emerald-600 hover:bg-emerald-500"
+              }`}
             >
               {isSending ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <Send className="w-4 h-4" />
               )}
-              Senden
+              {editingActivityId ? "Änderung speichern" : "Senden"}
             </button>
           </div>
         </div>
@@ -676,7 +1206,8 @@ export default function WhatsAppReviewFeed({
         </div>
       ) : visibleActivities.length === 0 ? (
         <div className="text-center py-10 px-4 bg-[#111827]/60 rounded-2xl border border-white/5 text-gray-400 text-sm">
-          Noch keine passenden Reviews im Feed. Starte oben mit einer neuen Review!
+          Noch keine passenden Reviews im Feed. Starte oben mit einer neuen
+          Review!
         </div>
       ) : (
         <div className="flex flex-col gap-3.5">
@@ -691,6 +1222,15 @@ export default function WhatsAppReviewFeed({
             const activeReactionEntries = Object.entries(reactions).filter(
               ([, users]) => Array.isArray(users) && users.length > 0
             );
+            const isCommentsOpen = Boolean(
+              openCommentsForIds[activity.activity_id]
+            );
+            const activityComments =
+              commentsByActivity[activity.activity_id] || [];
+            const commentsCount =
+              commentsByActivity[activity.activity_id] !== undefined
+                ? activityComments.length
+                : activity.comments_count || 0;
 
             return (
               <div key={activity.activity_id} className="flex flex-col w-full">
@@ -724,14 +1264,28 @@ export default function WhatsAppReviewFeed({
                     </div>
 
                     {isOwn && activity.action_type === "REVIEW_LIST" && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteActivity(activity.activity_id)}
-                        aria-label="Nachricht löschen"
-                        className="text-gray-400 hover:text-rose-400 p-1 rounded-lg transition-colors"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditActivity(activity)}
+                          aria-label="Nachricht bearbeiten"
+                          title="Review bearbeiten"
+                          className="text-gray-400 hover:text-emerald-300 p-1 rounded-lg transition-colors"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleDeleteActivity(activity.activity_id)
+                          }
+                          aria-label="Nachricht löschen"
+                          title="Review löschen (setzt Fortschritt zurück)"
+                          className="text-gray-400 hover:text-rose-400 p-1 rounded-lg transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     )}
                   </div>
 
@@ -746,60 +1300,193 @@ export default function WhatsAppReviewFeed({
                   {activity.action_type === "REVIEW_LIST" &&
                     Array.isArray(activity.review_items) && (
                       <div className="flex flex-col gap-2.5">
-                        {activity.review_items.map((item, idx) => (
-                          <div
-                            key={`${item.work_id}-${item.episode_num}-${idx}`}
-                            className="flex items-start gap-2.5 bg-black/20 border border-white/5 rounded-xl p-2.5"
-                          >
-                            <Link
-                              href={`/work/${item.work_id}`}
-                              className="shrink-0 block mt-0.5"
+                        {activity.review_items.map((item, idx) => {
+                          const comparisons = getComparisonsForItem(
+                            activity.activity_id,
+                            activity.user_id,
+                            item
+                          );
+                          const compKey = `${activity.activity_id}_${item.work_id}_${idx}`;
+                          const isCompExpanded = openComparisonKey === compKey;
+
+                          return (
+                            <div
+                              key={`${item.work_id}-${item.episode_num}-${idx}`}
+                              className="flex flex-col gap-2 bg-black/20 border border-white/5 rounded-xl p-2.5"
                             >
-                              {item.work_cover ? (
-                                <img
-                                  src={item.work_cover}
-                                  alt={item.work_title}
-                                  className="w-8 h-11 rounded object-cover bg-gray-800 opacity-85 hover:opacity-100 transition-opacity"
-                                />
-                              ) : (
-                                <div className="w-8 h-11 rounded bg-gray-800" />
-                              )}
-                            </Link>
+                              <div className="flex items-start gap-2.5">
+                                <Link
+                                  href={`/work/${item.work_id}`}
+                                  className="shrink-0 block mt-0.5"
+                                >
+                                  {item.work_cover ? (
+                                    <img
+                                      src={item.work_cover}
+                                      alt={item.work_title}
+                                      className="w-8 h-11 rounded object-cover bg-gray-800 opacity-85 hover:opacity-100 transition-opacity"
+                                    />
+                                  ) : (
+                                    <div className="w-8 h-11 rounded bg-gray-800" />
+                                  )}
+                                </Link>
 
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                                  <Link
-                                    href={`/work/${item.work_id}`}
-                                    className="text-[11px] font-medium text-gray-400 hover:text-emerald-300 transition-colors truncate max-w-[180px]"
-                                  >
-                                    {item.work_title}
-                                  </Link>
-                                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5 shrink-0">
-                                    {formatEpisodeBadge(item)}
-                                  </span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                      <Link
+                                        href={`/work/${item.work_id}`}
+                                        className="text-[11px] font-medium text-gray-400 hover:text-emerald-300 transition-colors truncate max-w-[180px]"
+                                      >
+                                        {item.work_title}
+                                      </Link>
+                                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-white/5 shrink-0">
+                                        {formatEpisodeBadge(item)}
+                                      </span>
+                                    </div>
+
+                                    {typeof item.rating === "number" && (
+                                      <span
+                                        className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-md border flex items-center gap-0.5 ${getRatingBadgeClass(
+                                          item.rating
+                                        )}`}
+                                      >
+                                        <Star className="w-2.5 h-2.5 fill-current" />
+                                        {item.rating}/10
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {item.text && (
+                                    <p className="text-[15px] sm:text-base font-medium text-white mt-1 whitespace-pre-wrap break-words leading-snug">
+                                      {item.text}
+                                    </p>
+                                  )}
                                 </div>
-
-                                {typeof item.rating === "number" && (
-                                  <span
-                                    className={`shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-md border flex items-center gap-0.5 ${getRatingBadgeClass(
-                                      item.rating
-                                    )}`}
-                                  >
-                                    <Star className="w-2.5 h-2.5 fill-current" />
-                                    {item.rating}/10
-                                  </span>
-                                )}
                               </div>
 
-                              {item.text && (
-                                <p className="text-[15px] sm:text-base font-medium text-white mt-1 whitespace-pre-wrap break-words leading-snug">
-                                  {item.text}
-                                </p>
+                              {/* CROSS-USER RATING & OPINION COMPARISON WIDGET */}
+                              {comparisons.length > 0 && (
+                                <div className="pt-1.5 border-t border-white/5 flex flex-col gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setOpenComparisonKey(
+                                        isCompExpanded ? null : compKey
+                                      )
+                                    }
+                                    className="flex items-center justify-between gap-2 text-left w-full px-2 py-1 rounded-lg bg-blue-500/10 hover:bg-blue-500/15 border border-blue-500/25 transition-colors"
+                                  >
+                                    <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                                      <span className="font-bold text-blue-300 inline-flex items-center gap-1">
+                                        <ArrowLeftRight className="w-3 h-3" />
+                                        Vergleich:
+                                      </span>
+                                      {typeof item.rating === "number" && (
+                                        <span className="text-gray-300 font-semibold">
+                                          {isOwn ? "Du" : authorName}: ★{" "}
+                                          {item.rating}/10
+                                        </span>
+                                      )}
+                                      {comparisons.map((comp) => {
+                                        const isMe =
+                                          currentUserUid &&
+                                          comp.user_id === currentUserUid;
+                                        return (
+                                          <span
+                                            key={comp.user_id}
+                                            className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-white/10 text-white font-semibold"
+                                          >
+                                            <span>
+                                              {isMe ? "Du" : comp.username}:
+                                            </span>
+                                            {typeof comp.rating === "number" ? (
+                                              <span className="text-amber-300">
+                                                ★ {comp.rating}/10
+                                              </span>
+                                            ) : (
+                                              <span className="text-gray-300">
+                                                Review
+                                              </span>
+                                            )}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                    <span className="text-blue-300 shrink-0">
+                                      {isCompExpanded ? (
+                                        <ChevronUp className="w-3.5 h-3.5" />
+                                      ) : (
+                                        <ChevronDown className="w-3.5 h-3.5" />
+                                      )}
+                                    </span>
+                                  </button>
+
+                                  {isCompExpanded && (
+                                    <div className="flex flex-col gap-1.5 pl-2 border-l-2 border-blue-500/40 mt-0.5">
+                                      {comparisons.map((comp) => {
+                                        const isMe =
+                                          currentUserUid &&
+                                          comp.user_id === currentUserUid;
+                                        const diff =
+                                          typeof item.rating === "number" &&
+                                          typeof comp.rating === "number"
+                                            ? item.rating - comp.rating
+                                            : null;
+                                        return (
+                                          <div
+                                            key={comp.user_id}
+                                            className="bg-black/30 rounded-lg p-2 text-xs flex flex-col gap-1"
+                                          >
+                                            <div className="flex items-center justify-between gap-2">
+                                              <div className="flex items-center gap-1.5">
+                                                <span className="font-bold text-blue-300">
+                                                  {isMe
+                                                    ? `Deine Review (${comp.username})`
+                                                    : comp.username}
+                                                </span>
+                                                <span className="text-[10px] text-gray-400">
+                                                  • {comp.episode_label}
+                                                </span>
+                                              </div>
+                                              <div className="flex items-center gap-1.5">
+                                                {diff !== null && (
+                                                  <span className="text-[10px] text-gray-400">
+                                                    {diff === 0
+                                                      ? "Gleiche Wertung"
+                                                      : `Diff: ${
+                                                          diff > 0
+                                                            ? `+${diff}`
+                                                            : diff
+                                                        }`}
+                                                  </span>
+                                                )}
+                                                {typeof comp.rating ===
+                                                  "number" && (
+                                                  <span
+                                                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${getRatingBadgeClass(
+                                                      comp.rating
+                                                    )}`}
+                                                  >
+                                                    ★ {comp.rating}/10
+                                                  </span>
+                                                )}
+                                              </div>
+                                            </div>
+                                            {comp.text && (
+                                              <p className="text-xs text-gray-200 leading-snug whitespace-pre-wrap">
+                                                {comp.text}
+                                              </p>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
                               )}
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
 
@@ -818,110 +1505,260 @@ export default function WhatsAppReviewFeed({
                         </p>
                       )}
 
-                      {activity.work_id && (() => {
-                        const wDetails = userAniListDetails[activity.work_id];
-                        const wTitle =
-                          wDetails?.title?.english || wDetails?.title?.romaji;
-                        const wCover =
-                          wDetails?.coverImage?.large ||
-                          wDetails?.coverImage?.extraLarge;
-                        return wDetails ? (
-                          <Link
-                            href={`/work/${activity.work_id}`}
-                            className="flex items-center gap-2.5 bg-black/20 border border-white/5 hover:border-emerald-500/30 rounded-xl p-2 transition-colors"
-                          >
-                            {wCover ? (
-                              <img
-                                src={wCover}
-                                alt={wTitle || "Cover"}
-                                className="w-8 h-11 rounded object-cover shrink-0 bg-gray-800 opacity-85"
-                              />
-                            ) : (
-                              <div className="w-8 h-11 rounded bg-gray-800 shrink-0" />
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <p className="text-xs font-medium text-gray-300 truncate">
-                                {wTitle}
-                              </p>
-                              <span className="text-[11px] text-emerald-400 font-semibold">
-                                Werk ansehen →
-                              </span>
-                            </div>
-                          </Link>
-                        ) : (
-                          <Link
-                            href={`/work/${activity.work_id}`}
-                            className="inline-block mt-0.5 text-emerald-400 hover:underline font-semibold"
-                          >
-                            Werk ansehen →
-                          </Link>
-                        );
-                      })()}
+                      {activity.work_id &&
+                        (() => {
+                          const wDetails = userAniListDetails[activity.work_id];
+                          const wTitle =
+                            wDetails?.title?.english || wDetails?.title?.romaji;
+                          const wCover =
+                            wDetails?.coverImage?.large ||
+                            wDetails?.coverImage?.extraLarge;
+                          return wDetails ? (
+                            <Link
+                              href={`/work/${activity.work_id}`}
+                              className="flex items-center gap-2.5 bg-black/20 border border-white/5 hover:border-emerald-500/30 rounded-xl p-2 transition-colors"
+                            >
+                              {wCover ? (
+                                <img
+                                  src={wCover}
+                                  alt={wTitle || "Cover"}
+                                  className="w-8 h-11 rounded object-cover shrink-0 bg-gray-800 opacity-85"
+                                />
+                              ) : (
+                                <div className="w-8 h-11 rounded bg-gray-800 shrink-0" />
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-medium text-gray-300 truncate">
+                                  {wTitle}
+                                </p>
+                                <span className="text-[11px] text-emerald-400 font-semibold">
+                                  Werk ansehen →
+                                </span>
+                              </div>
+                            </Link>
+                          ) : (
+                            <Link
+                              href={`/work/${activity.work_id}`}
+                              className="inline-block mt-0.5 text-emerald-400 hover:underline font-semibold"
+                            >
+                              Werk ansehen →
+                            </Link>
+                          );
+                        })()}
                     </div>
                   )}
 
-                  {/* WHATSAPP EMOJI-REACTION BAR */}
-                  <div className="flex flex-wrap items-center gap-1.5 mt-2.5 pt-2 border-t border-white/10">
-                    {activeReactionEntries.map(([emoji, users]) => {
-                      const hasReacted = Boolean(
-                        currentUserUid && users.includes(currentUserUid)
-                      );
-                      return (
-                        <button
-                          key={emoji}
-                          type="button"
-                          disabled={!currentUserUid}
-                          onClick={() =>
-                            handleToggleReaction(activity.activity_id, emoji)
-                          }
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border transition-colors ${
-                            hasReacted
-                              ? "bg-emerald-500/25 border-emerald-400/50 text-emerald-200"
-                              : "bg-white/5 border-white/10 text-gray-300 hover:bg-white/10"
-                          }`}
-                        >
-                          <span>{emoji}</span>
-                          <span className="text-[11px]">{users.length}</span>
-                        </button>
-                      );
-                    })}
+                  {/* WHATSAPP EMOJI-REACTION & OPINION COMMENT BAR */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 mt-2.5 pt-2 border-t border-white/10">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {activeReactionEntries.map(([emoji, users]) => {
+                        const hasReacted = Boolean(
+                          currentUserUid && users.includes(currentUserUid)
+                        );
+                        return (
+                          <button
+                            key={emoji}
+                            type="button"
+                            disabled={!currentUserUid}
+                            onClick={() =>
+                              handleToggleReaction(activity.activity_id, emoji)
+                            }
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold border transition-colors ${
+                              hasReacted
+                                ? "bg-emerald-500/25 border-emerald-400/50 text-emerald-200"
+                                : "bg-white/5 border-white/10 text-gray-300 hover:bg-white/10"
+                            }`}
+                          >
+                            <span>{emoji}</span>
+                            <span className="text-[11px]">{users.length}</span>
+                          </button>
+                        );
+                      })}
 
-                    {currentUserUid && (
-                      <div className="relative flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setOpenReactionForId((prev) =>
-                              prev === activity.activity_id
-                                ? null
-                                : activity.activity_id
-                            )
-                          }
-                          aria-label="Reaktion hinzufügen"
-                          className="inline-flex items-center justify-center w-7 h-6 rounded-full bg-white/5 hover:bg-white/15 border border-white/10 text-gray-300 transition-colors"
-                        >
-                          <SmilePlus className="w-3.5 h-3.5" />
-                        </button>
+                      {currentUserUid && (
+                        <div className="relative flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOpenReactionForId((prev) =>
+                                prev === activity.activity_id
+                                  ? null
+                                  : activity.activity_id
+                              )
+                            }
+                            aria-label="Reaktion hinzufügen"
+                            className="inline-flex items-center justify-center w-7 h-6 rounded-full bg-white/5 hover:bg-white/15 border border-white/10 text-gray-300 transition-colors"
+                          >
+                            <SmilePlus className="w-3.5 h-3.5" />
+                          </button>
 
-                        {openReactionForId === activity.activity_id && (
-                          <div className="flex items-center gap-1 bg-[#0b101b] border border-white/15 rounded-full px-2 py-1 shadow-xl">
-                            {QUICK_EMOJIS.map((emoji) => (
-                              <button
-                                key={emoji}
-                                type="button"
-                                onClick={() =>
-                                  handleToggleReaction(activity.activity_id, emoji)
-                                }
-                                className="hover:scale-125 transition-transform text-sm px-0.5"
-                              >
-                                {emoji}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                          {openReactionForId === activity.activity_id && (
+                            <div className="flex items-center gap-1 bg-[#0b101b] border border-white/15 rounded-full px-2 py-1 shadow-xl">
+                              {QUICK_EMOJIS.map((emoji) => (
+                                <button
+                                  key={emoji}
+                                  type="button"
+                                  onClick={() =>
+                                    handleToggleReaction(
+                                      activity.activity_id,
+                                      emoji
+                                    )
+                                  }
+                                  className="hover:scale-125 transition-transform text-sm px-0.5"
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Text Comment / Opinion Toggle Button */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleToggleCommentsSection(activity.activity_id)
+                      }
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                        isCommentsOpen || commentsCount > 0
+                          ? "bg-emerald-500/15 border-emerald-500/35 text-emerald-200"
+                          : "bg-white/5 border-white/10 text-gray-300 hover:bg-white/10"
+                      }`}
+                    >
+                      <MessageCircle className="w-3.5 h-3.5" />
+                      <span>
+                        {commentsCount > 0
+                          ? `${commentsCount} ${
+                              commentsCount === 1 ? "Meinung" : "Meinungen"
+                            }`
+                          : "Meinung schreiben"}
+                      </span>
+                    </button>
                   </div>
+
+                  {/* EXPANDABLE TEXT COMMENTS / OPINIONS SECTION */}
+                  {isCommentsOpen && (
+                    <div className="mt-2.5 pt-2.5 border-t border-white/10 flex flex-col gap-2">
+                      {loadingCommentsForIds[activity.activity_id] ? (
+                        <div className="text-xs text-gray-400 flex items-center gap-1.5 py-1">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Lade Meinungen...
+                        </div>
+                      ) : activityComments.length === 0 ? (
+                        <p className="text-xs text-gray-400">
+                          Noch keine Text-Reaktionen. Schreib deine Meinung
+                          dazu!
+                        </p>
+                      ) : (
+                        <div className="flex flex-col gap-1.5">
+                          {activityComments.map((c) => {
+                            const cAuthor = userProfiles[c.user_id];
+                            const cName = cAuthor?.username || "Unbekannt";
+                            const cAvatar = cAuthor?.avatar_url;
+                            const isOwnComment =
+                              currentUserUid && c.user_id === currentUserUid;
+
+                            return (
+                              <div
+                                key={c.comment_id}
+                                className="flex items-start gap-2 bg-black/25 border border-white/5 rounded-xl p-2"
+                              >
+                                {cAvatar ? (
+                                  <img
+                                    src={cAvatar}
+                                    alt={cName}
+                                    className="w-5 h-5 rounded-full object-cover shrink-0 mt-0.5 bg-gray-800"
+                                  />
+                                ) : (
+                                  <div className="w-5 h-5 rounded-full bg-emerald-700/60 text-emerald-200 flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">
+                                    {cName.slice(0, 1).toUpperCase()}
+                                  </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[11px] font-bold text-emerald-300">
+                                        {cName}
+                                      </span>
+                                      <span className="text-[10px] text-gray-500">
+                                        {formatMessageTime(c.timestamp)}
+                                      </span>
+                                    </div>
+                                    {isOwnComment && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          handleDeleteComment(
+                                            activity.activity_id,
+                                            c.comment_id
+                                          )
+                                        }
+                                        className="text-gray-500 hover:text-rose-400 transition"
+                                        title="Kommentar löschen"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                  </div>
+                                  <p className="text-xs sm:text-sm text-white mt-0.5 whitespace-pre-wrap break-words leading-snug">
+                                    {c.text}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {currentUserUid && (
+                        <div className="flex items-center gap-1.5 pt-1">
+                          <input
+                            type="text"
+                            value={
+                              commentInputByActivity[activity.activity_id] || ""
+                            }
+                            onChange={(e) =>
+                              setCommentInputByActivity((prev) => ({
+                                ...prev,
+                                [activity.activity_id]: e.target.value,
+                              }))
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
+                                handleSendComment(activity.activity_id);
+                              }
+                            }}
+                            placeholder="Kurzer Text oder Meinung zur Review..."
+                            className="flex-1 bg-[#0b101b] border border-white/10 rounded-xl px-3 py-1.5 text-xs sm:text-sm text-white placeholder:text-gray-500 focus:outline-none focus:border-emerald-500/60"
+                          />
+                          <button
+                            type="button"
+                            disabled={
+                              !(
+                                commentInputByActivity[activity.activity_id] ||
+                                ""
+                              ).trim() ||
+                              Boolean(sendingCommentForIds[activity.activity_id])
+                            }
+                            onClick={() =>
+                              handleSendComment(activity.activity_id)
+                            }
+                            className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-800 disabled:text-gray-500 text-white text-xs font-bold transition shrink-0 flex items-center gap-1"
+                          >
+                            {sendingCommentForIds[activity.activity_id] ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Send className="w-3.5 h-3.5" />
+                            )}
+                            Senden
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -929,19 +1766,26 @@ export default function WhatsAppReviewFeed({
         </div>
       )}
 
-      {/* PICKER MODAL FOR "+ Werk hinzufügen" */}
+      {/* PICKER MODAL FOR "+ Werk hinzufügen" or Editing Draft Item */}
       {isPickerOpen && (
         <div className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="w-full sm:max-w-md bg-[#111827] border border-white/15 rounded-t-3xl sm:rounded-2xl p-4 pb-8 sm:pb-4 max-h-[85vh] overflow-y-auto flex flex-col gap-3 shadow-2xl">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-bold text-white">
                 {selectedWork
-                  ? "Review-Eintrag"
-                  : `${composerMediaType === "MANGA" ? "Manga" : "Anime"} auswählen`}
+                  ? editingDraftIndex !== null
+                    ? "Review-Eintrag bearbeiten"
+                    : "Review-Eintrag"
+                  : `${
+                      composerMediaType === "MANGA" ? "Manga" : "Anime"
+                    } auswählen`}
               </h3>
               <button
                 type="button"
-                onClick={() => setIsPickerOpen(false)}
+                onClick={() => {
+                  setEditingDraftIndex(null);
+                  setIsPickerOpen(false);
+                }}
                 className="text-gray-400 hover:text-white p-1 rounded-lg"
               >
                 <X className="w-5 h-5" />
@@ -967,7 +1811,9 @@ export default function WhatsAppReviewFeed({
                   {localFilteredWorks.length > 0 && (
                     <div className="flex flex-col gap-1.5">
                       <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">
-                        {pickerSearch.trim() ? "Aus deiner Bibliothek" : "Aktuell aktiv"}
+                        {pickerSearch.trim()
+                          ? "Aus deiner Bibliothek"
+                          : "Aktuell aktiv"}
                       </span>
                       {localFilteredWorks.map((work) => (
                         <button
@@ -1028,7 +1874,9 @@ export default function WhatsAppReviewFeed({
                             <p className="text-sm font-semibold text-white truncate">
                               {work.title}
                             </p>
-                            <p className="text-xs text-gray-400">{work.media_type}</p>
+                            <p className="text-xs text-gray-400">
+                              {work.media_type}
+                            </p>
                           </div>
                         </button>
                       ))}
@@ -1093,12 +1941,16 @@ export default function WhatsAppReviewFeed({
                   {epMode === "SINGLE" && (
                     <div className="flex items-center justify-between pt-1">
                       <span className="text-xs font-semibold text-gray-300">
-                        {selectedWork.media_type === "MANGA" ? "Kapitel" : "Folge"}
+                        {selectedWork.media_type === "MANGA"
+                          ? "Kapitel"
+                          : "Folge"}
                       </span>
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => setEpNum((prev) => Math.max(1, prev - 1))}
+                          onClick={() =>
+                            setEpNum((prev) => Math.max(1, prev - 1))
+                          }
                           className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"
                         >
                           <Minus className="w-3.5 h-3.5" />
@@ -1108,7 +1960,9 @@ export default function WhatsAppReviewFeed({
                           min={1}
                           value={epNum}
                           onChange={(e) =>
-                            setEpNum(Math.max(1, parseInt(e.target.value, 10) || 1))
+                            setEpNum(
+                              Math.max(1, parseInt(e.target.value, 10) || 1)
+                            )
                           }
                           className="w-14 text-center bg-transparent text-sm font-bold text-white focus:outline-none"
                         />
@@ -1128,7 +1982,10 @@ export default function WhatsAppReviewFeed({
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex-1 flex flex-col gap-1">
                           <span className="text-[11px] text-gray-400 font-semibold">
-                            Von {selectedWork.media_type === "MANGA" ? "Kap." : "Folge"}
+                            Von{" "}
+                            {selectedWork.media_type === "MANGA"
+                              ? "Kap."
+                              : "Folge"}
                           </span>
                           <div className="flex items-center gap-1 bg-[#111827] border border-white/10 rounded-lg p-1">
                             <button
@@ -1169,7 +2026,10 @@ export default function WhatsAppReviewFeed({
 
                         <div className="flex-1 flex flex-col gap-1">
                           <span className="text-[11px] text-gray-400 font-semibold">
-                            Bis {selectedWork.media_type === "MANGA" ? "Kap." : "Folge"}
+                            Bis{" "}
+                            {selectedWork.media_type === "MANGA"
+                              ? "Kap."
+                              : "Folge"}
                           </span>
                           <div className="flex items-center gap-1 bg-[#111827] border border-white/10 rounded-lg p-1">
                             <button
@@ -1209,7 +2069,10 @@ export default function WhatsAppReviewFeed({
                           onClick={() => setEpNum(1)}
                           className="text-[11px] px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-emerald-300 border border-white/10"
                         >
-                          Ab {selectedWork.media_type === "MANGA" ? "Kap. 1" : "Folge 1"}
+                          Ab{" "}
+                          {selectedWork.media_type === "MANGA"
+                            ? "Kap. 1"
+                            : "Folge 1"}
                         </button>
                         {selectedWork.current_episode > 0 && (
                           <button
@@ -1220,7 +2083,8 @@ export default function WhatsAppReviewFeed({
                             }}
                             className="text-[11px] px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-emerald-300 border border-white/10"
                           >
-                            1 bis aktueller Stand ({selectedWork.current_episode})
+                            1 bis aktueller Stand (
+                            {selectedWork.current_episode})
                           </button>
                         )}
                       </div>
@@ -1239,7 +2103,9 @@ export default function WhatsAppReviewFeed({
                           <button
                             type="button"
                             onClick={() =>
-                              setMultiEpCandidate((prev) => Math.max(1, prev - 1))
+                              setMultiEpCandidate((prev) =>
+                                Math.max(1, prev - 1)
+                              )
                             }
                             className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"
                           >
@@ -1258,7 +2124,9 @@ export default function WhatsAppReviewFeed({
                           />
                           <button
                             type="button"
-                            onClick={() => setMultiEpCandidate((prev) => prev + 1)}
+                            onClick={() =>
+                              setMultiEpCandidate((prev) => prev + 1)
+                            }
                             className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"
                           >
                             <Plus className="w-3 h-3" />
@@ -1280,7 +2148,9 @@ export default function WhatsAppReviewFeed({
                               key={n}
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 text-xs font-bold"
                             >
-                              {selectedWork.media_type === "MANGA" ? "Kap." : "Folge"}{" "}
+                              {selectedWork.media_type === "MANGA"
+                                ? "Kap."
+                                : "Folge"}{" "}
                               {n}
                               <button
                                 type="button"
@@ -1295,7 +2165,9 @@ export default function WhatsAppReviewFeed({
                       ) : (
                         <p className="text-[11px] text-amber-300/90">
                           Bitte mindestens eine{" "}
-                          {selectedWork.media_type === "MANGA" ? "Kapitel" : "Folge"}
+                          {selectedWork.media_type === "MANGA"
+                            ? "Kapitel"
+                            : "Folge"}
                           -Nummer hinzufügen.
                         </p>
                       )}
@@ -1370,7 +2242,9 @@ export default function WhatsAppReviewFeed({
                   onClick={handleAddDraftItem}
                   className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-800 disabled:text-gray-500 text-white font-bold text-sm transition-colors"
                 >
-                  Hinzufügen
+                  {editingDraftIndex !== null
+                    ? "Eintrag übernehmen"
+                    : "Hinzufügen"}
                 </button>
               </div>
             )}
@@ -1380,3 +2254,4 @@ export default function WhatsAppReviewFeed({
     </section>
   );
 }
+

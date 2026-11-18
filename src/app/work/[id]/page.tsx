@@ -8,14 +8,14 @@ import { UserWork, EmotionalImpact, WatchMode } from "@/types/database";
 import { Star, ChevronLeft, Save, Library as LibraryIcon, Check, Calendar as CalendarIcon, PlayCircle, CheckCircle, PauseCircle, Bookmark, Settings, X } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
-import { setCalendarOverride, getCalendarOverrides, clearManualMaxEpisode, CalendarOverride } from "@/lib/db/calendar";
+import { setCalendarOverride, getCalendarOverrides, clearManualMaxEpisode, resetScheduleOverride, formatPauseStatusLabel } from "@/lib/db/calendar";
 import { auth } from "@/lib/firebase";
 import { saveUserWork, getUserWork, updateEpisodeProgress, removeUserWork, updateUserWorkStatus } from "@/lib/db/works";
 import { addToHistory } from "@/lib/db/users";
 import { WorkSocialFeed } from "./WorkSocialFeed";
 import { createActivity } from "@/lib/db/feed";
 import { getUserEpisodeRatingsForWork } from "@/lib/db/feedback";
-import { getPausedWorkIds, unpauseWork } from "@/lib/db/pauses";
+import { getPausedWorksMap, pauseWorkForWeeks, pauseWorkIndefinitely, unpauseWork } from "@/lib/db/pauses";
 import { useAppStore } from "@/lib/store";
 
 export default function WorkDetailPage() {
@@ -36,6 +36,7 @@ export default function WorkDetailPage() {
   const [manualAvailableEps, setManualAvailableEps] = useState<number | "">("");
   const [droppedReason, setDroppedReason] = useState("");
   const [isWorkPaused, setIsWorkPaused] = useState(false);
+  const [pausedUntilIso, setPausedUntilIso] = useState<string>("");
 
   // Form State for Deep Evaluation
   const [evaluation, setEvaluation] = useState<UserWork["evaluation"]>({
@@ -62,12 +63,12 @@ export default function WorkDetailPage() {
   const [saveMessage, setSaveMessage] = useState("");
 
   const [customDay, setCustomDay] = useState<number>(-1);
-  const [customTime, setCustomTime] = useState<string>("12:00");
+  const [customTime, setCustomTime] = useState<string>("18:00");
   const [releaseFrequency, setReleaseFrequency] = useState<number>(1);
   const [hasCustomOverride, setHasCustomOverride] = useState(false);
   const [startDate, setStartDate] = useState<string>("");
   const [rhythmType, setRhythmType] = useState<"strict" | "flexible">("strict");
-  const [flexibleMinDay, setFlexibleMinDay] = useState<number>(5);
+  const [flexibleMinDay, setFlexibleMinDay] = useState<number>(4);
   const [flexibleMaxDay, setFlexibleMaxDay] = useState<number>(0);
   const [episodeRatingStats, setEpisodeRatingStats] = useState<{ average: number | null; count: number }>({
     average: null,
@@ -81,36 +82,54 @@ export default function WorkDetailPage() {
       if (!id) return;
       setIsLoading(true);
       try {
-        const [data, userWork, overrides, epRatings, pausedIds] = await Promise.all([
+        const [data, userWork, overrides, epRatings, pausedMap] = await Promise.all([
           fetchAniList(GET_WORK_DETAILS, { id: parseInt(id, 10) }),
           user ? getUserWork(user.uid, id) : Promise.resolve(null),
           getCalendarOverrides(),
           user
             ? getUserEpisodeRatingsForWork(user.uid, id)
             : Promise.resolve({ average: null, count: 0, items: [] }),
-          getPausedWorkIds().catch(() => new Set<string>()),
+          getPausedWorksMap().catch(() => ({})),
         ]);
 
         if (!isMounted) return;
 
         setWork(data.Media);
         setEpisodeRatingStats({ average: epRatings.average, count: epRatings.count });
-        setIsWorkPaused(pausedIds.has(id));
+        const pauseRecord = pausedMap[id];
+        setIsWorkPaused(Boolean(pauseRecord));
+        setPausedUntilIso(pauseRecord?.paused_until || "");
 
         if (overrides[id]) {
-          if (overrides[id].weeklyTime) {
+          const ov = overrides[id];
+          if (ov.weeklyDay !== undefined) {
             setHasCustomOverride(true);
-            if (overrides[id].weeklyDay !== undefined) setCustomDay(overrides[id].weeklyDay!);
-            if (overrides[id].weeklyTime !== undefined) setCustomTime(overrides[id].weeklyTime!);
+            setCustomDay(ov.weeklyDay);
           }
-          if (overrides[id].releaseFrequency !== undefined) {
-            setReleaseFrequency(overrides[id].releaseFrequency!);
+          if (ov.weeklyTime !== undefined) {
+            setCustomTime(ov.weeklyTime);
           }
-          if (overrides[id].manualMaxEpisode !== undefined) {
-            setManualMaxEpisode(overrides[id].manualMaxEpisode!);
+          if (ov.releaseFrequency !== undefined) {
+            setReleaseFrequency(ov.releaseFrequency);
           }
-          if (overrides[id].manualAvailableEps !== undefined) {
-            setManualAvailableEps(overrides[id].manualAvailableEps!);
+          if (ov.startDate !== undefined) {
+            setStartDate(ov.startDate);
+          }
+          if (ov.rhythmType !== undefined) {
+            setRhythmType(ov.rhythmType);
+          }
+          if (ov.flexibleDayRange) {
+            setFlexibleMinDay(ov.flexibleDayRange.minDay);
+            setFlexibleMaxDay(ov.flexibleDayRange.maxDay);
+            if (ov.weeklyDay === undefined) {
+              setCustomDay(ov.flexibleDayRange.minDay);
+            }
+          }
+          if (ov.manualMaxEpisode !== undefined) {
+            setManualMaxEpisode(ov.manualMaxEpisode);
+          }
+          if (ov.manualAvailableEps !== undefined) {
+            setManualAvailableEps(ov.manualAvailableEps);
           }
         }
         const isRomance = data.Media.genres?.includes("Romance") || false;
@@ -403,19 +422,45 @@ export default function WorkDetailPage() {
     }
     setIsSaving(true);
     try {
-      if (isWorkPaused) {
-        await unpauseWork(id);
-        setIsWorkPaused(false);
-      }
+      await unpauseWork(id);
+      setIsWorkPaused(false);
+      setPausedUntilIso("");
       if (userWorkStatus === "PAUSED") {
         await updateUserWorkStatus(user.uid, id, "CURRENT");
         setUserWorkStatus("CURRENT");
       }
-      setSaveMessage("Entpausiert!");
+      setSaveMessage("Pause aufgehoben!");
       setTimeout(() => setSaveMessage(""), 3000);
     } catch (err) {
       console.error(err);
       setSaveMessage("Fehler beim Entpausieren");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handlePauseWork = async (weeksOrIndefinite: number | "INDEFINITE") => {
+    const user = auth?.currentUser;
+    if (!user) {
+      alert("Bitte erst einloggen!");
+      return;
+    }
+    setIsSaving(true);
+    try {
+      if (weeksOrIndefinite === "INDEFINITE") {
+        await pauseWorkIndefinitely(id, user.uid);
+        setPausedUntilIso("9999-12-31T23:59:59.999Z");
+      } else {
+        await pauseWorkForWeeks(id, user.uid, weeksOrIndefinite);
+        const pausedMap = await getPausedWorksMap();
+        setPausedUntilIso(pausedMap[id]?.paused_until || "");
+      }
+      setIsWorkPaused(true);
+      setSaveMessage("Werk pausiert!");
+      setTimeout(() => setSaveMessage(""), 3000);
+    } catch (err) {
+      console.error(err);
+      setSaveMessage("Fehler beim Pausieren");
     } finally {
       setIsSaving(false);
     }
@@ -658,82 +703,202 @@ export default function WorkDetailPage() {
                   </div>
                   {customDay !== -1 && (
                     <>
-                    <div className="mt-2">
-                      <select
-                        value={releaseFrequency}
-                        onChange={e => setReleaseFrequency(parseInt(e.target.value))}
-                        className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500"
-                      >
-                        <option value={1}>Jede Woche</option>
-                        <option value={2}>Alle 2 Wochen</option>
-                        <option value={4}>Alle 4 Wochen (Monatlich)</option>
-                        </select>
+                      <div className="mt-2 flex items-center gap-2">
+                        <label className="text-xs text-gray-400 font-semibold shrink-0">
+                          Abstand (Alle X Wochen):
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={52}
+                          value={releaseFrequency}
+                          onChange={(e) =>
+                            setReleaseFrequency(
+                              Math.max(
+                                1,
+                                Math.min(52, parseInt(e.target.value, 10) || 1)
+                              )
+                            )
+                          }
+                          className="w-20 bg-[#141a29] border border-gray-700 rounded-lg px-3 py-1.5 text-white text-center font-bold outline-none focus:border-blue-500"
+                        />
+                        <span className="text-xs text-gray-400">
+                          {releaseFrequency === 1
+                            ? "Wöchentlich"
+                            : `Alle ${releaseFrequency} Wo.`}
+                        </span>
                       </div>
-                      
-                      {releaseFrequency > 1 && (
-                        <div className="flex flex-col gap-1 w-full mt-2">
-                          <label className="text-xs text-gray-400 font-semibold">Startdatum (für Takt-Berechnung)</label>
-                          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500 w-full" />
-                        </div>
-                      )}
-                      
+
                       <div className="flex flex-col gap-1 w-full mt-2">
-                        <label className="text-xs text-gray-400 font-semibold">Rhythmus</label>
-                        <select value={rhythmType} onChange={e => setRhythmType(e.target.value as any)} className="bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500 w-full">
-                          <option value="strict">Pünktlich (Fester Tag & Zeit)</option>
-                          <option value="flexible">Flexibel (Zeitfenster)</option>
+                        <label className="text-xs text-gray-400 font-semibold">
+                          Startdatum / Anker (für Takt-Berechnung)
+                        </label>
+                        <input
+                          type="date"
+                          value={startDate}
+                          onChange={(e) => setStartDate(e.target.value)}
+                          className="bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500 w-full"
+                        />
+                      </div>
+
+                      <div className="flex flex-col gap-1 w-full mt-2">
+                        <label className="text-xs text-gray-400 font-semibold">
+                          Rhythmus
+                        </label>
+                        <select
+                          value={rhythmType}
+                          onChange={(e) => setRhythmType(e.target.value as any)}
+                          className="bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500 w-full"
+                        >
+                          <option value="strict">
+                            Pünktlich (Fester Tag &amp; Zeit)
+                          </option>
+                          <option value="flexible">
+                            Flexibel / Ungefähr (Zeitfenster für Manga)
+                          </option>
                         </select>
                       </div>
-                      
-                      {rhythmType === 'flexible' && (
+
+                      {rhythmType === "flexible" && (
                         <div className="flex gap-2 items-center mt-1 w-full">
-                          <select value={flexibleMinDay} onChange={e => setFlexibleMinDay(Number(e.target.value))} className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-2 py-2 text-white outline-none focus:border-blue-500">
-                            <option value={1}>Mo</option><option value={2}>Di</option><option value={3}>Mi</option><option value={4}>Do</option><option value={5}>Fr</option><option value={6}>Sa</option><option value={0}>So</option>
+                          <select
+                            value={flexibleMinDay}
+                            onChange={(e) =>
+                              setFlexibleMinDay(Number(e.target.value))
+                            }
+                            className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-2 py-2 text-white outline-none focus:border-blue-500"
+                          >
+                            <option value={1}>Mo</option>
+                            <option value={2}>Di</option>
+                            <option value={3}>Mi</option>
+                            <option value={4}>Do</option>
+                            <option value={5}>Fr</option>
+                            <option value={6}>Sa</option>
+                            <option value={0}>So</option>
                           </select>
                           <span className="text-gray-400 text-xs">bis</span>
-                          <select value={flexibleMaxDay} onChange={e => setFlexibleMaxDay(Number(e.target.value))} className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-2 py-2 text-white outline-none focus:border-blue-500">
-                            <option value={1}>Mo</option><option value={2}>Di</option><option value={3}>Mi</option><option value={4}>Do</option><option value={5}>Fr</option><option value={6}>Sa</option><option value={0}>So</option>
+                          <select
+                            value={flexibleMaxDay}
+                            onChange={(e) =>
+                              setFlexibleMaxDay(Number(e.target.value))
+                            }
+                            className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-2 py-2 text-white outline-none focus:border-blue-500"
+                          >
+                            <option value={1}>Mo</option>
+                            <option value={2}>Di</option>
+                            <option value={3}>Mi</option>
+                            <option value={4}>Do</option>
+                            <option value={5}>Fr</option>
+                            <option value={6}>Sa</option>
+                            <option value={0}>So</option>
                           </select>
                         </div>
                       )}
                     </>
                   )}
                 </div>
+
+                {/* Quick Pause & Reset in Work Settings Modal */}
+                <div className="pt-2 border-t border-gray-800 flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-amber-400">
+                      Release-Pause (Schnellsteuerung)
+                    </span>
+                    {isWorkPaused && (
+                      <span className="text-[11px] font-bold text-amber-300">
+                        {formatPauseStatusLabel(pausedUntilIso)}
+                      </span>
+                    )}
+                  </div>
+                  {isWorkPaused ? (
+                    <button
+                      type="button"
+                      onClick={handleUnpause}
+                      className="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition"
+                    >
+                      Pause sofort aufheben
+                    </button>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handlePauseWork(1)}
+                        className="py-1.5 px-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-200 text-xs font-semibold transition"
+                      >
+                        1 Wo. Pause
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handlePauseWork(2)}
+                        className="py-1.5 px-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-200 text-xs font-semibold transition"
+                      >
+                        2 Wo. Pause
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handlePauseWork("INDEFINITE")}
+                        className="py-1.5 px-2 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-200 text-xs font-semibold transition"
+                      >
+                        Hiatus
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              <div className="flex justify-end mt-6">
+              <div className="flex items-center justify-between gap-2 mt-6">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await resetScheduleOverride(id);
+                    await unpauseWork(id).catch(() => {});
+                    setCustomDay(-1);
+                    setReleaseFrequency(1);
+                    setStartDate("");
+                    setRhythmType("strict");
+                    setHasCustomOverride(false);
+                    setIsWorkPaused(false);
+                    setPausedUntilIso("");
+                    setSaveMessage("Auf AniList-Standard zurückgesetzt!");
+                    setTimeout(() => setSaveMessage(""), 3000);
+                  }}
+                  className="text-xs font-semibold text-gray-400 hover:text-rose-300 px-2.5 py-2 rounded-lg bg-white/5 hover:bg-rose-500/15 transition"
+                >
+                  Standard (Reset)
+                </button>
                 <button 
                   onClick={async () => {
                     const user = auth?.currentUser;
                     if (user && inLibrary) {
                       if (manualMaxEpisode === "") await clearManualMaxEpisode(id);
-                      else {
-                        await setCalendarOverride(
-                          id, 
-                          null as any, 
-                          customDay === -1 ? (null as any) : customDay, 
-                          customDay === -1 ? (null as any) : customTime, 
-                          manualMaxEpisode as number,
-                          customDay === -1 ? (null as any) : releaseFrequency,
-                          manualAvailableEps === "" ? (null as any) : (manualAvailableEps as number),
-                          undefined,
-                          startDate || undefined,
-                          rhythmType,
-                          rhythmType === 'flexible' ? { minDay: flexibleMinDay, maxDay: flexibleMaxDay } : undefined
-                        );
-                      }
-                      
-                      if (manualMaxEpisode === "" && (customDay !== -1 || manualAvailableEps !== "")) {
-                         await setCalendarOverride(
-                           id, 
-                            null as any, 
-                            customDay === -1 ? (null as any) : customDay, 
-                           customDay === -1 ? (null as any) : customTime, 
-                           undefined,
-                           customDay === -1 ? (null as any) : releaseFrequency,
-                           manualAvailableEps === "" ? (null as any) : (manualAvailableEps as number)
-                         );
-                      }
+                      const effectiveDay =
+                        customDay === -1
+                          ? (null as any)
+                          : rhythmType === "flexible"
+                          ? flexibleMinDay
+                          : customDay;
+
+                      await setCalendarOverride(
+                        id,
+                        null as any,
+                        effectiveDay,
+                        customDay === -1 ? (null as any) : customTime,
+                        manualMaxEpisode === ""
+                          ? undefined
+                          : (manualMaxEpisode as number),
+                        customDay === -1 ? (null as any) : releaseFrequency,
+                        manualAvailableEps === ""
+                          ? (null as any)
+                          : (manualAvailableEps as number),
+                        undefined,
+                        customDay === -1 || !startDate
+                          ? (null as any)
+                          : startDate,
+                        customDay === -1 ? (null as any) : rhythmType,
+                        customDay !== -1 && rhythmType === "flexible"
+                          ? { minDay: flexibleMinDay, maxDay: flexibleMaxDay }
+                          : (null as any)
+                      );
 
                       // Update synchro_offset_episodes in DB (manual_available_eps is now global)
                       await saveUserWork(user.uid, id, { 
@@ -787,15 +952,39 @@ export default function WorkDetailPage() {
             </button>
           </div>
           
-          {(isWorkPaused || userWorkStatus === "PAUSED") && (
+          {isWorkPaused || userWorkStatus === "PAUSED" ? (
             <button
               onClick={handleUnpause}
               disabled={isSaving}
               className="w-full flex items-center justify-center gap-2 rounded-xl bg-amber-600/20 border border-amber-500/50 hover:bg-amber-600/35 transition text-amber-300 py-3 text-sm font-bold active:scale-95 disabled:opacity-50"
             >
               <PlayCircle size={18} />
-              Entpausieren
+              Pause aufheben ({formatPauseStatusLabel(pausedUntilIso)})
             </button>
+          ) : (
+            inLibrary &&
+            userWorkStatus === "CURRENT" && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handlePauseWork(1)}
+                  disabled={isSaving}
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-[#1a1d24] border border-gray-800 hover:border-amber-500/40 text-gray-300 hover:text-amber-300 py-2.5 text-xs font-bold transition"
+                >
+                  <PauseCircle size={15} />
+                  Diese Woche Pause
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handlePauseWork(2)}
+                  disabled={isSaving}
+                  className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-[#1a1d24] border border-gray-800 hover:border-amber-500/40 text-gray-300 hover:text-amber-300 py-2.5 text-xs font-bold transition"
+                >
+                  <PauseCircle size={15} />
+                  2 Wochen Pause
+                </button>
+              </div>
+            )
           )}
 
           {userWorkStatus === "DROPPED" && (

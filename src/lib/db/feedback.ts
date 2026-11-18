@@ -5,6 +5,8 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
+  orderBy,
   query,
   setDoc,
   updateDoc,
@@ -13,7 +15,21 @@ import {
 import { ActivityFeed, EpisodeFeedback, ReviewListItem } from "@/types/database";
 import { getUserProfile } from "@/lib/db/users";
 
-function sanitizeReviewItem(item: ReviewListItem): ReviewListItem {
+export function getReviewItemTargetEpisode(item: ReviewListItem): number {
+  if (
+    typeof item.episode_end === "number" &&
+    !Number.isNaN(item.episode_end) &&
+    item.episode_end > item.episode_num
+  ) {
+    return item.episode_end;
+  }
+  if (Array.isArray(item.episodes) && item.episodes.length > 0) {
+    return Math.max(...item.episodes);
+  }
+  return item.episode_num;
+}
+
+export function sanitizeReviewItem(item: ReviewListItem): ReviewListItem {
   const sanitized: ReviewListItem = {
     work_id: item.work_id,
     work_title: item.work_title,
@@ -30,6 +46,20 @@ function sanitizeReviewItem(item: ReviewListItem): ReviewListItem {
   }
   if (Array.isArray(item.episodes) && item.episodes.length > 0) {
     sanitized.episodes = item.episodes;
+  }
+  if (
+    typeof item.previous_episode === "number" &&
+    !Number.isNaN(item.previous_episode) &&
+    item.previous_episode >= 0
+  ) {
+    sanitized.previous_episode = item.previous_episode;
+  }
+  if (
+    typeof item.applied_episode === "number" &&
+    !Number.isNaN(item.applied_episode) &&
+    item.applied_episode >= 0
+  ) {
+    sanitized.applied_episode = item.applied_episode;
   }
   if (item.work_cover !== undefined && item.work_cover !== "") {
     sanitized.work_cover = item.work_cover;
@@ -134,6 +164,72 @@ export async function createReviewList(
 }
 
 /**
+ * Updates an existing REVIEW_LIST activity (verifying ownership) and syncs all
+ * linked episode_feedback documents.
+ */
+export async function updateReviewList(
+  activityId: string,
+  userId: string,
+  newTitle: string,
+  newItems: ReviewListItem[]
+): Promise<ActivityFeed | null> {
+  if (!db) return null;
+
+  const activityRef = doc(db, "activity_feed", activityId);
+  const snap = await getDoc(activityRef);
+  if (!snap.exists()) return null;
+
+  const data = snap.data() as ActivityFeed;
+  if (data.user_id !== userId) {
+    throw new Error("Nicht berechtigt, diese Review-Liste zu bearbeiten.");
+  }
+
+  const sanitizedItems = newItems.map(sanitizeReviewItem);
+  const work_ids = Array.from(new Set(sanitizedItems.map((i) => i.work_id)));
+
+  await updateDoc(activityRef, {
+    text: newTitle,
+    review_items: sanitizedItems,
+    work_ids,
+  });
+
+  // Replace linked episode_feedback documents for this activity_id
+  const feedbackCol = collection(db, "episode_feedback");
+  const q = query(feedbackCol, where("activity_id", "==", activityId));
+  const oldFbSnap = await getDocs(q);
+  await Promise.all(oldFbSnap.docs.map((d) => deleteDoc(d.ref)));
+
+  const timestamp = data.timestamp || new Date().toISOString();
+  await Promise.all(
+    sanitizedItems.map((item) => {
+      const fbRef = doc(feedbackCol);
+      const feedbackDoc: EpisodeFeedback = {
+        feedback_id: fbRef.id,
+        user_id: userId,
+        work_id: item.work_id,
+        episode_num: item.episode_num,
+        media_type: item.media_type,
+        text: item.text,
+        activity_id: activityId,
+        timestamp,
+        reactions: {},
+      };
+      if (typeof item.rating === "number") {
+        feedbackDoc.rating = item.rating;
+      }
+      return setDoc(fbRef, feedbackDoc);
+    })
+  );
+
+  return {
+    ...data,
+    text: newTitle,
+    review_items: sanitizedItems,
+    work_ids,
+  };
+}
+
+/**
  * Adds a single episode/chapter feedback entry (with optional 1-10 rating)
  * directly from a work's detail page.
  */
@@ -163,6 +259,31 @@ export async function addSingleEpisodeFeedback(
 
   await setDoc(fbRef, feedbackDoc);
   return feedbackDoc;
+}
+
+/**
+ * Fetches recent episode_feedback entries globally so the review feed can
+ * compare ratings/reviews on the exact same work and episode/chapter.
+ */
+export async function getAllEpisodeFeedback(
+  limitCount: number = 300
+): Promise<EpisodeFeedback[]> {
+  if (!db) return [];
+
+  try {
+    const feedbackCol = collection(db, "episode_feedback");
+    const q = query(feedbackCol, orderBy("timestamp", "desc"), limit(limitCount));
+    const snapshot = await getDocs(q);
+
+    const items: EpisodeFeedback[] = [];
+    snapshot.forEach((docSnap) => {
+      items.push(docSnap.data() as EpisodeFeedback);
+    });
+    return items;
+  } catch (err) {
+    console.error("Failed to fetch global episode feedback:", err);
+    return [];
+  }
 }
 
 /**
@@ -252,23 +373,26 @@ export async function toggleActivityReaction(
 }
 
 /**
- * Deletes a REVIEW_LIST activity (verifying ownership) and all linked
- * episode_feedback documents.
+ * Deletes a REVIEW_LIST activity (verifying ownership), deletes all linked
+ * episode_feedback documents, and returns the deleted review_items so the caller
+ * can roll back the user's episode/chapter progress.
  */
 export async function deleteReviewList(
   activityId: string,
   userId: string
-): Promise<void> {
-  if (!db) return;
+): Promise<ReviewListItem[]> {
+  if (!db) return [];
 
   const activityRef = doc(db, "activity_feed", activityId);
   const snap = await getDoc(activityRef);
-  if (!snap.exists()) return;
+  if (!snap.exists()) return [];
 
   const data = snap.data() as ActivityFeed;
   if (data.user_id !== userId) {
     throw new Error("Nicht berechtigt, diese Review-Liste zu löschen.");
   }
+
+  const deletedItems = Array.isArray(data.review_items) ? data.review_items : [];
 
   await deleteDoc(activityRef);
 
@@ -277,4 +401,7 @@ export async function deleteReviewList(
   const fbSnap = await getDocs(q);
 
   await Promise.all(fbSnap.docs.map((d) => deleteDoc(d.ref)));
+
+  return deletedItems;
 }
+
