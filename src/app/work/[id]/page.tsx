@@ -89,7 +89,7 @@ export default function WorkDetailPage() {
           user
             ? getUserEpisodeRatingsForWork(user.uid, id)
             : Promise.resolve({ average: null, count: 0, items: [] }),
-          getPausedWorksMap().catch(() => ({})),
+          getPausedWorksMap().catch((): Record<string, any> => ({})),
         ]);
 
         if (!isMounted) return;

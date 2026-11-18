@@ -136,7 +136,7 @@ export default function CalendarPage() {
         const [mediaList, overrides, pauses] = await Promise.all([
           fetchAniListBatch(ids),
           getCalendarOverrides(),
-          getPausedWorksMap().catch(() => ({})),
+          getPausedWorksMap().catch((): Record<string, WorkPauseRecord> => ({})),
         ]);
         setGlobalOverrides(overrides);
         setPausedWorksMap(pauses);
