@@ -43,7 +43,8 @@ export async function createActivity(
         title: "Neuer Social Beitrag",
         body: text || "Jemand hat etwas im Social Feed gepostet.",
         type: "social",
-        link: "/feed"
+        link: "/feed",
+        ...(work_id ? { workId: work_id } : {}),
       })
     }).catch(console.error);
   } else if (action_type === "WEEKLY_RANKING") {
@@ -69,12 +70,14 @@ export async function createActivity(
         title: "Neue Bewertung",
         body: text || "Jemand hat ein Werk bewertet.",
         type: "social",
-        link: "/feed"
+        link: "/feed",
+        ...(work_id ? { workId: work_id } : {}),
       })
     }).catch(console.error);
   } else if (action_type === "EPISODE_THREAD") {
     let workTitle = "";
     let mediaType: "ANIME" | "MANGA" = "ANIME";
+    let workCover: string | undefined;
     if (work_id) {
       try {
         const { getWorkTitleAndType } = await import("@/lib/anilist");
@@ -82,6 +85,7 @@ export async function createActivity(
         if (info) {
           workTitle = info.title;
           mediaType = info.type;
+          workCover = info.coverImage;
         }
       } catch(e) {}
     }
@@ -98,7 +102,9 @@ export async function createActivity(
         title: targetTitle,
         body: text || `Ein neuer Thread für ${unit} ${episode_num || ''} wurde erstellt.`,
         type: "social",
-        link: work_id ? `/work/${work_id}?episode=${episode_num || ''}` : "/feed"
+        link: work_id ? `/work/${work_id}?episode=${episode_num || ''}` : "/feed",
+        icon: workCover,
+        workId: work_id,
       })
     }).catch(console.error);
 
@@ -255,13 +261,21 @@ export async function addActivityComment(activityId: string, userId: string, tex
       
       let workTitle = "";
       let mediaType: "ANIME" | "MANGA" = "ANIME";
-      if (activityData.work_id) {
+      let workCover: string | undefined = activityData.review_items?.[0]?.work_cover;
+      const resolvedWorkId =
+        activityData.work_id ||
+        activityData.review_items?.[0]?.work_id ||
+        activityData.work_ids?.[0];
+      if (resolvedWorkId) {
         try {
           const { getWorkTitleAndType } = await import("@/lib/anilist");
-          const info = await getWorkTitleAndType(activityData.work_id);
+          const info = await getWorkTitleAndType(resolvedWorkId);
           if (info) {
             workTitle = info.title;
             mediaType = info.type;
+            if (!workCover && info.coverImage) {
+              workCover = info.coverImage;
+            }
           }
         } catch(e) {}
       }
@@ -306,7 +320,9 @@ export async function addActivityComment(activityId: string, userId: string, tex
                 title: `${actorName} zu deinem Kommentar${workTitle ? ` in ${workTitle}` : ''}${activityData.episode_num ? ` (${unit} ${activityData.episode_num})` : ''}`,
                 body: text,
                 type: "replies",
-                link: activityData.work_id ? `/work/${activityData.work_id}?episode=${activityData.episode_num || ''}` : "/feed"
+                link: activityData.work_id ? `/work/${activityData.work_id}?episode=${activityData.episode_num || ''}` : "/feed",
+                icon: workCover,
+                workId: resolvedWorkId,
               })
             }).catch(console.error);
           }
@@ -343,7 +359,9 @@ export async function addActivityComment(activityId: string, userId: string, tex
             title: `${actorName} zu deinem Review${workTitle ? ` (${workTitle})` : ''}${activityData.episode_num ? ` · ${unit} ${activityData.episode_num}` : ''}`,
             body: text,
             type: "replies",
-            link: "/feed"
+            link: "/feed",
+            icon: workCover,
+            workId: resolvedWorkId,
           })
         }).catch(console.error);
       }
@@ -497,19 +515,29 @@ export async function toggleCommentLike(
         
         let workTitle = "";
         let mediaType: "ANIME" | "MANGA" = "ANIME";
+        let workCover: string | undefined;
+        let resolvedWorkId: string | undefined;
         let activityData: ActivityFeed | undefined;
         
         if (activityId) {
           const actSnap = await getDoc(doc(db, "activity_feed", activityId));
           if (actSnap.exists()) {
             activityData = actSnap.data() as ActivityFeed;
-            if (activityData.work_id) {
+            workCover = activityData.review_items?.[0]?.work_cover;
+            resolvedWorkId =
+              activityData.work_id ||
+              activityData.review_items?.[0]?.work_id ||
+              activityData.work_ids?.[0];
+            if (resolvedWorkId) {
               try {
                 const { getWorkTitleAndType } = await import("@/lib/anilist");
-                const info = await getWorkTitleAndType(activityData.work_id);
+                const info = await getWorkTitleAndType(resolvedWorkId);
                 if (info) {
                   workTitle = info.title;
                   mediaType = info.type;
+                  if (!workCover && info.coverImage) {
+                    workCover = info.coverImage;
+                  }
                 }
               } catch {}
             }
@@ -555,7 +583,9 @@ export async function toggleCommentLike(
             title: `${actorName} gefällt dein Kommentar${workTitle ? ` in ${workTitle}` : ''}${epContext}`,
             body: comment.text?.length > 80 ? comment.text.slice(0, 77) + "..." : (comment.text || ""),
             type: "likes",
-            link: `/feed?activity_id=${activityId}&comment_id=${commentId}`
+            link: `/feed?activity_id=${activityId}&comment_id=${commentId}`,
+            icon: workCover,
+            workId: resolvedWorkId,
           })
         }).catch(console.error);
       } catch (err) {

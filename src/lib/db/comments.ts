@@ -56,7 +56,9 @@ export async function addComment(
             title: `${author_name} in ${workInfo?.title || "Werk"}${episode_num ? ` (${unit} ${episode_num})` : ''}`,
             body: text,
             type: "replies",
-            link: `/work/${work_id}?episode=${episode_num || ''}`
+            link: `/work/${work_id}?episode=${episode_num || ''}`,
+            icon: workInfo?.coverImage,
+            workId: work_id,
           })
         }).catch(console.error);
       }
@@ -118,7 +120,8 @@ export async function voteComment(comment_id: string, uid: string, voteType: "UP
         title: "Neuer Like",
         body: `Jemand hat deinen Kommentar gelikt!`,
         type: "likes",
-        link: `/work/${comment.work_id}`
+        link: `/work/${comment.work_id}`,
+        workId: comment.work_id,
       })
     }).catch(console.error);
   }

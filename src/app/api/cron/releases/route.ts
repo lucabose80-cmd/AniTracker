@@ -3,6 +3,18 @@ import { NextResponse } from "next/server";
 
 export const dynamic = 'force-dynamic';
 
+const DEFAULT_ICON_URL = "https://anitracker-delta.vercel.app/anipulse-192x192.png";
+
+function resolveCoverIcon(coverImage?: { large?: string | null; medium?: string | null } | null): string {
+  const candidate = coverImage?.large || coverImage?.medium;
+  if (typeof candidate === "string") {
+    const trimmed = candidate.trim();
+    if (trimmed.startsWith("https://")) return trimmed;
+    if (trimmed.startsWith("http://")) return trimmed.replace(/^http:\/\//, "https://");
+  }
+  return DEFAULT_ICON_URL;
+}
+
 const GET_RECENT_RELEASES = `
   query($greater: Int, $lesser: Int) {
     Page(page: 1, perPage: 50) {
@@ -14,6 +26,10 @@ const GET_RECENT_RELEASES = `
             romaji
             english
             native
+          }
+          coverImage {
+            large
+            medium
           }
         }
       }
@@ -33,6 +49,7 @@ const GET_MEDIA_STATUS_BATCH = `
         }
         coverImage {
           large
+          medium
         }
       }
     }
@@ -183,7 +200,7 @@ export async function GET(req: Request) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query: `query($in: [Int]) { Page { media(id_in: $in) { id type title { romaji english native } } } }`,
+          query: `query($in: [Int]) { Page { media(id_in: $in) { id type title { romaji english native } coverImage { large medium } } } }`,
           variables: { in: customIds }
         }),
       }).then(r => r.json());
@@ -258,19 +275,20 @@ export async function GET(req: Request) {
         
         if (tokensToNotify.length > 0) {
           const workTitle = schedule.media?.title?.english || schedule.media?.title?.native || schedule.media?.title?.romaji || "Werk";
+          const coverUrl = resolveCoverIcon(schedule.media?.coverImage);
           const payload = {
             notification: {
               title: schedule.type === "MANGA" ? "Neues Kapitel verf\u00FCgbar!" : "Neue Folge verf\u00FCgbar!",
               body: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${workTitle} ist jetzt online.`,
             },
-            data: { link: `/work/${schedule.mediaId}`, type: "releases" },
+            data: { link: `/work/${schedule.mediaId}`, type: "releases", icon: coverUrl },
             webpush: {
               headers: { 
                 Urgency: "high",
                 TTL: "86400"
               },
               notification: { 
-                icon: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
+                icon: coverUrl,
                 badge: "https://anitracker-delta.vercel.app/anipulse-badge-96.png",
                 requireInteraction: true,
                 tag: `release-${schedule.mediaId}-${schedule.episode}`,
@@ -404,19 +422,20 @@ export async function GET(req: Request) {
               const settings = userData.notification_settings || { releases: true };
               
               if (settings.releases !== false && tokens.length > 0) {
+                const wishlistCoverUrl = resolveCoverIcon(aniListInfo.coverImage);
                 const payload = {
                   notification: {
                     title: "\uD83C\uDF89 Wunschliste -> Jetzt verf\u00FCgbar!",
                     body: `${title} ist jetzt erschienen und wurde in deine Aktiv-Liste verschoben!`,
                   },
-                  data: { link: `/work/${workId}`, type: "releases" },
+                  data: { link: `/work/${workId}`, type: "releases", icon: wishlistCoverUrl },
                   webpush: {
                     headers: { 
                       Urgency: "high",
                       TTL: "86400"
                     },
                     notification: { 
-                      icon: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
+                      icon: wishlistCoverUrl,
                       badge: "https://anitracker-delta.vercel.app/anipulse-badge-96.png",
                       requireInteraction: true,
                       tag: `wishlist-${workId}`,

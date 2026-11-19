@@ -1,5 +1,78 @@
 import { NextResponse } from "next/server";
 
+const DEFAULT_ICON_URL = "https://anitracker-delta.vercel.app/anipulse-192x192.png";
+// Android status bar & lock screen require a monochrome transparent PNG for the small badge icon
+const BADGE_URL = "https://anitracker-delta.vercel.app/anipulse-badge-96.png";
+
+const COVER_CACHE = new Map<number, { url: string | null; ts: number }>();
+const COVER_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+function normalizeHttpsUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed.startsWith("https://")) return trimmed;
+  if (trimmed.startsWith("http://")) return trimmed.replace(/^http:\/\//, "https://");
+  return null;
+}
+
+async function resolveNotificationIcon(
+  icon?: unknown,
+  workId?: unknown,
+  link?: unknown
+): Promise<string> {
+  const directIcon = normalizeHttpsUrl(icon);
+  if (directIcon) {
+    return directIcon;
+  }
+
+  let parsedId: number | null = null;
+  if (typeof workId === "number" && Number.isInteger(workId) && workId > 0) {
+    parsedId = workId;
+  } else if (typeof workId === "string" && /^\d+$/.test(workId.trim())) {
+    parsedId = parseInt(workId.trim(), 10);
+  } else if (typeof link === "string") {
+    const match = link.match(/^\/work\/(\d+)/);
+    if (match) {
+      parsedId = parseInt(match[1], 10);
+    }
+  }
+
+  if (!parsedId || Number.isNaN(parsedId) || parsedId <= 0) {
+    return DEFAULT_ICON_URL;
+  }
+
+  const cached = COVER_CACHE.get(parsedId);
+  if (cached && Date.now() - cached.ts < COVER_CACHE_TTL_MS) {
+    return cached.url || DEFAULT_ICON_URL;
+  }
+
+  try {
+    const res = await fetch("https://graphql.anilist.co", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        query: `query($id: Int) { Media(id: $id) { coverImage { large medium } } }`,
+        variables: { id: parsedId },
+      }),
+      signal: AbortSignal.timeout(3000),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      const rawUrl =
+        json?.data?.Media?.coverImage?.large ||
+        json?.data?.Media?.coverImage?.medium ||
+        null;
+      const validUrl = normalizeHttpsUrl(rawUrl);
+      COVER_CACHE.set(parsedId, { url: validUrl, ts: Date.now() });
+      return validUrl || DEFAULT_ICON_URL;
+    }
+  } catch (err) {
+    console.warn("Could not resolve AniList cover for push notification:", err);
+  }
+
+  return DEFAULT_ICON_URL;
+}
+
 export async function POST(req: Request) {
   try {
     const { adminDb, adminMessaging } = await import("@/lib/firebase-admin");
@@ -12,15 +85,16 @@ export async function POST(req: Request) {
       excludeUserId,
       tag: customTag,
       forceNotification,
+      icon: customIcon,
+      workId,
     } = await req.json();
 
     if (!targetUserId || !title || !body || !type) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
-    const iconUrl = "https://anitracker-delta.vercel.app/anipulse-192x192.png";
-    // Android status bar & lock screen require a monochrome transparent PNG for the small badge icon
-    const badgeUrl = "https://anitracker-delta.vercel.app/anipulse-badge-96.png";
+    const iconUrl = await resolveNotificationIcon(customIcon, workId, link);
+    const badgeUrl = BADGE_URL;
     const resolvedTag =
       customTag || `anipulse-${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
@@ -59,7 +133,7 @@ export async function POST(req: Request) {
 
       const payload = {
         notification: { title, body },
-        data: { link: link || "/", type, tag: resolvedTag },
+        data: { link: link || "/", type, tag: resolvedTag, icon: iconUrl },
         webpush: {
           headers: {
             Urgency: "high",
@@ -145,7 +219,7 @@ export async function POST(req: Request) {
 
     const payload = {
       notification: { title, body },
-      data: { link: link || "/", type, tag: resolvedTag },
+      data: { link: link || "/", type, tag: resolvedTag, icon: iconUrl },
       webpush: {
         headers: {
           Urgency: "high",

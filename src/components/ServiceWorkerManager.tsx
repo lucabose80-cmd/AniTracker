@@ -54,9 +54,13 @@ export function ServiceWorkerManager() {
             const notifTag =
               payload.data?.tag ||
               `anipulse-fg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+            const notifIcon =
+              payload.notification.icon ||
+              payload.data?.icon ||
+              '/anipulse-192x192.png';
             reg.showNotification(payload.notification.title || 'AniPulse', {
               body: payload.notification.body || '',
-              icon: '/anipulse-192x192.png',
+              icon: notifIcon,
               badge: '/anipulse-badge-96.png',
               tag: notifTag,
               renotify: true,

@@ -151,11 +151,12 @@ export async function createReviewList(
     .slice(0, 3)
     .join(", ");
 
+  const firstItem = sanitizedItems[0];
+
   // Create in-app notifications for other users
   try {
     const usersSnap = await getDocs(collection(db, "users"));
     const notifCol = collection(db, "notifications");
-    const firstItem = sanitizedItems[0];
     await Promise.all(
       usersSnap.docs
         .filter((uDoc) => uDoc.id !== userId)
@@ -200,6 +201,8 @@ export async function createReviewList(
       title: `${actorName} hat ein Review gepostet`,
       body: title.trim() || workSummary || "Neue Episoden-Reviews im Feed.",
       link: "/",
+      icon: firstItem?.work_cover,
+      workId: firstItem?.work_id,
     }),
   }).catch(console.error);
 

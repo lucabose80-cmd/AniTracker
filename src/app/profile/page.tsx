@@ -332,13 +332,44 @@ export default function ProfilePage() {
                         // Ensure current device token is registered before sending test pushes
                         await requestForToken(user.uid).catch(() => {});
 
-                        const testScenarios = [
+                        const loadedMedia = Object.values(aniListDetails) as Array<{
+                          type?: string;
+                          coverImage?: { large?: string; medium?: string };
+                        }>;
+                        const sampleAnime = loadedMedia.find(
+                          (m) => m?.type === "ANIME" && (m?.coverImage?.large || m?.coverImage?.medium)
+                        );
+                        const sampleManga = loadedMedia.find(
+                          (m) => m?.type === "MANGA" && (m?.coverImage?.large || m?.coverImage?.medium)
+                        );
+                        const fallbackSample = loadedMedia.find(
+                          (m) => m?.coverImage?.large || m?.coverImage?.medium
+                        );
+                        const sampleAnimeIcon =
+                          sampleAnime?.coverImage?.large ||
+                          sampleAnime?.coverImage?.medium ||
+                          fallbackSample?.coverImage?.large ||
+                          fallbackSample?.coverImage?.medium;
+                        const sampleMangaIcon =
+                          sampleManga?.coverImage?.large ||
+                          sampleManga?.coverImage?.medium ||
+                          sampleAnimeIcon;
+
+                        const testScenarios: Array<{
+                          type: string;
+                          tag: string;
+                          title: string;
+                          body: string;
+                          link: string;
+                          icon?: string;
+                        }> = [
                           {
                             type: "releases",
                             tag: `test-1-anime-release-${Date.now()}`,
                             title: "[Test 1/9 · Anime-Release] Neue Folge verfügbar!",
                             body: "Episode 12 von Solo Leveling Season 2 ist jetzt online.",
                             link: "/calendar",
+                            icon: sampleAnimeIcon,
                           },
                           {
                             type: "releases",
@@ -346,6 +377,7 @@ export default function ProfilePage() {
                             title: "[Test 2/9 · Manga-Release] Neues Kapitel verfügbar!",
                             body: "Kapitel 1140 von One Piece ist jetzt online.",
                             link: "/calendar",
+                            icon: sampleMangaIcon,
                           },
                           {
                             type: "releases",
@@ -353,6 +385,7 @@ export default function ProfilePage() {
                             title: "[Test 3/9 · Wunschliste -> Aktiv] 🎉 Jetzt verfügbar!",
                             body: "Chainsaw Man Movie: Reze Arc ist erschienen und wurde in deine Aktiv-Liste verschoben!",
                             link: "/library",
+                            icon: sampleAnimeIcon,
                           },
                           {
                             type: "social",
@@ -360,6 +393,7 @@ export default function ProfilePage() {
                             title: "[Test 4/9 · Neues Review] Neues Review von Lugga! 🌟",
                             body: "Lugga hat 3 Folgen/Kapitel bewertet (Frieren Ep. 28: 10/10 · Dandadan Ep. 12: 9.5/10).",
                             link: "/feed",
+                            icon: sampleAnimeIcon,
                           },
                           {
                             type: "social",
@@ -367,6 +401,7 @@ export default function ProfilePage() {
                             title: "[Test 5/9 · Werk-Bewertung] Neue Gesamtbewertung",
                             body: "Lugga hat Attack on Titan insgesamt mit 9.8/10 bewertet.",
                             link: "/feed",
+                            icon: sampleAnimeIcon,
                           },
                           {
                             type: "social",
@@ -381,6 +416,7 @@ export default function ProfilePage() {
                             title: "[Test 7/9 · Antwort/Meinung] Lugga zu deinem Review (Folge 12)",
                             body: "„Stimme dir komplett zu, das Pacing und die Animation am Ende waren eine glatte 10/10!“",
                             link: "/feed",
+                            icon: sampleAnimeIcon,
                           },
                           {
                             type: "likes",
@@ -388,6 +424,7 @@ export default function ProfilePage() {
                             title: "[Test 8/9 · Kommentar-Like] Lugga gefällt deine Meinung in Frieren",
                             body: "„Beste Folge der gesamten Staffel!“",
                             link: "/feed",
+                            icon: sampleAnimeIcon,
                           },
                           {
                             type: "likes",
@@ -395,6 +432,7 @@ export default function ProfilePage() {
                             title: "[Test 9/9 · Upvote] Neuer Like auf deine Meinung",
                             body: "Jemand hat deine Meinung zu Kapitel 180 gelikt!",
                             link: "/feed",
+                            icon: sampleMangaIcon,
                           },
                         ];
 
@@ -414,6 +452,7 @@ export default function ProfilePage() {
                               body: item.body,
                               link: item.link,
                               tag: item.tag,
+                              icon: item.icon,
                               forceNotification: true,
                             }),
                           });
