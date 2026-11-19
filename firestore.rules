@@ -159,7 +159,7 @@ service cloud.firestore {
     function isValidUser(data) {
       return (!('uid' in data) || (data.uid is string && data.uid.size() <= 128)) &&
              (!('username' in data) || (data.username is string && data.username.size() <= 100)) &&
-             (!('avatar_url' in data) || (data.avatar_url is string && data.avatar_url.size() <= 5000)) &&
+             (!('avatar_url' in data) || (data.avatar_url is string && data.avatar_url.size() <= 500000)) &&
              (!('email' in data) || (data.email is string && data.email.size() <= 254)) &&
              (!('following_array' in data) || isValidList(data.following_array, 5000)) &&
              (!('top_9_list' in data) || isValidList(data.top_9_list, 50)) &&
@@ -203,7 +203,7 @@ service cloud.firestore {
              data.work_id is string && data.work_id.size() <= 100 &&
              data.author_uid is string && data.author_uid == request.auth.uid &&
              data.author_name is string && data.author_name.size() >= 1 && data.author_name.size() <= 100 &&
-             (!('author_avatar' in data) || (data.author_avatar is string && data.author_avatar.size() <= 1000)) &&
+             (!('author_avatar' in data) || (data.author_avatar is string && data.author_avatar.size() <= 500000)) &&
              data.text is string && data.text.size() >= 1 && data.text.size() <= 5000 &&
              data.timestamp is string && data.timestamp.size() <= 50 &&
              data.is_spoiler is bool &&
@@ -257,7 +257,7 @@ service cloud.firestore {
              data.user_id is string && data.user_id.size() <= 128 &&
              data.actor_id is string && data.actor_id.size() <= 128 &&
              data.actor_name is string && data.actor_name.size() <= 100 &&
-             (!('actor_avatar' in data) || (data.actor_avatar is string && data.actor_avatar.size() <= 1000)) &&
+             (!('actor_avatar' in data) || (data.actor_avatar is string && data.actor_avatar.size() <= 500000)) &&
              data.type is string && data.type.size() <= 50 &&
              (!('activity_id' in data) || (data.activity_id is string && data.activity_id.size() <= 128)) &&
              (!('work_id' in data) || (data.work_id is string && data.work_id.size() <= 100)) &&
