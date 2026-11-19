@@ -33,6 +33,7 @@ import {
   PlayCircle,
   RotateCcw,
   SlidersHorizontal,
+  Check,
 } from "lucide-react";
 import Link from "next/link";
 import { format, formatDistanceToNow } from "date-fns";
@@ -439,14 +440,18 @@ export default function CalendarPage() {
   const handleQuickIncrement = async (
     e: React.MouseEvent,
     strId: string,
-    currentEp: number
+    currentEp: number,
+    maxAllowed: number | null
   ) => {
     e.preventDefault();
     e.stopPropagation();
     const user = auth.currentUser;
     if (!user || updatingIds[strId]) return;
 
-    const nextEp = currentEp + 1;
+    if (maxAllowed !== null && currentEp >= maxAllowed) return;
+    const nextEp =
+      maxAllowed !== null ? Math.min(currentEp + 1, maxAllowed) : currentEp + 1;
+    if (nextEp <= currentEp) return;
 
     setUserWorkMap((prev) => ({
       ...prev,
@@ -751,14 +756,23 @@ export default function CalendarPage() {
                         );
                         const strId = item.id.toString();
                         const uWork = userWorkMap[strId];
-                        const rInfo = item.releaseInfo;
                         const pauseInfo = pausedWorksMap[strId];
+                        const rInfo = computeWorkReleaseInfo({
+                          media: item,
+                          override: globalOverrides[strId],
+                          pauseInfo,
+                          userWork: uWork,
+                        });
 
                         const currentEp = uWork?.current_episode || 0;
                         const displayEpisode =
                           rInfo?.nextEpisodeNumber ||
                           item.nextAiringEpisode.episode;
                         const behindCount = rInfo?.behindCount ?? 0;
+                        const maxAllowed = rInfo?.maxAllowedProgress ?? null;
+                        const canIncrement =
+                          behindCount > 0 &&
+                          (maxAllowed === null || currentEp < maxAllowed);
 
                         const timeString = format(date, "HH:mm");
                         const dateLabel = format(date, "dd.MM.", { locale: de });
@@ -843,14 +857,17 @@ export default function CalendarPage() {
 
                             {/* Actions */}
                             <div className="flex items-center gap-1.5 shrink-0">
-                              {(behindCount > 0 ||
-                                isToday ||
-                                date.getTime() <= Date.now()) && (
+                              {canIncrement ? (
                                 <button
                                   type="button"
                                   disabled={!!updatingIds[strId]}
                                   onClick={(e) =>
-                                    handleQuickIncrement(e, strId, currentEp)
+                                    handleQuickIncrement(
+                                      e,
+                                      strId,
+                                      currentEp,
+                                      maxAllowed
+                                    )
                                   }
                                   className="px-2.5 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 text-xs font-bold transition-colors disabled:opacity-50 whitespace-nowrap"
                                   title={`${unitShort} ${
@@ -860,6 +877,11 @@ export default function CalendarPage() {
                                   + {item.type === "MANGA" ? "Kap" : "Ep"}{" "}
                                   {currentEp + 1}
                                 </button>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-300/90 border border-emerald-500/20 text-[11px] font-semibold whitespace-nowrap">
+                                  <Check size={12} />
+                                  Aktuell
+                                </span>
                               )}
                               <button
                                 type="button"

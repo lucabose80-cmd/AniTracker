@@ -26,7 +26,10 @@ interface CalendarStripItem {
   airingAt: number;
   airingLabel: string;
   airingEpisode?: number;
+  currentEp: number;
   nextUserEpisode: number;
+  behindCount: number;
+  maxAllowedProgress: number | null;
   isPaused?: boolean;
   pauseLabel?: string;
 }
@@ -162,7 +165,10 @@ export default function Home() {
             releaseInfo.flexibleRangeLabel
           ),
           airingEpisode: releaseInfo.nextEpisodeNumber,
+          currentEp,
           nextUserEpisode: currentEp + 1,
+          behindCount: releaseInfo.behindCount,
+          maxAllowedProgress: releaseInfo.maxAllowedProgress,
           isPaused: releaseInfo.isPaused,
           pauseLabel: releaseInfo.pauseLabel,
         } as CalendarStripItem;
@@ -171,8 +177,13 @@ export default function Home() {
       .sort((a, b) => a.airingAt - b.airingAt);
   }, [userWorks, userAniListDetails, calendarOverrides, pausedWorksMap]);
 
-  const handleQuickIncrement = async (workId: string, nextEp: number) => {
+  const handleQuickIncrement = async (
+    workId: string,
+    nextEp: number,
+    maxAllowed: number | null
+  ) => {
     if (!currentUserUid) return;
+    if (maxAllowed !== null && nextEp > maxAllowed) return;
     if (!isOnline) {
       alert("Keine Internetverbindung. Fortschritt konnte nicht gespeichert werden.");
       return;
@@ -278,6 +289,10 @@ export default function Home() {
             {upcomingCalendarItems.map((item) => {
               const unitShort = item.media_type === "MANGA" ? "Kap" : "Ep";
               const wasJustIncremented = justIncrementedIds.has(item.work_id);
+              const canIncrement =
+                item.behindCount > 0 &&
+                (item.maxAllowedProgress === null ||
+                  item.currentEp < item.maxAllowedProgress);
 
               return (
                 <div
@@ -315,29 +330,32 @@ export default function Home() {
                       )}
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleQuickIncrement(item.work_id, item.nextUserEpisode)
-                      }
-                      className={`mt-0.5 self-start inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors ${
-                        wasJustIncremented
-                          ? "bg-emerald-500 text-white"
-                          : "bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/30"
-                      }`}
-                    >
-                      {wasJustIncremented ? (
-                        <>
-                          <Check className="w-3 h-3" />
-                          Gespeichert
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="w-3 h-3" />
-                          {unitShort} {item.nextUserEpisode}
-                        </>
-                      )}
-                    </button>
+                    {wasJustIncremented ? (
+                      <span className="mt-0.5 self-start inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-500 text-white">
+                        <Check className="w-3 h-3" />
+                        Gespeichert
+                      </span>
+                    ) : canIncrement ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleQuickIncrement(
+                            item.work_id,
+                            item.nextUserEpisode,
+                            item.maxAllowedProgress
+                          )
+                        }
+                        className="mt-0.5 self-start inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/30"
+                      >
+                        <Plus className="w-3 h-3" />
+                        {unitShort} {item.nextUserEpisode}
+                      </button>
+                    ) : (
+                      <span className="mt-0.5 self-start inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-emerald-500/10 text-emerald-300/90 border border-emerald-500/20">
+                        <Check className="w-3 h-3" />
+                        Aktuell ({unitShort} {item.currentEp})
+                      </span>
+                    )}
                   </div>
                 </div>
               );

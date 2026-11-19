@@ -235,6 +235,7 @@ export interface ComputedWorkReleaseInfo {
   airingAt?: number; // Unix seconds of next expected release
   nextEpisodeNumber: number;
   availableEpisodes: number;
+  maxAllowedProgress: number | null;
   behindCount: number;
   isPaused: boolean;
   isIndefinitePause: boolean;
@@ -327,38 +328,72 @@ export function computeWorkReleaseInfo(params: {
   }
 
   // 1. Compute currently available episodes & next episode number
-  let totalEps = 9999;
-  if (override?.manualMaxEpisode != null) {
-    totalEps = Number(override.manualMaxEpisode);
-  } else if (userWork?.manual_max_episode != null) {
-    totalEps = Number(userWork.manual_max_episode);
+  let totalLimit: number | null = null;
+  if (override?.manualMaxEpisode != null && Number(override.manualMaxEpisode) > 0) {
+    totalLimit = Number(override.manualMaxEpisode);
+  } else if (userWork?.manual_max_episode != null && Number(userWork.manual_max_episode) > 0) {
+    totalLimit = Number(userWork.manual_max_episode);
+  } else if (media?.type === "MANGA" && Number(media?.chapters) > 0) {
+    totalLimit = Number(media.chapters);
+  } else if (media?.type !== "MANGA" && Number(media?.episodes) > 0) {
+    totalLimit = Number(media.episodes);
   }
 
   let availableEpisodes = 0;
   let isManualAvail = false;
+  let hasKnownAvailableLimit = false;
   if (override?.manualAvailableEps != null) {
     availableEpisodes = Number(override.manualAvailableEps);
     isManualAvail = true;
+    hasKnownAvailableLimit = true;
   } else if (userWork?.manual_available_eps != null) {
     availableEpisodes = Number(userWork.manual_available_eps);
     isManualAvail = true;
+    hasKnownAvailableLimit = true;
+  } else if (media?.status === "NOT_YET_RELEASED") {
+    availableEpisodes = 0;
+    hasKnownAvailableLimit = true;
   } else if (media?.type === "MANGA") {
-    availableEpisodes = totalEps !== 9999 ? totalEps : Number(media?.chapters) || currentEp;
+    if (totalLimit != null) {
+      availableEpisodes = totalLimit;
+      hasKnownAvailableLimit = true;
+    } else {
+      availableEpisodes = currentEp;
+      hasKnownAvailableLimit = false;
+    }
   } else if (media?.status === "RELEASING" && media?.nextAiringEpisode?.episode) {
-    availableEpisodes = Math.max(0, Number(media.nextAiringEpisode.episode) - 1);
+    const nextEpNum = Number(media.nextAiringEpisode.episode);
+    const nextAiringAt = Number(media.nextAiringEpisode.airingAt);
+    const hasJustAired = !Number.isNaN(nextAiringAt) && nextAiringAt > 0 && nextAiringAt <= nowSec;
+    availableEpisodes = hasJustAired ? nextEpNum : Math.max(0, nextEpNum - 1);
+    hasKnownAvailableLimit = true;
   } else if (media?.status === "RELEASING") {
-    availableEpisodes = currentEp;
+    availableEpisodes = totalLimit != null ? Math.min(currentEp, totalLimit) : currentEp;
+    hasKnownAvailableLimit = totalLimit != null;
   } else if (media?.status === "FINISHED") {
-    availableEpisodes = totalEps !== 9999 ? totalEps : Number(media?.episodes) || 0;
+    availableEpisodes = totalLimit != null ? totalLimit : 0;
+    hasKnownAvailableLimit = totalLimit != null;
   }
 
   if (!isManualAvail && offset > 0) {
     availableEpisodes = Math.max(0, availableEpisodes - offset);
   }
 
+  if (totalLimit != null && hasKnownAvailableLimit) {
+    availableEpisodes = Math.min(availableEpisodes, totalLimit);
+  }
+
+  const maxAllowedProgress: number | null = hasKnownAvailableLimit
+    ? availableEpisodes
+    : totalLimit;
+
   let nextEpisodeNumber = availableEpisodes + 1;
   if (!isManualAvail && media?.nextAiringEpisode?.episode) {
-    nextEpisodeNumber = Math.max(1, Number(media.nextAiringEpisode.episode) - offset);
+    const nextEpNum = Number(media.nextAiringEpisode.episode);
+    const nextAiringAt = Number(media.nextAiringEpisode.airingAt);
+    const hasJustAired = !Number.isNaN(nextAiringAt) && nextAiringAt > 0 && nextAiringAt <= nowSec;
+    const rawNext = hasJustAired ? nextEpNum + 1 : nextEpNum;
+    nextEpisodeNumber = Math.max(1, rawNext - offset);
   }
 
   const behindCount =
@@ -497,6 +532,7 @@ export function computeWorkReleaseInfo(params: {
     airingAt: isIndefinitePause ? undefined : computedAiringAt,
     nextEpisodeNumber,
     availableEpisodes,
+    maxAllowedProgress,
     behindCount,
     isPaused,
     isIndefinitePause,

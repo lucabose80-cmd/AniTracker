@@ -328,7 +328,22 @@ export default function LibraryPage() {
     if (!uid) return;
 
     const current = work.current_episode || 0;
-    const nextEp = current + 1;
+    const details = aniListDetails[work.work_id];
+    const globalOverride = globalOverrides[work.work_id];
+    const isPaused = pausedWorkIds.has(work.work_id);
+    const releaseInfo = computeWorkReleaseInfo({
+      media: details,
+      override: globalOverride,
+      pauseInfo: isPaused
+        ? { paused: true, paused_until: "9999-12-31T23:59:59.999Z" }
+        : null,
+      userWork: work,
+    });
+    const maxAllowed = releaseInfo.maxAllowedProgress;
+    if (maxAllowed !== null && current >= maxAllowed) return;
+    const nextEp =
+      maxAllowed !== null ? Math.min(current + 1, maxAllowed) : current + 1;
+    if (nextEp <= current) return;
 
     // Optimistic UI update
     setAllWorks((prev) =>
@@ -648,16 +663,23 @@ export default function LibraryPage() {
               ? 100
               : 0;
 
-            const behindCount = computeBehindCount(
-              work,
-              details,
-              globalOverride,
-              isPaused
-            );
+            const releaseInfo = computeWorkReleaseInfo({
+              media: details,
+              override: globalOverride,
+              pauseInfo: isPaused
+                ? { paused: true, paused_until: "9999-12-31T23:59:59.999Z" }
+                : null,
+              userWork: work,
+            });
+            const behindCount = releaseInfo.behindCount;
 
             const isCompleted =
               work.status === "COMPLETED" ||
               (total !== null && total > 0 && current >= total);
+            const isCaughtUp =
+              !isCompleted &&
+              releaseInfo.maxAllowedProgress !== null &&
+              current >= releaseInfo.maxAllowedProgress;
 
             return (
               <div
@@ -736,6 +758,11 @@ export default function LibraryPage() {
                       <Check size={12} />
                       Fertig
                     </span>
+                  ) : isCaughtUp ? (
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 border border-emerald-500/25 px-2 py-1 text-[11px] font-semibold text-emerald-300">
+                      <Check size={12} />
+                      Aktuell
+                    </span>
                   ) : (
                     <button
                       type="button"
@@ -782,12 +809,15 @@ export default function LibraryPage() {
               ? 100
               : 0;
 
-            const behindCount = computeBehindCount(
-              work,
-              details,
-              globalOverride,
-              isPaused
-            );
+            const releaseInfo = computeWorkReleaseInfo({
+              media: details,
+              override: globalOverride,
+              pauseInfo: isPaused
+                ? { paused: true, paused_until: "9999-12-31T23:59:59.999Z" }
+                : null,
+              userWork: work,
+            });
+            const behindCount = releaseInfo.behindCount;
             const nextReleaseText = formatNextReleaseLabel(
               work,
               details,
@@ -798,6 +828,10 @@ export default function LibraryPage() {
             const isCompleted =
               work.status === "COMPLETED" ||
               (total !== null && total > 0 && current >= total);
+            const isCaughtUp =
+              !isCompleted &&
+              releaseInfo.maxAllowedProgress !== null &&
+              current >= releaseInfo.maxAllowedProgress;
 
             return (
               <div
@@ -892,6 +926,11 @@ export default function LibraryPage() {
                     <span className="inline-flex items-center gap-1 rounded-full bg-green-500/15 border border-green-500/30 px-3 py-1.5 text-xs font-semibold text-green-400">
                       <Check size={13} />
                       Fertig
+                    </span>
+                  ) : isCaughtUp ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 px-3 py-1.5 text-xs font-semibold text-emerald-300">
+                      <Check size={13} />
+                      Aktuell
                     </span>
                   ) : (
                     <button
