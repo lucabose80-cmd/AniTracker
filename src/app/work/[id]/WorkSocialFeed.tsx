@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { getAllUserProfiles } from "@/lib/db/users";
 import { addSingleEpisodeFeedback, getEpisodeFeedbackForWork } from "@/lib/db/feedback";
 import { EpisodeFeedback } from "@/types/database";
@@ -320,20 +321,30 @@ export function WorkSocialFeed({ workId, work }: { workId: string; work: any }) 
               >
                 <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
                   <div className="flex items-center gap-2.5 min-w-0">
-                    {user.avatar_url ? (
-                      <img
-                        src={user.avatar_url}
-                        alt={user.username || "Avatar"}
-                        className="h-7 w-7 rounded-full object-cover border border-gray-700 shrink-0"
-                      />
-                    ) : (
-                      <div className="h-7 w-7 rounded-full bg-blue-900/50 border border-blue-700/50 flex items-center justify-center text-xs font-bold text-blue-300 shrink-0">
-                        {(user.username || "U").charAt(0).toUpperCase()}
-                      </div>
-                    )}
-                    <span className="font-bold text-sm text-gray-100 truncate">
-                      {user.username || "Unbekannt"}
-                    </span>
+                    <Link
+                      href={
+                        currentUserUid && item.user_id === currentUserUid
+                          ? "/profile"
+                          : `/profile/${item.user_id}`
+                      }
+                      className="flex items-center gap-2.5 min-w-0 group/author hover:opacity-90 transition-opacity"
+                      title={`Profil von ${user.username || "Unbekannt"} ansehen`}
+                    >
+                      {user.avatar_url ? (
+                        <img
+                          src={user.avatar_url}
+                          alt={user.username || "Avatar"}
+                          className="h-7 w-7 rounded-full object-cover border border-gray-700 group-hover/author:border-blue-400 shrink-0 transition-colors"
+                        />
+                      ) : (
+                        <div className="h-7 w-7 rounded-full bg-blue-900/50 border border-blue-700/50 group-hover/author:border-blue-400 flex items-center justify-center text-xs font-bold text-blue-300 shrink-0 transition-colors">
+                          {(user.username || "U").charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <span className="font-bold text-sm text-gray-100 group-hover/author:text-blue-300 group-hover/author:underline truncate transition-colors">
+                        {user.username || "Unbekannt"}
+                      </span>
+                    </Link>
                     <span className="text-xs text-gray-500">{timeAgo}</span>
                   </div>
 

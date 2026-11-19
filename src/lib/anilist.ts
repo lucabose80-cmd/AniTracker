@@ -132,9 +132,9 @@ export async function fetchAniListBatch(ids: number[]) {
 // -- Queries --
 
 export const GET_TRENDING_WORKS = `
-  query($type: MediaType, $season: MediaSeason, $seasonYear: Int, $page: Int = 1, $perPage: Int = 20, $genre_in: [String]) {
+  query($type: MediaType, $season: MediaSeason, $seasonYear: Int, $page: Int = 1, $perPage: Int = 20, $genre_in: [String], $excludeIds: [Int]) {
     Page(page: $page, perPage: $perPage) {
-      media(type: $type, sort: TRENDING_DESC, season: $season, seasonYear: $seasonYear, genre_in: $genre_in) {
+      media(type: $type, sort: TRENDING_DESC, season: $season, seasonYear: $seasonYear, genre_in: $genre_in, id_not_in: $excludeIds) {
         id
         title {
           romaji
@@ -166,9 +166,9 @@ export const GET_TRENDING_WORKS = `
 `;
 
 export const SEARCH_WORKS = `
-  query($search: String, $type: MediaType, $page: Int = 1, $perPage: Int = 24) {
+  query($search: String, $type: MediaType, $page: Int = 1, $perPage: Int = 24, $excludeIds: [Int]) {
     Page(page: $page, perPage: $perPage) {
-      media(search: $search, type: $type) {
+      media(search: $search, type: $type, id_not_in: $excludeIds) {
         id
         title {
           romaji
@@ -197,9 +197,9 @@ export const SEARCH_WORKS = `
 `;
 
 export const GET_UPCOMING_WORKS = `
-  query($type: MediaType, $season: MediaSeason, $seasonYear: Int, $page: Int = 1, $perPage: Int = 30) {
+  query($type: MediaType, $season: MediaSeason, $seasonYear: Int, $page: Int = 1, $perPage: Int = 30, $excludeIds: [Int]) {
     Page(page: $page, perPage: $perPage) {
-      media(type: $type, status: NOT_YET_RELEASED, sort: POPULARITY_DESC, season: $season, seasonYear: $seasonYear) {
+      media(type: $type, status: NOT_YET_RELEASED, sort: POPULARITY_DESC, season: $season, seasonYear: $seasonYear, id_not_in: $excludeIds) {
         id
         title {
           romaji

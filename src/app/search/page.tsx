@@ -69,8 +69,11 @@ function SearchContent() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [currentUserUid, setCurrentUserUid] = useState<string | null>(null);
+  const [isLibraryLoaded, setIsLibraryLoaded] = useState(false);
   // Work IDs that the current user already has (CURRENT, PLANNING, COMPLETED, etc.)
   const [hiddenMyWorkIds, setHiddenMyWorkIds] = useState<Set<number>>(new Set());
+  // Snapshot of excluded IDs sent to AniList on load/refresh so the server returns a full page of new works
+  const [queryExcludeIds, setQueryExcludeIds] = useState<number[]>([]);
   // All works in the user's library (for sequel/spin-off relation detection)
   const [allMyLibraryIds, setAllMyLibraryIds] = useState<Set<number>>(new Set());
   // Other users' active / wishlist tracking per workId
@@ -85,13 +88,18 @@ function SearchContent() {
   }, [query]);
 
   useEffect(() => {
-    if (!auth) return;
+    if (!auth) {
+      setIsLibraryLoaded(true);
+      return;
+    }
     const unsub = onAuthStateChanged(auth, async (user) => {
       setCurrentUserUid(user?.uid || null);
       if (!user) {
         setHiddenMyWorkIds(new Set());
+        setQueryExcludeIds([]);
         setAllMyLibraryIds(new Set());
         setCommunityTracksByWork({});
+        setIsLibraryLoaded(true);
         return;
       }
 
@@ -120,6 +128,7 @@ function SearchContent() {
           }
         });
         setHiddenMyWorkIds(hiddenIds);
+        setQueryExcludeIds(Array.from(hiddenIds));
         setAllMyLibraryIds(allMyIds);
 
         const profileMap: Record<string, { username: string; avatar_url?: string }> = {};
@@ -154,6 +163,8 @@ function SearchContent() {
         setCommunityTracksByWork(commMap);
       } catch (err) {
         console.error("Failed to load library/community works for search:", err);
+      } finally {
+        setIsLibraryLoaded(true);
       }
     });
 
@@ -161,9 +172,14 @@ function SearchContent() {
   }, []);
 
   useEffect(() => {
+    if (!isLibraryLoaded) return;
+
     async function doSearch() {
       setIsLoading(true);
       try {
+        const excludeParam =
+          queryExcludeIds.length > 0 ? queryExcludeIds : undefined;
+
         if (!query) {
           if (discoverTab === "SEASON") {
             // For Anime: current season & year; for Manga: trending/releasing works
@@ -174,10 +190,12 @@ function SearchContent() {
                     season: seasonInfo.season,
                     seasonYear: seasonInfo.seasonYear,
                     perPage: 36,
+                    excludeIds: excludeParam,
                   }
                 : {
                     type: contentType,
                     perPage: 36,
+                    excludeIds: excludeParam,
                   };
             const data = await fetchAniList(GET_TRENDING_WORKS, vars);
             setResults(data?.Page?.media || []);
@@ -185,6 +203,7 @@ function SearchContent() {
             const data = await fetchAniList(GET_UPCOMING_WORKS, {
               type: contentType,
               perPage: 36,
+              excludeIds: excludeParam,
             });
             setResults(data?.Page?.media || []);
           }
@@ -193,6 +212,7 @@ function SearchContent() {
             search: query,
             type: contentType,
             perPage: 24,
+            excludeIds: excludeParam,
           });
           setResults(data?.Page?.media || []);
         }
@@ -203,10 +223,12 @@ function SearchContent() {
       }
     }
     doSearch();
-  }, [query, contentType, discoverTab, seasonInfo]);
+  }, [query, contentType, discoverTab, seasonInfo, isLibraryLoaded, queryExcludeIds]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    // Sync queryExcludeIds so any newly added works are excluded on fresh search
+    setQueryExcludeIds(Array.from(hiddenMyWorkIds));
     if (input.trim()) {
       addSearchHistory(input.trim());
       router.push(`/search?q=${encodeURIComponent(input.trim())}`);
@@ -257,6 +279,11 @@ function SearchContent() {
       setHiddenMyWorkIds((prev) => {
         const next = new Set(prev);
         next.add(work.id);
+        // If the visible list is getting noticeably smaller, automatically trigger a server refill
+        const remainingCount = results.filter((r) => !next.has(r.id)).length;
+        if (remainingCount < 12) {
+          setQueryExcludeIds(Array.from(next));
+        }
         return next;
       });
       setAllMyLibraryIds((prev) => {
