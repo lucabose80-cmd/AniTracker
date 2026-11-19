@@ -28,13 +28,14 @@ export const metadata: Metadata = {
   },
   appleWebApp: {
     capable: true,
-    statusBarStyle: "default",
+    statusBarStyle: "black-translucent",
     title: "AniPulse",
   },
 };
 
 export const viewport = {
-  themeColor: "#2563eb",
+  themeColor: "#0f1115",
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

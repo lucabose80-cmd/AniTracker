@@ -167,7 +167,7 @@ export async function createReviewList(
             actor_id: userId,
             actor_name: actorName,
             actor_avatar: actorAvatar,
-            type: "COMMENT_ON_THREAD",
+            type: "REPLY_TO_COMMENT",
             activity_id,
             text:
               title.trim() ||

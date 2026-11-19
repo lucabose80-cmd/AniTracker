@@ -5,7 +5,7 @@
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f1115",
-  "theme_color": "#2563eb",
+  "theme_color": "#0f1115",
   "icons": [
     {
       "src": "/anipulse-192x192.png",

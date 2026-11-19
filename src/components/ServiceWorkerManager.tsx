@@ -131,7 +131,13 @@ export function ServiceWorkerManager() {
           unsubscribeNotifications = onSnapshot(
             q,
             (snap) => {
-              const unread = snap.docs.filter((d) => d.data()?.read === false).length;
+              const unread = snap.docs.filter((d) => {
+                const data = d.data();
+                if (data?.type === 'NEW_EPISODE_THREAD' || data?.type === 'COMMENT_ON_THREAD') {
+                  return false;
+                }
+                return data?.read === false;
+              }).length;
               useAppStore.getState().setUnreadNotifications(unread);
             },
             (err) => {

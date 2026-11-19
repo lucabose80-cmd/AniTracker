@@ -303,7 +303,7 @@ export async function addActivityComment(activityId: string, userId: string, tex
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 targetUserId: parentData.user_id,
-                title: `${actorName} in ${workTitle || "Thread"}${activityData.episode_num ? ` (${unit} ${activityData.episode_num})` : ''}`,
+                title: `${actorName} zu deinem Kommentar${workTitle ? ` in ${workTitle}` : ''}${activityData.episode_num ? ` (${unit} ${activityData.episode_num})` : ''}`,
                 body: text,
                 type: "replies",
                 link: activityData.work_id ? `/work/${activityData.work_id}?episode=${activityData.episode_num || ''}` : "/feed"
@@ -312,53 +312,8 @@ export async function addActivityComment(activityId: string, userId: string, tex
           }
         }
       } 
-      // 2. Notify Thread/Activity Author (if not reply, and not their own post)
-      else if (activityData.action_type === "EPISODE_THREAD") {
-         // Notify all users tracking the work
-         const userWorksRef = collection(db, "user_works");
-         const q = query(userWorksRef, where("work_id", "==", activityData.work_id));
-         const snap = await getDocs(q);
-         const notifiedUsers = new Set<string>();
-         notifiedUsers.add(userId);
-         
-         snap.forEach((docSnap) => {
-            const data = docSnap.data();
-            if (!notifiedUsers.has(data.user_id)) {
-               notifiedUsers.add(data.user_id);
-               const notifRef = doc(notificationsRef);
-               setDoc(notifRef, {
-                  notification_id: notifRef.id,
-                  user_id: data.user_id,
-                  actor_id: userId,
-                  actor_name: actorName,
-                  actor_avatar: actorAvatar,
-                  type: "COMMENT_ON_THREAD",
-                  activity_id: activityId,
-                  work_id: activityData.work_id,
-                  work_title: workTitle,
-                  media_type: mediaType,
-                  episode_num: activityData.episode_num,
-                  comment_id: comment_id,
-                  text: text,
-                  timestamp: timestamp,
-                  read: false
-               });
-               
-               // Send Push Notification
-               fetch("/api/notify", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                     targetUserId: data.user_id,
-                     title: `${actorName} in ${workTitle || "Thread"}${activityData.episode_num ? ` (${unit} ${activityData.episode_num})` : ''}`,
-                     body: text,
-                     type: "replies",
-                     link: activityData.work_id ? `/work/${activityData.work_id}?episode=${activityData.episode_num || ''}` : "/feed"
-                  })
-               }).catch(console.error);
-            }
-         });
-      } else if (activityData.user_id !== userId) {
+      // 2. Notify Review/Activity Author (if not reply, and not their own post)
+      else if (activityData.user_id !== userId) {
         const notifRef = doc(notificationsRef);
         const notif: InAppNotification = {
           notification_id: notifRef.id,
@@ -385,7 +340,7 @@ export async function addActivityComment(activityId: string, userId: string, tex
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             targetUserId: activityData.user_id,
-            title: `${actorName} in ${workTitle || "Beitrag"}${activityData.episode_num ? ` (${unit} ${activityData.episode_num})` : ''}`,
+            title: `${actorName} zu deinem Review${workTitle ? ` (${workTitle})` : ''}${activityData.episode_num ? ` · ${unit} ${activityData.episode_num}` : ''}`,
             body: text,
             type: "replies",
             link: "/feed"
@@ -441,8 +396,10 @@ export async function getInAppNotifications(userId: string): Promise<InAppNotifi
     
     const notifications: InAppNotification[] = [];
     snap.forEach(d => {
+      const data = d.data();
+      if (data.type === "NEW_EPISODE_THREAD" || data.type === "COMMENT_ON_THREAD") return;
       notifications.push({
-        ...d.data(),
+        ...data,
         notification_id: d.id,
       } as InAppNotification);
     });

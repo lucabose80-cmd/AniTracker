@@ -1,15 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { getGlobalFeed } from "@/lib/db/feed";
 import { getAllUserProfiles } from "@/lib/db/users";
 import { addSingleEpisodeFeedback, getEpisodeFeedbackForWork } from "@/lib/db/feedback";
-import { ActivityFeed, EpisodeFeedback } from "@/types/database";
+import { EpisodeFeedback } from "@/types/database";
 import { auth } from "@/lib/firebase";
-import { SpoilerProtectedThread } from "@/components/ui/SocialComponents";
 import { formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
-import { ChevronDown, ChevronUp, MessageSquarePlus, Star, X } from "lucide-react";
+import { MessageSquarePlus, Star, X } from "lucide-react";
 import { useAppStore } from "@/lib/store";
 
 function sortFeedbackDesc(a: EpisodeFeedback, b: EpisodeFeedback): number {
@@ -21,7 +19,6 @@ function sortFeedbackDesc(a: EpisodeFeedback, b: EpisodeFeedback): number {
 
 export function WorkSocialFeed({ workId, work }: { workId: string; work: any }) {
   const [feedbackItems, setFeedbackItems] = useState<EpisodeFeedback[]>([]);
-  const [legacyThreads, setLegacyThreads] = useState<ActivityFeed[]>([]);
   const [userProfiles, setUserProfiles] = useState<Record<string, any>>({});
   const [currentUserUid, setCurrentUserUid] = useState<string | undefined>(undefined);
   const [selectedEpisode, setSelectedEpisode] = useState<number | null>(null);
@@ -34,9 +31,6 @@ export function WorkSocialFeed({ workId, work }: { workId: string; work: any }) 
   const [ratingInput, setRatingInput] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string>("");
-
-  // Collapsible legacy threads
-  const [showLegacyThreads, setShowLegacyThreads] = useState(false);
 
   const reloadTrigger = useAppStore((state) => state.reloadTrigger);
   const triggerReload = useAppStore((state) => state.triggerReload);
@@ -54,9 +48,8 @@ export function WorkSocialFeed({ workId, work }: { workId: string; work: any }) 
     async function load() {
       setIsLoading(true);
       try {
-        const [items, allFeed, profilesList] = await Promise.all([
+        const [items, profilesList] = await Promise.all([
           getEpisodeFeedbackForWork(workId),
-          getGlobalFeed(200),
           getAllUserProfiles(),
         ]);
 
@@ -68,16 +61,6 @@ export function WorkSocialFeed({ workId, work }: { workId: string; work: any }) 
         });
         setUserProfiles(map);
         setFeedbackItems(items);
-        setLegacyThreads(
-          allFeed
-            .filter((a) => a.work_id === workId && a.action_type === "EPISODE_THREAD")
-            .sort((a, b) => {
-              const epA = a.episode_num || 0;
-              const epB = b.episode_num || 0;
-              if (epA !== epB) return epB - epA;
-              return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-            })
-        );
       } catch (e) {
         console.error(e);
       } finally {
@@ -373,47 +356,6 @@ export function WorkSocialFeed({ workId, work }: { workId: string; work: any }) 
               </div>
             );
           })}
-        </div>
-      )}
-
-      {/* Optional Collapsible Legacy Threads Fallback */}
-      {legacyThreads.length > 0 && (
-        <div className="mt-4 border-t border-gray-800 pt-4">
-          <button
-            type="button"
-            onClick={() => setShowLegacyThreads((prev) => !prev)}
-            className="flex items-center gap-2 text-xs font-semibold text-gray-400 hover:text-gray-200 transition"
-          >
-            {showLegacyThreads ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            Alte Threads ({legacyThreads.length})
-          </button>
-
-          {showLegacyThreads && (
-            <div className="mt-3 flex flex-col gap-3">
-              {legacyThreads.map((activity) => {
-                const user = userProfiles[activity.user_id] || { username: "Unbekannt" };
-                const timeAgo = formatDistanceToNow(new Date(activity.timestamp), {
-                  addSuffix: true,
-                  locale: de,
-                });
-                return (
-                  <SpoilerProtectedThread
-                    key={activity.activity_id}
-                    activity={activity}
-                    work={work}
-                    user={user}
-                    timeAgo={timeAgo}
-                    currentUserUid={currentUserUid}
-                    isSpoiler={false}
-                    userProfiles={userProfiles}
-                    onDelete={(id: string) =>
-                      setLegacyThreads((prev) => prev.filter((a) => a.activity_id !== id))
-                    }
-                  />
-                );
-              })}
-            </div>
-          )}
         </div>
       )}
     </div>

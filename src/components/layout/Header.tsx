@@ -108,13 +108,19 @@ export function Header() {
         getGlobalFeed(40).catch(() => []),
         getAllUserProfiles().catch(() => []),
       ]);
-      setNotifications(notifs);
-      const unreadNotifCount = notifs.filter((n) => !n.read).length;
+      const cleanNotifs = notifs.filter(
+        (n) => n.type !== "NEW_EPISODE_THREAD" && n.type !== "COMMENT_ON_THREAD"
+      );
+      setNotifications(cleanNotifs);
+      const unreadNotifCount = cleanNotifs.filter((n) => !n.read).length;
       setUnreadNotifications(unreadNotifCount);
 
-      // Filter non-review community activities (Watchlist/Library additions, Rankings, Threads, Recommendations, Manual posts)
+      // Filter non-review community activities (Watchlist/Library additions, Rankings, Recommendations, Manual posts)
       const updates = feedItems.filter(
-        (a) => a.action_type !== "REVIEW_LIST" && a.action_type !== "RATING"
+        (a) =>
+          a.action_type !== "REVIEW_LIST" &&
+          a.action_type !== "RATING" &&
+          a.action_type !== "EPISODE_THREAD"
       );
       setCommunityUpdates(updates);
 

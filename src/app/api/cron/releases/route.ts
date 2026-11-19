@@ -62,14 +62,16 @@ export async function GET(req: Request) {
 
     // ─── PART 1: Neue Folgen/Kapitel ─────────────────────────────────────────
     const now = Math.floor(Date.now() / 1000);
-    const oneHourAgo = now - 3600;
+    // Use a 4-hour lookback window so even if a cron run is delayed, no release is ever missed.
+    // Deterministic notification IDs (`release_${uid}_${mediaId}_${episode}`) guarantee zero duplicate alerts.
+    const lookbackStart = now - 4 * 3600;
 
     const response = await fetch("https://graphql.anilist.co", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         query: GET_RECENT_RELEASES,
-        variables: { greater: oneHourAgo, lesser: now },
+        variables: { greater: lookbackStart, lesser: now },
       }),
     });
 
@@ -86,8 +88,13 @@ export async function GET(req: Request) {
     const pausedWorkIds = new Set<string>();
     for (const pDoc of pausesSnap.docs) {
       const pData = pDoc.data();
-      if (pData?.paused && typeof pData.paused_until === "string" && pData.paused_until > nowIso) {
-        pausedWorkIds.add(pData.work_id || pDoc.id);
+      if (pData?.paused && typeof pData.paused_until === "string") {
+        if (pData.paused_until > nowIso) {
+          pausedWorkIds.add(pData.work_id || pDoc.id);
+        } else {
+          // Pause has expired -> automatically clear the expired pause document so it unpauses cleanly
+          await pDoc.ref.delete().catch(() => {});
+        }
       }
     }
 
@@ -105,7 +112,7 @@ export async function GET(req: Request) {
       const over = doc.data();
       const freqWeeks = Math.max(1, Number(over.releaseFrequency) || 1);
       const lastInc = Number(over.lastIncrementedAt) || 0;
-      const threshold = freqWeeks * 7 * 24 * 3600 - 3600;
+      const threshold = freqWeeks * 7 * 24 * 3600 - 4 * 3600;
 
       // If startDate is in the future, do not auto-increment yet
       if (typeof over.startDate === "string" && over.startDate) {
@@ -126,7 +133,7 @@ export async function GET(req: Request) {
       let shouldTriggerNow = false;
 
       if (typeof over.airingAt === "number" && over.airingAt > 0) {
-        if (over.airingAt >= oneHourAgo && over.airingAt <= now && now - lastInc >= 3600) {
+        if (over.airingAt >= lookbackStart && over.airingAt <= now && now - lastInc >= 3600) {
           shouldTriggerNow = true;
         }
       }
@@ -147,7 +154,8 @@ export async function GET(req: Request) {
           const currentTimeMin = currentHour * 60 + currentMinute;
           const targetTimeMin = targetHour * 60 + targetMinute;
 
-          if (currentTimeMin >= targetTimeMin && currentTimeMin < targetTimeMin + 60) {
+          // Allow a 4-hour catch-up window on the release day in case a cron execution was delayed
+          if (currentTimeMin >= targetTimeMin && currentTimeMin < targetTimeMin + 240) {
             if (now - lastInc >= threshold) {
               shouldTriggerNow = true;
             }
@@ -175,7 +183,7 @@ export async function GET(req: Request) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query: `query($in: [Int]) { Page { media(id_in: $in) { id title { romaji english native } } } }`,
+          query: `query($in: [Int]) { Page { media(id_in: $in) { id type title { romaji english native } } } }`,
           variables: { in: customIds }
         }),
       }).then(r => r.json());
@@ -183,7 +191,11 @@ export async function GET(req: Request) {
       const mediaList = mediaRes.data?.Page?.media || [];
       customSchedules.forEach(cs => {
         const m = mediaList.find((x: any) => x.id.toString() === cs.mediaId);
-        if (m) { cs.media = m; schedules.push(cs); }
+        if (m) {
+          cs.media = m;
+          if (m.type) cs.type = m.type;
+          schedules.push(cs);
+        }
       });
     }
 
@@ -199,14 +211,14 @@ export async function GET(req: Request) {
         if (userIds.length === 0) continue;
         
         const tokensToNotify: string[] = [];
+        const tokenToUserIds = new Map<string, string[]>();
         
-        // Fetch users in chunks of 10 to avoid limits, though here we just fetch them individually since there might be few
         for (const uid of userIds) {
           const userDoc = await adminDb.collection("users").doc(uid as string).get();
           if (userDoc.exists) {
             const userData = userDoc.data()!;
             const settings = userData.notification_settings || { releases: true };
-            const tokens = userData.fcm_tokens || [];
+            const tokens: string[] = Array.isArray(userData.fcm_tokens) ? userData.fcm_tokens : [];
             
             if (settings.releases !== false) {
               // Create InAppNotification with deterministic ID to prevent duplicates
@@ -231,8 +243,13 @@ export async function GET(req: Request) {
                   read: false
                 });
 
-                if (tokens.length > 0) {
-                  tokensToNotify.push(...tokens);
+                for (const tk of tokens) {
+                  if (!tk) continue;
+                  if (!tokenToUserIds.has(tk)) {
+                    tokenToUserIds.set(tk, []);
+                    tokensToNotify.push(tk);
+                  }
+                  tokenToUserIds.get(tk)!.push(uid as string);
                 }
               }
             }
@@ -240,7 +257,6 @@ export async function GET(req: Request) {
         }
         
         if (tokensToNotify.length > 0) {
-          const uniqueTokens = [...new Set(tokensToNotify)];
           const workTitle = schedule.media?.title?.english || schedule.media?.title?.native || schedule.media?.title?.romaji || "Werk";
           const payload = {
             notification: {
@@ -264,11 +280,33 @@ export async function GET(req: Request) {
               },
               fcmOptions: { link: `/work/${schedule.mediaId}` }
             },
-            tokens: uniqueTokens,
+            tokens: tokensToNotify,
           };
           try {
-            await adminMessaging.sendEachForMulticast(payload);
-            notificationsSent++;
+            const res = await adminMessaging.sendEachForMulticast(payload);
+            notificationsSent += res.successCount;
+
+            if (res.failureCount > 0) {
+              const FieldValue = (await import("firebase-admin/firestore")).FieldValue;
+              for (let idx = 0; idx < res.responses.length; idx++) {
+                const resp = res.responses[idx];
+                if (
+                  !resp.success &&
+                  (resp.error?.code === "messaging/registration-token-not-registered" ||
+                    resp.error?.code === "messaging/invalid-registration-token")
+                ) {
+                  const deadToken = tokensToNotify[idx];
+                  const uids = tokenToUserIds.get(deadToken) || [];
+                  for (const uid of uids) {
+                    await adminDb
+                      .collection("users")
+                      .doc(uid)
+                      .update({ fcm_tokens: FieldValue.arrayRemove(deadToken) })
+                      .catch(() => {});
+                  }
+                }
+              }
+            }
           } catch (pushErr) {
             console.error("FCM Send Error:", pushErr);
           }
@@ -312,6 +350,14 @@ export async function GET(req: Request) {
           const aniListInfo = aniListStatusMap[uWork.work_id];
           if (!aniListInfo) continue;
 
+          // Backfill added_status if missing on legacy PLANNING entries when still unreleased
+          if (!uWork.added_status && aniListInfo.status === "NOT_YET_RELEASED") {
+            await adminDb.collection("user_works").doc(docSnap.id).update({
+              added_status: "NOT_YET_RELEASED",
+            }).catch(() => {});
+            continue;
+          }
+
           if (uWork.added_status !== "NOT_YET_RELEASED") continue; // Nur Werke beachten, die bei Hinzufügen noch nicht raus waren
 
           if (aniListInfo.status === "RELEASING" || aniListInfo.status === "FINISHED") {
@@ -354,7 +400,7 @@ export async function GET(req: Request) {
             const userDoc = await adminDb.collection("users").doc(userId).get();
             if (userDoc.exists) {
               const userData = userDoc.data()!;
-              const tokens = userData.fcm_tokens || [];
+              const tokens: string[] = Array.isArray(userData.fcm_tokens) ? userData.fcm_tokens : [];
               const settings = userData.notification_settings || { releases: true };
               
               if (settings.releases !== false && tokens.length > 0) {
@@ -383,8 +429,8 @@ export async function GET(req: Request) {
                   tokens,
                 };
                 try {
-                  await adminMessaging.sendEachForMulticast(payload);
-                  wishlistNotificationsSent++;
+                  const res = await adminMessaging.sendEachForMulticast(payload);
+                  wishlistNotificationsSent += res.successCount;
                 } catch (pushErr) {
                   console.error("FCM Wishlist Send Error:", pushErr);
                 }

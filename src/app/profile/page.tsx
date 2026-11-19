@@ -133,13 +133,13 @@ export default function ProfilePage() {
       } else if (typeof Notification !== "undefined" && Notification.permission === "denied") {
         alert("Benachrichtigungen sind im Browser blockiert. Bitte erlaube Push-Benachrichtigungen in den Browser-/Website-Einstellungen.");
       } else {
-        alert("Push-Benachrichtigungen konnten nicht aktiviert werden. Bitte prÃ¼fe die Browser-Berechtigungen, den Service Worker und die Firestore-Regeln.");
+        alert("Push-Benachrichtigungen konnten nicht aktiviert werden. Bitte prüfe die Browser-Berechtigungen, den Service Worker und die Firestore-Regeln.");
       }
     } catch (e: any) {
       console.error(e);
       alert(
         `Fehler beim Aktivieren der Push-Benachrichtigungen: ${
-          e?.message || "Bitte prÃ¼fe die Browser-Berechtigungen und Firestore-Regeln."
+          e?.message || "Bitte prüfe die Browser-Berechtigungen und Firestore-Regeln."
         }`
       );
     } finally {
@@ -314,71 +314,64 @@ export default function ProfilePage() {
                         {
                           type: "releases",
                           tag: `test-1-anime-release-${Date.now()}`,
-                          title: "[Test 1/10 · Anime-Release] Neue Folge verfügbar!",
+                          title: "[Test 1/9 · Anime-Release] Neue Folge verfügbar!",
                           body: "Episode 12 von Solo Leveling Season 2 ist jetzt online.",
                           link: "/calendar",
                         },
                         {
                           type: "releases",
                           tag: `test-2-manga-release-${Date.now()}`,
-                          title: "[Test 2/10 · Manga-Release] Neues Kapitel verfügbar!",
+                          title: "[Test 2/9 · Manga-Release] Neues Kapitel verfügbar!",
                           body: "Kapitel 1140 von One Piece ist jetzt online.",
                           link: "/calendar",
                         },
                         {
                           type: "releases",
                           tag: `test-3-wishlist-release-${Date.now()}`,
-                          title: "[Test 3/10 · Wunschliste -> Aktiv] 🎉 Jetzt verfügbar!",
+                          title: "[Test 3/9 · Wunschliste -> Aktiv] 🎉 Jetzt verfügbar!",
                           body: "Chainsaw Man Movie: Reze Arc ist erschienen und wurde in deine Aktiv-Liste verschoben!",
                           link: "/library",
                         },
                         {
                           type: "social",
                           tag: `test-4-review-list-${Date.now()}`,
-                          title: "[Test 4/10 · Neues Review] Neues Review von Lugga! 🌟",
+                          title: "[Test 4/9 · Neues Review] Neues Review von Lugga! 🌟",
                           body: "Lugga hat 3 Folgen/Kapitel bewertet (Frieren Ep. 28: 10/10 · Dandadan Ep. 12: 9.5/10).",
                           link: "/feed",
                         },
                         {
                           type: "social",
-                          tag: `test-5-episode-thread-${Date.now()}`,
-                          title: "[Test 5/10 · Episoden-Thread] Neuer Thread in Jujutsu Kaisen (Folge 24)",
-                          body: "Lugga hat eine Diskussion zu Folge 24 gestartet.",
-                          link: "/feed",
-                        },
-                        {
-                          type: "social",
-                          tag: `test-6-rating-${Date.now()}`,
-                          title: "[Test 6/10 · Werk-Bewertung] Neue Gesamtbewertung",
+                          tag: `test-5-rating-${Date.now()}`,
+                          title: "[Test 5/9 · Werk-Bewertung] Neue Gesamtbewertung",
                           body: "Lugga hat Attack on Titan insgesamt mit 9.8/10 bewertet.",
                           link: "/feed",
                         },
                         {
                           type: "social",
-                          tag: `test-7-weekly-ranking-${Date.now()}`,
-                          title: "[Test 7/10 · Wochen-Ranking] Neues Wochen-Ranking!",
+                          tag: `test-6-weekly-ranking-${Date.now()}`,
+                          title: "[Test 6/9 · Wochen-Ranking] Neues Wochen-Ranking!",
                           body: "Lugga hat sein neues Anime-Wochen-Ranking veröffentlicht.",
                           link: "/feed",
                         },
                         {
                           type: "replies",
-                          tag: `test-8-review-reply-${Date.now()}`,
-                          title: "[Test 8/10 · Antwort/Meinung] Lugga zu deinem Review (Folge 12)",
+                          tag: `test-7-review-reply-${Date.now()}`,
+                          title: "[Test 7/9 · Antwort/Meinung] Lugga zu deinem Review (Folge 12)",
                           body: "„Stimme dir komplett zu, das Pacing und die Animation am Ende waren eine glatte 10/10!“",
                           link: "/feed",
                         },
                         {
                           type: "likes",
-                          tag: `test-9-comment-like-${Date.now()}`,
-                          title: "[Test 9/10 · Kommentar-Like] Lugga gefällt deine Meinung in Frieren",
+                          tag: `test-8-comment-like-${Date.now()}`,
+                          title: "[Test 8/9 · Kommentar-Like] Lugga gefällt deine Meinung in Frieren",
                           body: "„Beste Folge der gesamten Staffel!“",
                           link: "/feed",
                         },
                         {
                           type: "likes",
-                          tag: `test-10-work-upvote-${Date.now()}`,
-                          title: "[Test 10/10 · Upvote] Neuer Like auf deinen Werk-Kommentar",
-                          body: "Jemand hat deinen Kommentar zu Kapitel 180 gelikt!",
+                          tag: `test-9-work-upvote-${Date.now()}`,
+                          title: "[Test 9/9 · Upvote] Neuer Like auf deine Meinung",
+                          body: "Jemand hat deine Meinung zu Kapitel 180 gelikt!",
                           link: "/feed",
                         },
                       ];
@@ -414,7 +407,7 @@ export default function ProfilePage() {
 
                       if (totalSent > 0) {
                         alert(
-                          `${totalSent}/10 Test-Push-Benachrichtigungen (alle 10 Kategorien) wurden an dein Gerät gesendet!`
+                          `${totalSent}/9 Test-Push-Benachrichtigungen (alle 9 Kategorien) wurden an dein Gerät gesendet!`
                         );
                       } else {
                         alert(
@@ -431,7 +424,7 @@ export default function ProfilePage() {
                   disabled={isSaving}
                   className="text-[11px] bg-blue-600/20 hover:bg-blue-600/35 text-blue-300 border border-blue-500/30 px-2.5 py-1 rounded-lg font-semibold transition"
                 >
-                  {isSaving ? "Sende 10 Tests (3s)..." : "Alle 10 Push-Arten testen"}
+                  {isSaving ? "Sende 9 Tests (3s)..." : "Alle 9 Push-Arten testen"}
                 </button>
               )}
               {isPushEnabled && (
@@ -449,8 +442,8 @@ export default function ProfilePage() {
           {isPushEnabled && (
             <p className="text-[11px] text-gray-400 mb-3 leading-relaxed">
               💡 <strong>Tipp für den Sperrbildschirm-Test:</strong> Nach Klick auf{" "}
-              <span className="text-blue-300 font-semibold">„Alle 10 Push-Arten testen“</span> startet ein{" "}
-              <strong>3-Sekunden-Countdown</strong> – sperre in diesen 3 Sekunden direkt dein Handy, damit du alle 10 Benachrichtigungen live auf dem Lock-Screen siehst!
+              <span className="text-blue-300 font-semibold">„Alle 9 Push-Arten testen“</span> startet ein{" "}
+              <strong>3-Sekunden-Countdown</strong> – sperre in diesen 3 Sekunden direkt dein Handy, damit du alle 9 Benachrichtigungen live auf dem Lock-Screen siehst!
             </p>
           )}
 
@@ -589,7 +582,7 @@ export default function ProfilePage() {
             <p className="text-xs text-gray-500 text-center py-6">
               {onlyMalOpen
                 ? "Alle bewerteten Werke sind bereits auf AniList/MAL markiert."
-                : "Keine bewerteten Werke fÃ¼r diese Kategorie vorhanden."}
+                : "Keine bewerteten Werke für diese Kategorie vorhanden."}
             </p>
           ) : (
             <div className="max-h-[420px] overflow-y-auto space-y-2 pr-1">
@@ -643,7 +636,7 @@ export default function ProfilePage() {
                     </div>
 
                     <span className="text-sm font-bold text-blue-400 shrink-0 tabular-nums">
-                      â˜… {score.toFixed(1)}
+                      ★ {score.toFixed(1)}
                     </span>
                   </div>
                 );
@@ -709,7 +702,7 @@ export default function ProfilePage() {
                       onClick={() => fileInputRef.current?.click()}
                       className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-2 rounded-lg transition"
                     >
-                      Bild vom Handy wÃ¤hlen
+                      Bild vom Handy wählen
                     </button>
                     {editAvatarUrl && (
                       <button 
