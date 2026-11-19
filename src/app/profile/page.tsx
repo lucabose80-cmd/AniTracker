@@ -668,20 +668,6 @@ export default function ProfilePage() {
         </section>
       )}
 
-      <section>
-        <h3 className="mb-3 text-lg font-bold">Statistiken</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-4 text-center">
-            <span className="block text-2xl font-bold text-blue-500">{watchedAnimeCount}</span>
-            <span className="text-xs text-gray-400">Gesehene Anime</span>
-          </div>
-          <div className="rounded-xl border border-gray-800 bg-[#1a1d24] p-4 text-center">
-            <span className="block text-2xl font-bold text-blue-500">{readMangaCount}</span>
-            <span className="text-xs text-gray-400">Gelesene Manga</span>
-          </div>
-        </div>
-      </section>
-
       {/* Profil Edit Modal */}
       {isEditingProfile && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">

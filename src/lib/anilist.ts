@@ -166,7 +166,7 @@ export const GET_TRENDING_WORKS = `
 `;
 
 export const SEARCH_WORKS = `
-  query($search: String, $type: MediaType, $page: Int = 1, $perPage: Int = 10) {
+  query($search: String, $type: MediaType, $page: Int = 1, $perPage: Int = 24) {
     Page(page: $page, perPage: $perPage) {
       media(search: $search, type: $type) {
         id
@@ -179,16 +179,25 @@ export const SEARCH_WORKS = `
           large
         }
         format
+        status
         episodes
         chapters
         averageScore
+        relations {
+          edges {
+            relationType
+            node {
+              id
+            }
+          }
+        }
       }
     }
   }
 `;
 
 export const GET_UPCOMING_WORKS = `
-  query($type: MediaType, $season: MediaSeason, $seasonYear: Int, $page: Int = 1, $perPage: Int = 10) {
+  query($type: MediaType, $season: MediaSeason, $seasonYear: Int, $page: Int = 1, $perPage: Int = 30) {
     Page(page: $page, perPage: $perPage) {
       media(type: $type, status: NOT_YET_RELEASED, sort: POPULARITY_DESC, season: $season, seasonYear: $seasonYear) {
         id
@@ -201,6 +210,7 @@ export const GET_UPCOMING_WORKS = `
           large
         }
         format
+        status
         episodes
         chapters
         averageScore
@@ -291,6 +301,7 @@ export const GET_WORKS_BATCH = `
         status
         episodes
         chapters
+        duration
         nextAiringEpisode {
           episode
           airingAt

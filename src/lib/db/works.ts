@@ -68,6 +68,23 @@ export async function getAllUserWorks(userId: string): Promise<UserWork[]> {
   }
 }
 
+// Holt alle Werke aller Nutzer (für Community-Markierungen in der Suche)
+export async function getAllCommunityWorks(): Promise<UserWork[]> {
+  if (!db) return [];
+  try {
+    const worksRef = collection(db, "user_works");
+    const snap = await getDocs(worksRef);
+    const works: UserWork[] = [];
+    snap.forEach((doc) => {
+      works.push(doc.data() as UserWork);
+    });
+    return works;
+  } catch (error) {
+    console.error("Fehler beim Laden der Community-Werke:", error);
+    return [];
+  }
+}
+
 // Löscht ein Werk aus der Bibliothek
 export async function removeUserWork(userId: string, workId: string) {
   if (!db) return;
