@@ -57,10 +57,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { adminAuth, adminDb } = await import("@/lib/firebase-admin");
+    const { verifyFirebaseIdToken, adminDb } = await import("@/lib/firebase-admin");
     let uid: string;
     try {
-      const decoded = await adminAuth.verifyIdToken(match[1]);
+      const decoded = await verifyFirebaseIdToken(match[1]);
       uid = decoded.uid;
     } catch {
       return NextResponse.json({ error: "Invalid auth token" }, { status: 401 });

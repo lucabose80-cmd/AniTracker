@@ -83,17 +83,25 @@ export async function GET(req: Request) {
     // Deterministic notification IDs (`release_${uid}_${mediaId}_${episode}`) guarantee zero duplicate alerts.
     const lookbackStart = now - 4 * 3600;
 
-    const response = await fetch("https://graphql.anilist.co", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query: GET_RECENT_RELEASES,
-        variables: { greater: lookbackStart, lesser: now },
-      }),
-    });
-
-    const json = await response.json();
-    const schedules = json.data?.Page?.airingSchedules || [];
+    let schedules: any[] = [];
+    try {
+      const response = await fetch("https://graphql.anilist.co", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          query: GET_RECENT_RELEASES,
+          variables: { greater: lookbackStart, lesser: now },
+        }),
+      });
+      if (response.ok) {
+        const json = await response.json();
+        schedules = json.data?.Page?.airingSchedules || [];
+      } else {
+        console.warn("AniList recent releases non-OK status:", response.status);
+      }
+    } catch (aniErr) {
+      console.error("AniList recent releases fetch error:", aniErr);
+    }
 
     const customSchedules: any[] = [];
     const [overridesSnap, pausesSnap] = await Promise.all([
@@ -195,25 +203,37 @@ export async function GET(req: Request) {
     }
 
     if (customSchedules.length > 0) {
-      const customIds = customSchedules.map(s => parseInt(s.mediaId, 10));
-      const mediaRes = await fetch("https://graphql.anilist.co", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: `query($in: [Int]) { Page { media(id_in: $in) { id type title { romaji english native } coverImage { large medium } } } }`,
-          variables: { in: customIds }
-        }),
-      }).then(r => r.json());
-      
-      const mediaList = mediaRes.data?.Page?.media || [];
-      customSchedules.forEach(cs => {
-        const m = mediaList.find((x: any) => x.id.toString() === cs.mediaId);
-        if (m) {
-          cs.media = m;
-          if (m.type) cs.type = m.type;
-          schedules.push(cs);
+      const customIds = customSchedules
+        .map(s => parseInt(s.mediaId, 10))
+        .filter((id) => !Number.isNaN(id) && id > 0);
+      if (customIds.length > 0) {
+        try {
+          const mediaResp = await fetch("https://graphql.anilist.co", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({
+              query: `query($in: [Int]) { Page { media(id_in: $in) { id type title { romaji english native } coverImage { large medium } } } }`,
+              variables: { in: customIds }
+            }),
+          });
+          if (mediaResp.ok) {
+            const mediaRes = await mediaResp.json();
+            const mediaList = mediaRes.data?.Page?.media || [];
+            customSchedules.forEach(cs => {
+              const m = mediaList.find((x: any) => x.id.toString() === cs.mediaId);
+              if (m) {
+                cs.media = m;
+                if (m.type) cs.type = m.type;
+                schedules.push(cs);
+              }
+            });
+          } else {
+            console.warn("AniList custom schedules non-OK status:", mediaResp.status);
+          }
+        } catch (customAniErr) {
+          console.error("AniList custom schedules fetch error:", customAniErr);
         }
-      });
+      }
     }
 
     let notificationsSent = 0;

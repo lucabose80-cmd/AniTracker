@@ -1,9 +1,8 @@
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
-import { getAuth } from 'firebase-admin/auth';
 
-
+const FIREBASE_WEB_API_KEY = "AIzaSyD9J0wKxGWQGCx0jrjAiKa5rSM36iKu3gs";
 
 const initApp = () => {
   if (!getApps().length) {
@@ -31,6 +30,23 @@ export const adminMessaging = {
   get sendEachForMulticast() { initApp(); return getMessaging().sendEachForMulticast.bind(getMessaging()); }
 } as unknown as ReturnType<typeof getMessaging>;
 
-export const adminAuth = {
-  get verifyIdToken() { initApp(); return getAuth().verifyIdToken.bind(getAuth()); }
-} as unknown as ReturnType<typeof getAuth>;
+export async function verifyFirebaseIdToken(idToken: string): Promise<{ uid: string }> {
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_WEB_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken }),
+      signal: AbortSignal.timeout(5000),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(`Invalid Firebase ID token (HTTP ${res.status})`);
+  }
+  const data = await res.json();
+  const uid = data?.users?.[0]?.localId;
+  if (typeof uid !== "string" || !uid) {
+    throw new Error("Invalid Firebase ID token payload");
+  }
+  return { uid };
+}
