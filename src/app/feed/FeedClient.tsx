@@ -748,7 +748,19 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
                       <span className="text-[9px] bg-yellow-600 text-white px-2 py-0.5 rounded-full font-bold shadow-md">
                         WOCHEN-RANKING
                       </span>
-                      <Link href={`/profile/${activity.user_id}`} className="font-bold text-gray-200 text-xs hover:text-blue-400 transition">{user.username}</Link>
+                      <Link
+                        href={activity.user_id === currentUserUid ? "/profile" : `/profile/${activity.user_id}`}
+                        className="flex items-center gap-1.5 font-bold text-gray-200 text-xs hover:text-blue-400 transition"
+                      >
+                        {user.avatar_url ? (
+                          <img src={user.avatar_url} alt={user.username || ""} className="w-5 h-5 rounded-full object-cover border border-gray-700" />
+                        ) : (
+                          <span className="w-5 h-5 rounded-full bg-blue-900/50 text-blue-300 flex items-center justify-center text-[10px] font-bold">
+                            {(user.username || "U").slice(0, 1).toUpperCase()}
+                          </span>
+                        )}
+                        <span>{user.username}</span>
+                      </Link>
                       <span className="text-xs text-gray-500">{timeAgo}</span>
                     </div>
                     
@@ -813,7 +825,19 @@ export default function FeedClient({ initialActivities }: { initialActivities: A
                               BEITRAG
                             </span>
                           )}
-                          <Link href={`/profile/${activity.user_id}`} className="font-bold text-gray-200 text-xs hover:text-blue-400 transition">{user.username}</Link>
+                          <Link
+                            href={activity.user_id === currentUserUid ? "/profile" : `/profile/${activity.user_id}`}
+                            className="flex items-center gap-1.5 font-bold text-gray-200 text-xs hover:text-blue-400 transition"
+                          >
+                            {user.avatar_url ? (
+                              <img src={user.avatar_url} alt={user.username || ""} className="w-5 h-5 rounded-full object-cover border border-gray-700" />
+                            ) : (
+                              <span className="w-5 h-5 rounded-full bg-blue-900/50 text-blue-300 flex items-center justify-center text-[10px] font-bold">
+                                {(user.username || "U").slice(0, 1).toUpperCase()}
+                              </span>
+                            )}
+                            <span>{user.username}</span>
+                          </Link>
                           <span className="text-xs text-gray-500">{timeAgo}</span>
                         </div>
                         

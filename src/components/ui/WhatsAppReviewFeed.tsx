@@ -1244,20 +1244,28 @@ export default function WhatsAppReviewFeed({
                   {/* Bubble Header */}
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <div className="flex items-center gap-2 min-w-0">
-                      {authorAvatar ? (
-                        <img
-                          src={authorAvatar}
-                          alt={authorName}
-                          className="w-6 h-6 rounded-full object-cover shrink-0 bg-gray-800"
-                        />
-                      ) : (
-                        <div className="w-6 h-6 rounded-full bg-emerald-700/60 text-emerald-200 flex items-center justify-center text-[11px] font-bold shrink-0">
-                          {authorName.slice(0, 1).toUpperCase()}
-                        </div>
-                      )}
-                      <span className="text-xs font-bold text-emerald-300 truncate">
-                        {authorName}
-                      </span>
+                      <Link
+                        href={
+                          isOwn ? "/profile" : `/profile/${activity.user_id}`
+                        }
+                        className="flex items-center gap-2 min-w-0 group/author hover:opacity-90 transition-opacity"
+                        title={`Profil von ${authorName} ansehen`}
+                      >
+                        {authorAvatar ? (
+                          <img
+                            src={authorAvatar}
+                            alt={authorName}
+                            className="w-6 h-6 rounded-full object-cover shrink-0 bg-gray-800 border border-transparent group-hover/author:border-emerald-400 transition-colors"
+                          />
+                        ) : (
+                          <div className="w-6 h-6 rounded-full bg-emerald-700/60 text-emerald-200 flex items-center justify-center text-[11px] font-bold shrink-0 border border-transparent group-hover/author:border-emerald-400 transition-colors">
+                            {authorName.slice(0, 1).toUpperCase()}
+                          </div>
+                        )}
+                        <span className="text-xs font-bold text-emerald-300 group-hover/author:underline truncate">
+                          {authorName}
+                        </span>
+                      </Link>
                       <span className="text-[11px] text-gray-400 shrink-0">
                         {formatMessageTime(activity.timestamp)}
                       </span>

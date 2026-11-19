@@ -522,26 +522,54 @@ export function Header() {
                                 !n.read ? "bg-blue-500/10" : ""
                               }`}
                             >
-                              <div className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 shrink-0 overflow-hidden flex items-center justify-center mt-0.5">
-                                {media?.coverImage?.large ? (
-                                  <img
-                                    src={media.coverImage.large}
-                                    alt=""
-                                    className="w-full h-full object-cover"
-                                  />
-                                ) : n.actor_avatar ? (
-                                  <img
-                                    src={n.actor_avatar}
-                                    alt=""
-                                    className="w-full h-full object-cover"
-                                  />
-                                ) : (
-                                  <Sparkles
-                                    size={14}
-                                    className="text-emerald-400"
-                                  />
-                                )}
-                              </div>
+                              {n.actor_id && n.actor_id !== "SYSTEM" ? (
+                                <Link
+                                  href={
+                                    n.actor_id === user?.uid
+                                      ? "/profile"
+                                      : `/profile/${n.actor_id}`
+                                  }
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setShowBellPanel(false);
+                                  }}
+                                  className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 hover:border-blue-400 shrink-0 overflow-hidden flex items-center justify-center mt-0.5 transition-colors"
+                                  title={`Profil von ${n.actor_name} ansehen`}
+                                >
+                                  {n.actor_avatar ? (
+                                    <img
+                                      src={n.actor_avatar}
+                                      alt={n.actor_name}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    <span className="text-xs font-bold text-blue-300">
+                                      {(n.actor_name || "U").slice(0, 1).toUpperCase()}
+                                    </span>
+                                  )}
+                                </Link>
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 shrink-0 overflow-hidden flex items-center justify-center mt-0.5">
+                                  {media?.coverImage?.large ? (
+                                    <img
+                                      src={media.coverImage.large}
+                                      alt=""
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : n.actor_avatar ? (
+                                    <img
+                                      src={n.actor_avatar}
+                                      alt=""
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    <Sparkles
+                                      size={14}
+                                      className="text-emerald-400"
+                                    />
+                                  )}
+                                </div>
+                              )}
 
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -553,6 +581,22 @@ export function Header() {
                                     <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
                                       Info
                                     </span>
+                                  )}
+                                  {n.actor_id && n.actor_id !== "SYSTEM" && (
+                                    <Link
+                                      href={
+                                        n.actor_id === user?.uid
+                                          ? "/profile"
+                                          : `/profile/${n.actor_id}`
+                                      }
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setShowBellPanel(false);
+                                      }}
+                                      className="text-xs font-bold text-blue-300 hover:underline truncate"
+                                    >
+                                      {n.actor_name}
+                                    </Link>
                                   )}
                                   {workTitle && (
                                     <span className="text-xs font-bold text-white truncate">
@@ -600,6 +644,10 @@ export function Header() {
                           : undefined;
                         const workTitle =
                           media?.title?.english || media?.title?.romaji;
+                        const profileHref =
+                          a.user_id === user?.uid
+                            ? "/profile"
+                            : `/profile/${a.user_id}`;
 
                         let badgeText = "Update";
                         let badgeColor =
@@ -623,49 +671,58 @@ export function Header() {
                             key={`act_${a.activity_id}`}
                             className="flex items-start gap-2.5 p-3 hover:bg-white/[0.04] transition group"
                           >
+                            {/* Clickable User Avatar -> User Profile */}
                             <Link
-                              href={a.work_id ? `/work/${a.work_id}` : "/feed"}
+                              href={profileHref}
                               onClick={() => setShowBellPanel(false)}
-                              className="flex items-start gap-2.5 flex-1 min-w-0"
+                              className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 hover:border-blue-400 shrink-0 overflow-hidden flex items-center justify-center mt-0.5 transition-colors"
+                              title={`Profil von ${actorName} ansehen`}
                             >
-                              <div className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 shrink-0 overflow-hidden flex items-center justify-center mt-0.5">
-                                {actor?.avatar_url ? (
-                                  <img
-                                    src={actor.avatar_url}
-                                    alt={actorName}
-                                    className="w-full h-full object-cover"
-                                  />
-                                ) : media?.coverImage?.large ? (
-                                  <img
-                                    src={media.coverImage.large}
-                                    alt=""
-                                    className="w-full h-full object-cover"
-                                  />
-                                ) : (
-                                  <BookmarkPlus
-                                    size={14}
-                                    className="text-cyan-400"
-                                  />
+                              {actor?.avatar_url ? (
+                                <img
+                                  src={actor.avatar_url}
+                                  alt={actorName}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <span className="text-xs font-bold text-cyan-300">
+                                  {actorName.slice(0, 1).toUpperCase()}
+                                </span>
+                              )}
+                            </Link>
+
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span
+                                  className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${badgeColor}`}
+                                >
+                                  {badgeText}
+                                </span>
+                                {/* Clickable User Name -> User Profile */}
+                                <Link
+                                  href={profileHref}
+                                  onClick={() => setShowBellPanel(false)}
+                                  className="text-xs font-bold text-white hover:text-blue-300 hover:underline truncate transition-colors"
+                                  title={`Profil von ${actorName} ansehen`}
+                                >
+                                  {actorName}
+                                </Link>
+                                {workTitle && (
+                                  <Link
+                                    href={a.work_id ? `/work/${a.work_id}` : "/feed"}
+                                    onClick={() => setShowBellPanel(false)}
+                                    className="text-[11px] text-blue-300 hover:underline font-semibold truncate"
+                                  >
+                                    • {workTitle}
+                                  </Link>
                                 )}
                               </div>
-
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span
-                                    className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${badgeColor}`}
-                                  >
-                                    {badgeText}
-                                  </span>
-                                  <span className="text-xs font-bold text-white truncate">
-                                    {actorName}
-                                  </span>
-                                  {workTitle && (
-                                    <span className="text-[11px] text-blue-300 font-semibold truncate">
-                                      • {workTitle}
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-xs text-gray-300 mt-1 leading-snug line-clamp-2">
+                              <Link
+                                href={a.work_id ? `/work/${a.work_id}` : "/feed"}
+                                onClick={() => setShowBellPanel(false)}
+                                className="block"
+                              >
+                                <p className="text-xs text-gray-300 mt-1 leading-snug line-clamp-2 hover:text-white transition-colors">
                                   {a.text || a.details || "Neues Update"}
                                 </p>
                                 <span className="block text-[10px] text-gray-500 mt-1">
@@ -674,8 +731,8 @@ export function Header() {
                                     locale: de,
                                   })}
                                 </span>
-                              </div>
-                            </Link>
+                              </Link>
+                            </div>
 
                             <button
                               type="button"
