@@ -8,12 +8,8 @@ import {
   X,
   Sparkles,
   BookmarkPlus,
-  MessageCircle,
-  Trophy,
-  Tv,
-  BookOpen,
   CheckCheck,
-  ExternalLink,
+  Trash2,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState, useMemo, useRef } from "react";
@@ -24,6 +20,9 @@ import {
   getInAppNotifications,
   markNotificationRead,
   markAllNotificationsRead,
+  deleteNotification,
+  deleteAllNotifications,
+  deleteActivity,
   getGlobalFeed,
 } from "@/lib/db/feed";
 import { ActivityFeed, InAppNotification, UserProfile } from "@/types/database";
@@ -48,6 +47,9 @@ export function Header() {
   const [bellTab, setBellTab] = useState<"ALL" | "RELEASES" | "COMMUNITY">("ALL");
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [communityUpdates, setCommunityUpdates] = useState<ActivityFeed[]>([]);
+  const [dismissedActivityIds, setDismissedActivityIds] = useState<Set<string>>(
+    new Set()
+  );
   const [actorProfiles, setActorProfiles] = useState<Record<string, UserProfile>>({});
   const [workDetailsMap, setWorkDetailsMap] = useState<Record<string, any>>({});
   const [seenActivityTimestamp, setSeenActivityTimestamp] = useState<number>(0);
@@ -61,10 +63,31 @@ export function Header() {
       if (!Number.isNaN(savedTs)) {
         setSeenActivityTimestamp(savedTs);
       }
+      const savedDismissed = window.localStorage.getItem(
+        "anipulse_dismissed_activities"
+      );
+      if (savedDismissed) {
+        const parsed = JSON.parse(savedDismissed);
+        if (Array.isArray(parsed)) {
+          setDismissedActivityIds(new Set(parsed));
+        }
+      }
     } catch {
       // ignore localStorage issues
     }
   }, []);
+
+  const persistDismissedIds = (nextSet: Set<string>) => {
+    setDismissedActivityIds(nextSet);
+    try {
+      window.localStorage.setItem(
+        "anipulse_dismissed_activities",
+        JSON.stringify(Array.from(nextSet).slice(-300))
+      );
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -166,6 +189,14 @@ export function Header() {
     }
   }, [showBellPanel, user]);
 
+  const visibleCommunityUpdates = useMemo(
+    () =>
+      communityUpdates.filter(
+        (a) => !dismissedActivityIds.has(a.activity_id)
+      ),
+    [communityUpdates, dismissedActivityIds]
+  );
+
   const unreadNotifCount = useMemo(
     () => notifications.filter((n) => !n.read).length,
     [notifications]
@@ -173,12 +204,12 @@ export function Header() {
 
   const unseenCommunityCount = useMemo(() => {
     if (!user) return 0;
-    return communityUpdates.filter((a) => {
+    return visibleCommunityUpdates.filter((a) => {
       if (a.user_id === user.uid) return false;
       const ts = new Date(a.timestamp).getTime();
       return ts > seenActivityTimestamp;
     }).length;
-  }, [communityUpdates, seenActivityTimestamp, user]);
+  }, [visibleCommunityUpdates, seenActivityTimestamp, user]);
 
   const totalBadgeCount = unreadNotifCount + unseenCommunityCount;
 
@@ -194,6 +225,54 @@ export function Header() {
       // ignore
     }
     await markAllNotificationsRead(user.uid);
+  };
+
+  const handleDeleteSingleNotification = async (
+    e: React.MouseEvent,
+    notif: InAppNotification
+  ) => {
+    e.stopPropagation();
+    setNotifications((prev) =>
+      prev.filter((n) => n.notification_id !== notif.notification_id)
+    );
+    if (!notif.read) {
+      setUnreadNotifications(Math.max(0, unreadNotifications - 1));
+    }
+    await deleteNotification(notif.notification_id);
+  };
+
+  const handleDeleteSingleCommunityActivity = async (
+    e: React.MouseEvent,
+    act: ActivityFeed
+  ) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const next = new Set(dismissedActivityIds);
+    next.add(act.activity_id);
+    persistDismissedIds(next);
+
+    // If it's the current user's own activity, also delete it from Firestore
+    if (user && act.user_id === user.uid) {
+      try {
+        await deleteActivity(act.activity_id, user.uid);
+      } catch {
+        // already dismissed locally
+      }
+    }
+  };
+
+  const handleClearAllItems = async () => {
+    if (!user) return;
+    if (bellTab === "ALL" || bellTab === "RELEASES") {
+      setNotifications([]);
+      setUnreadNotifications(0);
+      await deleteAllNotifications(user.uid);
+    }
+    if (bellTab === "ALL" || bellTab === "COMMUNITY") {
+      const next = new Set(dismissedActivityIds);
+      communityUpdates.forEach((a) => next.add(a.activity_id));
+      persistDismissedIds(next);
+    }
   };
 
   const handleClickNotification = async (notif: InAppNotification) => {
@@ -241,7 +320,7 @@ export function Header() {
     }
 
     if (bellTab === "ALL" || bellTab === "COMMUNITY") {
-      communityUpdates.forEach((a) => {
+      visibleCommunityUpdates.forEach((a) => {
         items.push({ kind: "ACTIVITY", timestamp: a.timestamp, data: a });
       });
     }
@@ -252,7 +331,7 @@ export function Header() {
           new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
       )
       .slice(0, 35);
-  }, [bellTab, notifications, communityUpdates]);
+  }, [bellTab, notifications, visibleCommunityUpdates]);
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-gray-800 bg-[#0f1115]/85 backdrop-blur-md">
@@ -341,9 +420,21 @@ export function Header() {
                           type="button"
                           onClick={handleMarkAllRead}
                           className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-400 hover:text-blue-300"
+                          title="Alle als gelesen markieren"
                         >
                           <CheckCheck size={13} />
-                          Alle gelesen
+                          Gelesen
+                        </button>
+                      )}
+                      {combinedItems.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleClearAllItems}
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-400 hover:text-rose-300"
+                          title="Alle Nachrichten in dieser Ansicht löschen"
+                        >
+                          <Trash2 size={13} />
+                          Alle löschen
                         </button>
                       )}
                       <button
@@ -397,7 +488,7 @@ export function Header() {
                   <div className="overflow-y-auto divide-y divide-gray-800/70 max-h-[58vh]">
                     {combinedItems.length === 0 ? (
                       <div className="p-6 text-center text-xs text-gray-400">
-                        Noch keine Updates in dieser Kategorie.
+                        Keine Nachrichten vorhanden.
                       </div>
                     ) : (
                       combinedItems.map((entry) => {
@@ -413,11 +504,15 @@ export function Header() {
                           const isRelease = n.type === "SYSTEM";
 
                           return (
-                            <button
+                            <div
                               key={`notif_${n.notification_id}`}
-                              type="button"
                               onClick={() => handleClickNotification(n)}
-                              className={`w-full flex items-start gap-2.5 p-3 text-left hover:bg-white/[0.04] transition ${
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleClickNotification(n);
+                              }}
+                              className={`w-full flex items-start gap-2.5 p-3 text-left hover:bg-white/[0.04] transition cursor-pointer group ${
                                 !n.read ? "bg-blue-500/10" : ""
                               }`}
                             >
@@ -469,10 +564,23 @@ export function Header() {
                                   })}
                                 </span>
                               </div>
-                              {!n.read && (
-                                <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0 mt-1.5" />
-                              )}
-                            </button>
+
+                              <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
+                                {!n.read && (
+                                  <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={(e) =>
+                                    handleDeleteSingleNotification(e, n)
+                                  }
+                                  className="p-1.5 rounded-lg text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                                  title="Nachricht löschen"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            </div>
                           );
                         }
 
@@ -505,60 +613,75 @@ export function Header() {
                         }
 
                         return (
-                          <Link
+                          <div
                             key={`act_${a.activity_id}`}
-                            href={a.work_id ? `/work/${a.work_id}` : "/feed"}
-                            onClick={() => setShowBellPanel(false)}
-                            className="flex items-start gap-2.5 p-3 hover:bg-white/[0.04] transition"
+                            className="flex items-start gap-2.5 p-3 hover:bg-white/[0.04] transition group"
                           >
-                            <div className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 shrink-0 overflow-hidden flex items-center justify-center mt-0.5">
-                              {actor?.avatar_url ? (
-                                <img
-                                  src={actor.avatar_url}
-                                  alt={actorName}
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : media?.coverImage?.large ? (
-                                <img
-                                  src={media.coverImage.large}
-                                  alt=""
-                                  className="w-full h-full object-cover"
-                                />
-                              ) : (
-                                <BookmarkPlus
-                                  size={14}
-                                  className="text-cyan-400"
-                                />
-                              )}
-                            </div>
-
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span
-                                  className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${badgeColor}`}
-                                >
-                                  {badgeText}
-                                </span>
-                                <span className="text-xs font-bold text-white truncate">
-                                  {actorName}
-                                </span>
-                                {workTitle && (
-                                  <span className="text-[11px] text-blue-300 font-semibold truncate">
-                                    • {workTitle}
-                                  </span>
+                            <Link
+                              href={a.work_id ? `/work/${a.work_id}` : "/feed"}
+                              onClick={() => setShowBellPanel(false)}
+                              className="flex items-start gap-2.5 flex-1 min-w-0"
+                            >
+                              <div className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 shrink-0 overflow-hidden flex items-center justify-center mt-0.5">
+                                {actor?.avatar_url ? (
+                                  <img
+                                    src={actor.avatar_url}
+                                    alt={actorName}
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : media?.coverImage?.large ? (
+                                  <img
+                                    src={media.coverImage.large}
+                                    alt=""
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <BookmarkPlus
+                                    size={14}
+                                    className="text-cyan-400"
+                                  />
                                 )}
                               </div>
-                              <p className="text-xs text-gray-300 mt-1 leading-snug line-clamp-2">
-                                {a.text || a.details || "Neues Update"}
-                              </p>
-                              <span className="block text-[10px] text-gray-500 mt-1">
-                                {formatDistanceToNow(new Date(a.timestamp), {
-                                  addSuffix: true,
-                                  locale: de,
-                                })}
-                              </span>
-                            </div>
-                          </Link>
+
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span
+                                    className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${badgeColor}`}
+                                  >
+                                    {badgeText}
+                                  </span>
+                                  <span className="text-xs font-bold text-white truncate">
+                                    {actorName}
+                                  </span>
+                                  {workTitle && (
+                                    <span className="text-[11px] text-blue-300 font-semibold truncate">
+                                      • {workTitle}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-gray-300 mt-1 leading-snug line-clamp-2">
+                                  {a.text || a.details || "Neues Update"}
+                                </p>
+                                <span className="block text-[10px] text-gray-500 mt-1">
+                                  {formatDistanceToNow(new Date(a.timestamp), {
+                                    addSuffix: true,
+                                    locale: de,
+                                  })}
+                                </span>
+                              </div>
+                            </Link>
+
+                            <button
+                              type="button"
+                              onClick={(e) =>
+                                handleDeleteSingleCommunityActivity(e, a)
+                              }
+                              className="p-1.5 rounded-lg text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 transition shrink-0 mt-0.5"
+                              title="Nachricht entfernen"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
                         );
                       })
                     )}
@@ -597,4 +720,5 @@ export function Header() {
     </header>
   );
 }
+
 

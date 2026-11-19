@@ -294,26 +294,89 @@ export default function ProfilePage() {
 
       {user && (
         <section className="bg-[#1a1d24] border border-gray-800 rounded-2xl p-5 shadow-lg">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <h3 className="text-lg font-bold flex items-center gap-2">
               <Bell size={20} className="text-blue-500" />
               Push-Benachrichtigungen
             </h3>
-            {isPushEnabled && (
-              <button 
-                onClick={handleRepairPush}
-                disabled={isSaving}
-                className="text-[10px] bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/30 px-2 py-1 rounded transition"
-              >
-                {isSaving ? "..." : "Reparieren"}
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {isPushEnabled && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!user) return;
+                    setIsSaving(true);
+                    try {
+                      // Ensure current device token is registered before sending test push
+                      await requestForToken(user.uid).catch(() => {});
+                      const res = await fetch("/api/notify", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          targetUserId: user.uid,
+                          type: "releases",
+                          title: "AniPulse Test-Push",
+                          body: "Push-Benachrichtigungen funktionieren auf diesem Gerät!",
+                          link: "/profile",
+                        }),
+                      });
+                      const data = await res.json();
+                      if (data.success && data.successCount > 0) {
+                        alert("Test-Push erfolgreich gesendet!");
+                      } else {
+                        alert(
+                          "Dein gespeicherter Push-Token war abgelaufen. Bitte klicke einmal auf 'Reparieren', um dieses Gerät neu zu verbinden."
+                        );
+                      }
+                    } catch (err) {
+                      console.error(err);
+                      alert("Fehler beim Senden der Test-Benachrichtigung.");
+                    } finally {
+                      setIsSaving(false);
+                    }
+                  }}
+                  disabled={isSaving}
+                  className="text-[11px] bg-blue-600/20 hover:bg-blue-600/35 text-blue-300 border border-blue-500/30 px-2.5 py-1 rounded-lg font-semibold transition"
+                >
+                  Test-Push senden
+                </button>
+              )}
+              {isPushEnabled && (
+                <button
+                  type="button"
+                  onClick={handleRepairPush}
+                  disabled={isSaving}
+                  className="text-[11px] bg-amber-600/20 hover:bg-amber-600/35 text-amber-300 border border-amber-500/30 px-2.5 py-1 rounded-lg font-semibold transition"
+                >
+                  {isSaving ? "..." : "Reparieren"}
+                </button>
+              )}
+            </div>
           </div>
-          
+
+          {typeof window !== "undefined" &&
+            typeof Notification !== "undefined" &&
+            Notification.permission !== "granted" &&
+            isPushEnabled && (
+              <div className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200 flex items-center justify-between gap-2">
+                <span>
+                  Auf diesem Gerät/Browser sind Push-Mitteilungen noch nicht erlaubt.
+                </span>
+                <button
+                  type="button"
+                  onClick={enablePush}
+                  disabled={isSaving}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500 text-black font-bold shrink-0"
+                >
+                  Hier aktivieren
+                </button>
+              </div>
+            )}
+
           {!isPushEnabled ? (
             <div className="text-center">
               <p className="text-xs text-gray-400 mb-4">
-                Erlaube Push-Benachrichtigungen, um Ã¼ber neue Folgen und AktivitÃ¤ten informiert zu werden.
+                Erlaube Push-Benachrichtigungen, um über neue Folgen, Kapitel und Reviews informiert zu werden.
               </p>
               <button 
                 onClick={enablePush}
@@ -327,8 +390,8 @@ export default function ProfilePage() {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-bold text-white">Neue Folgen & Kapitel</div>
-                  <div className="text-xs text-gray-500">FÃ¼r Werke aus deiner Bibliothek</div>
+                  <div className="text-sm font-bold text-white">Neue Folgen &amp; Kapitel</div>
+                  <div className="text-xs text-gray-500">Für Werke aus deiner Bibliothek</div>
                 </div>
                 <button 
                   onClick={() => handleToggle("releases")}
@@ -340,8 +403,8 @@ export default function ProfilePage() {
 
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-bold text-white">Likes & Reaktionen</div>
-                  <div className="text-xs text-gray-500">Wenn jemand deine Kommentare mag</div>
+                  <div className="text-sm font-bold text-white">Likes &amp; Reaktionen</div>
+                  <div className="text-xs text-gray-500">Wenn jemand auf deine Beiträge reagiert</div>
                 </div>
                 <button 
                   onClick={() => handleToggle("likes")}
@@ -353,8 +416,8 @@ export default function ProfilePage() {
 
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-bold text-white">Antworten</div>
-                  <div className="text-xs text-gray-500">Auf deine Kommentare</div>
+                  <div className="text-sm font-bold text-white">Antworten &amp; Meinungen</div>
+                  <div className="text-xs text-gray-500">Auf deine Reviews und Kommentare</div>
                 </div>
                 <button 
                   onClick={() => handleToggle("replies")}
@@ -366,8 +429,8 @@ export default function ProfilePage() {
 
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-bold text-white">Social Feed</div>
-                  <div className="text-xs text-gray-500">Neue BeitrÃ¤ge der Community</div>
+                  <div className="text-sm font-bold text-white">Review Feed</div>
+                  <div className="text-xs text-gray-500">Neue Reviews &amp; Beiträge der Community</div>
                 </div>
                 <button 
                   onClick={() => handleToggle("social")}

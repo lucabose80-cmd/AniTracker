@@ -464,6 +464,36 @@ export async function markNotificationRead(notificationId: string): Promise<void
   }
 }
 
+export async function deleteNotification(notificationId: string): Promise<void> {
+  if (!db || !notificationId) return;
+  try {
+    const notifRef = doc(db, "notifications", notificationId);
+    await deleteDoc(notifRef);
+  } catch (err) {
+    console.error("Error deleting notification:", err);
+  }
+}
+
+export async function deleteAllNotifications(userId: string): Promise<void> {
+  if (!db || !userId) return;
+  const { writeBatch } = await import("firebase/firestore");
+  try {
+    const notifRef = collection(db, "notifications");
+    const q = query(notifRef, where("user_id", "==", userId));
+    const snap = await getDocs(q);
+    if (snap.empty) return;
+
+    for (let i = 0; i < snap.docs.length; i += 400) {
+      const chunk = snap.docs.slice(i, i + 400);
+      const batch = writeBatch(db);
+      chunk.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+    }
+  } catch (err) {
+    console.error("Error in deleteAllNotifications:", err);
+  }
+}
+
 export async function toggleLike(activityId: string, userId: string): Promise<void> {
   if (!db) return;
   const docRef = doc(db, "activity_feed", activityId);

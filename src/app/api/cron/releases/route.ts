@@ -219,8 +219,8 @@ export async function GET(req: Request) {
                   notification_id: notifId,
                   user_id: uid,
                   actor_id: "SYSTEM",
-                  actor_name: "AniTracker",
-                  actor_avatar: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
+                  actor_name: "AniPulse",
+                  actor_avatar: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
                   type: "SYSTEM",
                   work_id: String(schedule.mediaId),
                   work_title: workTitle,
@@ -254,8 +254,8 @@ export async function GET(req: Request) {
                 TTL: "86400"
               },
               notification: { 
-                icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
-                badge: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
+                icon: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
+                badge: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
                 requireInteraction: true,
                 tag: `release-${schedule.mediaId}-${schedule.episode}`,
                 renotify: true
@@ -316,18 +316,36 @@ export async function GET(req: Request) {
             const userId = uWork.user_id;
             const workId = uWork.work_id;
             const title = aniListInfo.title?.english || aniListInfo.title?.romaji || "Ein Werk";
+            const nowIsoStr = new Date().toISOString();
 
             // 1. Move to CURRENT
             await adminDb.collection("user_works").doc(docSnap.id).update({ status: "CURRENT" });
             wishlistMoved++;
 
-            // 2. Create feed activity
-            await adminDb.collection("activity_feed").add({
+            // 2. Create feed activity & in-app notification
+            const actRef = adminDb.collection("activity_feed").doc();
+            await actRef.set({
+              activity_id: actRef.id,
               user_id: userId,
-              type: "TOP9_UPDATE",
+              action_type: "TOP9_UPDATE",
               work_id: workId,
               text: `${title} aus der Wunschliste ist jetzt erschienen und wurde zu 'Aktiv' verschoben!`,
-              timestamp: new Date(),
+              timestamp: nowIsoStr,
+            });
+
+            const notifRef = adminDb.collection("notifications").doc(`wishlist_${userId}_${workId}`);
+            await notifRef.set({
+              notification_id: notifRef.id,
+              user_id: userId,
+              actor_id: "SYSTEM",
+              actor_name: "AniPulse",
+              actor_avatar: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
+              type: "SYSTEM",
+              work_id: String(workId),
+              work_title: title,
+              text: `${title} aus der Wunschliste ist jetzt erschienen und wurde zu 'Aktiv' verschoben!`,
+              timestamp: nowIsoStr,
+              read: false,
             });
 
             // 3. FCM Push
@@ -337,7 +355,7 @@ export async function GET(req: Request) {
               const tokens = userData.fcm_tokens || [];
               const settings = userData.notification_settings || { releases: true };
               
-              if (settings.releases && tokens.length > 0) {
+              if (settings.releases !== false && tokens.length > 0) {
                 const payload = {
                   notification: {
                     title: "\uD83C\uDF89 Wunschliste -> Jetzt verf\u00FCgbar!",
@@ -350,8 +368,8 @@ export async function GET(req: Request) {
                       TTL: "86400"
                     },
                     notification: { 
-                      icon: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
-                      badge: "https://anitracker-delta.vercel.app/weebcheck-192x192.png",
+                      icon: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
+                      badge: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
                       requireInteraction: true,
                       tag: `wishlist-${workId}`,
                       renotify: true

@@ -5,25 +5,37 @@ import { doc, setDoc, arrayUnion } from "firebase/firestore";
 // Hardcoded VAPID Key provided by user
 const VAPID_KEY = "BBNHu2VQ73Ua2oZA4uKgHG3jm8vF3yAouKzfdiStItZU6R0R4nL74TWDDYp5hPNf7e9u6wv5gApyc3JZ_zN5DRw";
 
+export async function ensureServiceWorkerRegistration(): Promise<ServiceWorkerRegistration> {
+  let reg = await navigator.serviceWorker.getRegistration("/");
+  if (!reg) {
+    reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+  }
+  return await navigator.serviceWorker.ready;
+}
+
 export const requestForToken = async (userId: string) => {
   if (typeof window !== "undefined" && "serviceWorker" in navigator) {
     try {
       const messaging = getMessaging(app);
-      
+
       const permission = await Notification.requestPermission();
       if (permission === "granted") {
-        const registration = await navigator.serviceWorker.ready;
-        const currentToken = await getToken(messaging, { 
+        const registration = await ensureServiceWorkerRegistration();
+        const currentToken = await getToken(messaging, {
           vapidKey: VAPID_KEY,
-          serviceWorkerRegistration: registration 
+          serviceWorkerRegistration: registration,
         });
         if (currentToken) {
           // Save token to user profile
           if (db && userId) {
             const userRef = doc(db, "users", userId);
-            await setDoc(userRef, {
-              fcm_tokens: arrayUnion(currentToken)
-            }, { merge: true });
+            await setDoc(
+              userRef,
+              {
+                fcm_tokens: arrayUnion(currentToken),
+              },
+              { merge: true }
+            );
           }
           return currentToken;
         } else {
@@ -47,6 +59,43 @@ export const requestForToken = async (userId: string) => {
   }
 };
 
+/**
+ * Silently refreshes and saves the current browser/device's FCM token
+ * if Notification.permission is already "granted".
+ */
+export const syncExistingPushToken = async (userId: string): Promise<string | null> => {
+  if (
+    typeof window === "undefined" ||
+    !("serviceWorker" in navigator) ||
+    typeof Notification === "undefined" ||
+    Notification.permission !== "granted"
+  ) {
+    return null;
+  }
+  try {
+    const messaging = getMessaging(app);
+    const registration = await ensureServiceWorkerRegistration();
+    const currentToken = await getToken(messaging, {
+      vapidKey: VAPID_KEY,
+      serviceWorkerRegistration: registration,
+    });
+    if (currentToken && db && userId) {
+      const userRef = doc(db, "users", userId);
+      await setDoc(
+        userRef,
+        {
+          fcm_tokens: arrayUnion(currentToken),
+        },
+        { merge: true }
+      );
+      return currentToken;
+    }
+  } catch (err) {
+    console.warn("Silent FCM token sync skipped:", err);
+  }
+  return null;
+};
+
 export const setupOnMessage = (callback: (payload: any) => void) => {
   if (typeof window !== "undefined" && "serviceWorker" in navigator) {
     try {
@@ -64,15 +113,19 @@ export const repairToken = async (userId: string) => {
     try {
       const messaging = getMessaging(app);
       // Clear Firebase token cache
-      try { await deleteToken(messaging); } catch(e) { console.log("deleteToken err", e); }
-      
+      try {
+        await deleteToken(messaging);
+      } catch (e) {
+        console.log("deleteToken err", e);
+      }
+
       // Clear browser push subscription
-      const reg = await navigator.serviceWorker.ready;
+      const reg = await ensureServiceWorkerRegistration();
       const sub = await reg.pushManager.getSubscription();
       if (sub) {
         await sub.unsubscribe();
       }
-      
+
       // Get a fresh token
       return await requestForToken(userId);
     } catch (err: any) {
@@ -81,3 +134,4 @@ export const repairToken = async (userId: string) => {
     }
   }
 };
+

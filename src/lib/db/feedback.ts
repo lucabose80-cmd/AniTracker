@@ -132,10 +132,14 @@ export async function createReviewList(
   );
 
   let actorName = "Jemand";
+  let actorAvatar = "";
   try {
     const profile = await getUserProfile(userId);
     if (profile?.username) {
       actorName = profile.username;
+    }
+    if (profile?.avatar_url) {
+      actorAvatar = profile.avatar_url;
     }
   } catch (e) {
     console.error("Failed to fetch actor profile for notification:", e);
@@ -147,6 +151,45 @@ export async function createReviewList(
     .slice(0, 3)
     .join(", ");
 
+  // Create in-app notifications for other users
+  try {
+    const usersSnap = await getDocs(collection(db, "users"));
+    const notifCol = collection(db, "notifications");
+    const firstItem = sanitizedItems[0];
+    await Promise.all(
+      usersSnap.docs
+        .filter((uDoc) => uDoc.id !== userId)
+        .map((uDoc) => {
+          const notifRef = doc(notifCol);
+          const payload: Record<string, any> = {
+            notification_id: notifRef.id,
+            user_id: uDoc.id,
+            actor_id: userId,
+            actor_name: actorName,
+            actor_avatar: actorAvatar,
+            type: "COMMENT_ON_THREAD",
+            activity_id,
+            text:
+              title.trim() ||
+              (workSummary
+                ? `Neues Review zu ${workSummary}`
+                : "Neue Episoden-Reviews im Feed."),
+            timestamp,
+            read: false,
+          };
+          if (firstItem?.work_id) payload.work_id = firstItem.work_id;
+          if (firstItem?.work_title) payload.work_title = firstItem.work_title;
+          if (firstItem?.media_type) payload.media_type = firstItem.media_type;
+          if (typeof firstItem?.episode_num === "number") {
+            payload.episode_num = firstItem.episode_num;
+          }
+          return setDoc(notifRef, payload);
+        })
+    );
+  } catch (e) {
+    console.warn("Could not create in-app notifications for review list:", e);
+  }
+
   fetch("/api/notify", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -154,7 +197,7 @@ export async function createReviewList(
       targetUserId: "ALL",
       excludeUserId: userId,
       type: "social",
-      title: `${actorName} hat eine Review-Liste gepostet`,
+      title: `${actorName} hat ein Review gepostet`,
       body: title.trim() || workSummary || "Neue Episoden-Reviews im Feed.",
       link: "/",
     }),
