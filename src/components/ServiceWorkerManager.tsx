@@ -137,6 +137,9 @@ export function ServiceWorkerManager() {
             (snap) => {
               const unread = snap.docs.filter((d) => {
                 const data = d.data();
+                if (data?.deleted === true) {
+                  return false;
+                }
                 if (data?.type === 'NEW_EPISODE_THREAD' || data?.type === 'COMMENT_ON_THREAD') {
                   return false;
                 }

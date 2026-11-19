@@ -22,6 +22,8 @@ import {
   markAllNotificationsRead,
   deleteNotification,
   deleteAllNotifications,
+  dismissCommunityActivity,
+  clearBellItems,
   deleteActivity,
   getGlobalFeed,
 } from "@/lib/db/feed";
@@ -30,6 +32,11 @@ import { fetchAniListBatch } from "@/lib/anilist";
 import { formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
 import { PWAInstallPrompt } from "@/components/ui/PWAInstallPrompt";
+
+const isReleaseNotification = (n: InAppNotification) =>
+  n.type === "SYSTEM" ||
+  n.type === "APP_UPDATE" ||
+  n.type === "NEW_EPISODE_THREAD";
 
 export function Header() {
   const {
@@ -40,7 +47,7 @@ export function Header() {
     reloadTrigger,
   } = useAppStore();
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<any>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
 
   // Bell panel state
   const [showBellPanel, setShowBellPanel] = useState(false);
@@ -50,10 +57,81 @@ export function Header() {
   const [dismissedActivityIds, setDismissedActivityIds] = useState<Set<string>>(
     new Set()
   );
+  const [dismissedActivitiesBefore, setDismissedActivitiesBefore] =
+    useState<number>(0);
+  const [deletedNotificationIds, setDeletedNotificationIds] = useState<
+    Set<string>
+  >(new Set());
   const [actorProfiles, setActorProfiles] = useState<Record<string, UserProfile>>({});
   const [workDetailsMap, setWorkDetailsMap] = useState<Record<string, any>>({});
   const [seenActivityTimestamp, setSeenActivityTimestamp] = useState<number>(0);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // Keep refs in sync so async loads never overwrite just-deleted items
+  const dismissedActivityIdsRef = useRef<Set<string>>(new Set());
+  const dismissedBeforeRef = useRef<number>(0);
+  const deletedNotifIdsRef = useRef<Set<string>>(new Set());
+
+  const getLocalKeys = (uid: string) => ({
+    activities: `anipulse_dismissed_activities_${uid}`,
+    before: `anipulse_dismissed_before_${uid}`,
+    notifs: `anipulse_deleted_notifs_${uid}`,
+  });
+
+  const hydrateLocalDismissals = (uid: string) => {
+    const keys = getLocalKeys(uid);
+    const nextActivities = new Set<string>(dismissedActivityIdsRef.current);
+    const nextNotifs = new Set<string>(deletedNotifIdsRef.current);
+    let nextBefore = dismissedBeforeRef.current;
+
+    try {
+      const legacyDismissed = window.localStorage.getItem(
+        "anipulse_dismissed_activities"
+      );
+      if (legacyDismissed) {
+        const parsed = JSON.parse(legacyDismissed);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((id) => {
+            if (typeof id === "string") nextActivities.add(id);
+          });
+        }
+      }
+
+      const savedActivities = window.localStorage.getItem(keys.activities);
+      if (savedActivities) {
+        const parsed = JSON.parse(savedActivities);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((id) => {
+            if (typeof id === "string") nextActivities.add(id);
+          });
+        }
+      }
+
+      const savedNotifs = window.localStorage.getItem(keys.notifs);
+      if (savedNotifs) {
+        const parsed = JSON.parse(savedNotifs);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((id) => {
+            if (typeof id === "string") nextNotifs.add(id);
+          });
+        }
+      }
+
+      const savedBefore = Number(window.localStorage.getItem(keys.before) || "0");
+      if (!Number.isNaN(savedBefore) && savedBefore > nextBefore) {
+        nextBefore = savedBefore;
+      }
+    } catch {
+      // ignore localStorage issues
+    }
+
+    dismissedActivityIdsRef.current = nextActivities;
+    deletedNotifIdsRef.current = nextNotifs;
+    dismissedBeforeRef.current = nextBefore;
+    setDismissedActivityIds(nextActivities);
+    setDeletedNotificationIds(nextNotifs);
+    setDismissedActivitiesBefore(nextBefore);
+  };
 
   useEffect(() => {
     try {
@@ -63,27 +141,39 @@ export function Header() {
       if (!Number.isNaN(savedTs)) {
         setSeenActivityTimestamp(savedTs);
       }
-      const savedDismissed = window.localStorage.getItem(
-        "anipulse_dismissed_activities"
-      );
-      if (savedDismissed) {
-        const parsed = JSON.parse(savedDismissed);
-        if (Array.isArray(parsed)) {
-          setDismissedActivityIds(new Set(parsed));
-        }
-      }
     } catch {
       // ignore localStorage issues
     }
   }, []);
 
-  const persistDismissedIds = (nextSet: Set<string>) => {
+  const persistDismissedIds = (uid: string, nextSet: Set<string>) => {
+    dismissedActivityIdsRef.current = nextSet;
     setDismissedActivityIds(nextSet);
     try {
-      window.localStorage.setItem(
-        "anipulse_dismissed_activities",
-        JSON.stringify(Array.from(nextSet).slice(-300))
-      );
+      const serialized = JSON.stringify(Array.from(nextSet).slice(-500));
+      window.localStorage.setItem(getLocalKeys(uid).activities, serialized);
+    } catch {
+      // ignore
+    }
+  };
+
+  const persistDismissedBefore = (uid: string, tsMs: number) => {
+    const nextTs = Math.max(dismissedBeforeRef.current, tsMs);
+    dismissedBeforeRef.current = nextTs;
+    setDismissedActivitiesBefore(nextTs);
+    try {
+      window.localStorage.setItem(getLocalKeys(uid).before, String(nextTs));
+    } catch {
+      // ignore
+    }
+  };
+
+  const persistDeletedNotifIds = (uid: string, nextSet: Set<string>) => {
+    deletedNotifIdsRef.current = nextSet;
+    setDeletedNotificationIds(nextSet);
+    try {
+      const serialized = JSON.stringify(Array.from(nextSet).slice(-500));
+      window.localStorage.setItem(getLocalKeys(uid).notifs, serialized);
     } catch {
       // ignore
     }
@@ -101,15 +191,41 @@ export function Header() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showBellPanel]);
 
-  const loadBellData = async (uid: string) => {
+  const loadBellData = async (uid: string, preloadedProfile?: UserProfile | null) => {
     try {
-      const [notifs, feedItems, allUsers] = await Promise.all([
+      const [notifs, feedItems, allUsers, freshProfile] = await Promise.all([
         getInAppNotifications(uid).catch(() => []),
         getGlobalFeed(40).catch(() => []),
         getAllUserProfiles().catch(() => []),
+        preloadedProfile !== undefined
+          ? Promise.resolve(preloadedProfile)
+          : getUserProfile(uid).catch(() => null),
       ]);
+
+      // Merge Firestore-persisted dismissed activities with local state
+      if (freshProfile) {
+        setProfile(freshProfile);
+        if (Array.isArray(freshProfile.dismissed_activity_ids)) {
+          const mergedActivities = new Set(dismissedActivityIdsRef.current);
+          freshProfile.dismissed_activity_ids.forEach((id) => {
+            if (typeof id === "string") mergedActivities.add(id);
+          });
+          persistDismissedIds(uid, mergedActivities);
+        }
+        if (freshProfile.dismissed_activities_before) {
+          const parsedBefore = Date.parse(freshProfile.dismissed_activities_before);
+          if (!Number.isNaN(parsedBefore) && parsedBefore > 0) {
+            persistDismissedBefore(uid, parsedBefore);
+          }
+        }
+      }
+
       const cleanNotifs = notifs.filter(
-        (n) => n.type !== "NEW_EPISODE_THREAD" && n.type !== "COMMENT_ON_THREAD"
+        (n) =>
+          !n.deleted &&
+          !deletedNotifIdsRef.current.has(n.notification_id) &&
+          n.type !== "NEW_EPISODE_THREAD" &&
+          n.type !== "COMMENT_ON_THREAD"
       );
       setNotifications(cleanNotifs);
       const unreadNotifCount = cleanNotifs.filter((n) => !n.read).length;
@@ -135,7 +251,7 @@ export function Header() {
 
       // Load missing AniList work titles/covers
       const workIds = new Set<number>();
-      notifs.forEach((n) => {
+      cleanNotifs.forEach((n) => {
         if (n.work_id) {
           const parsed = parseInt(n.work_id, 10);
           if (!Number.isNaN(parsed)) workIds.add(parsed);
@@ -169,13 +285,20 @@ export function Header() {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
+        hydrateLocalDismissals(currentUser.uid);
         const p = await getUserProfile(currentUser.uid);
         setProfile(p);
-        loadBellData(currentUser.uid);
+        loadBellData(currentUser.uid, p);
       } else {
         setProfile(null);
         setNotifications([]);
         setCommunityUpdates([]);
+        dismissedActivityIdsRef.current = new Set();
+        deletedNotifIdsRef.current = new Set();
+        dismissedBeforeRef.current = 0;
+        setDismissedActivityIds(new Set());
+        setDeletedNotificationIds(new Set());
+        setDismissedActivitiesBefore(0);
       }
     });
     return () => unsubscribe();
@@ -195,17 +318,32 @@ export function Header() {
     }
   }, [showBellPanel, user]);
 
+  const visibleNotifications = useMemo(
+    () =>
+      notifications.filter(
+        (n) => !n.deleted && !deletedNotificationIds.has(n.notification_id)
+      ),
+    [notifications, deletedNotificationIds]
+  );
+
   const visibleCommunityUpdates = useMemo(
     () =>
-      communityUpdates.filter(
-        (a) => !dismissedActivityIds.has(a.activity_id)
-      ),
-    [communityUpdates, dismissedActivityIds]
+      communityUpdates.filter((a) => {
+        if (dismissedActivityIds.has(a.activity_id)) return false;
+        if (dismissedActivitiesBefore > 0) {
+          const ts = new Date(a.timestamp).getTime();
+          if (!Number.isNaN(ts) && ts <= dismissedActivitiesBefore) {
+            return false;
+          }
+        }
+        return true;
+      }),
+    [communityUpdates, dismissedActivityIds, dismissedActivitiesBefore]
   );
 
   const unreadNotifCount = useMemo(
-    () => notifications.filter((n) => !n.read).length,
-    [notifications]
+    () => visibleNotifications.filter((n) => !n.read).length,
+    [visibleNotifications]
   );
 
   const unseenCommunityCount = useMemo(() => {
@@ -238,6 +376,11 @@ export function Header() {
     notif: InAppNotification
   ) => {
     e.stopPropagation();
+    if (user) {
+      const nextDeleted = new Set(deletedNotifIdsRef.current);
+      nextDeleted.add(notif.notification_id);
+      persistDeletedNotifIds(user.uid, nextDeleted);
+    }
     setNotifications((prev) =>
       prev.filter((n) => n.notification_id !== notif.notification_id)
     );
@@ -253,31 +396,62 @@ export function Header() {
   ) => {
     e.preventDefault();
     e.stopPropagation();
-    const next = new Set(dismissedActivityIds);
+    if (!user) return;
+    const next = new Set(dismissedActivityIdsRef.current);
     next.add(act.activity_id);
-    persistDismissedIds(next);
+    persistDismissedIds(user.uid, next);
 
-    // If it's the current user's own activity, also delete it from Firestore
-    if (user && act.user_id === user.uid) {
+    // Persist dismissal permanently in Firestore for this user
+    const dismissPromise = dismissCommunityActivity(act.activity_id);
+
+    // If it's the current user's own activity, also attempt to delete it from Firestore
+    if (act.user_id === user.uid) {
       try {
         await deleteActivity(act.activity_id, user.uid);
       } catch {
-        // already dismissed locally
+        // already dismissed permanently for this user
       }
     }
+
+    await dismissPromise;
   };
 
   const handleClearAllItems = async () => {
     if (!user) return;
+
+    const activityIdsToDismiss = communityUpdates.map((a) => a.activity_id);
+    const latestActivityTs = communityUpdates.reduce((maxTs, a) => {
+      const ts = Date.parse(a.timestamp);
+      return !Number.isNaN(ts) && ts > maxTs ? ts : maxTs;
+    }, 0);
+    const dismissBeforeMs = Math.max(Date.now(), latestActivityTs);
+    const dismissBeforeIso = new Date(dismissBeforeMs).toISOString();
+
     if (bellTab === "ALL" || bellTab === "RELEASES") {
-      setNotifications([]);
-      setUnreadNotifications(0);
-      await deleteAllNotifications(user.uid);
+      const toDelete = visibleNotifications.filter(
+        (n) => bellTab === "ALL" || isReleaseNotification(n)
+      );
+      const nextDeleted = new Set(deletedNotifIdsRef.current);
+      toDelete.forEach((n) => nextDeleted.add(n.notification_id));
+      persistDeletedNotifIds(user.uid, nextDeleted);
+
+      const remaining = notifications.filter(
+        (n) => !nextDeleted.has(n.notification_id)
+      );
+      setNotifications(remaining);
+      setUnreadNotifications(remaining.filter((n) => !n.read).length);
     }
+
     if (bellTab === "ALL" || bellTab === "COMMUNITY") {
-      const next = new Set(dismissedActivityIds);
-      communityUpdates.forEach((a) => next.add(a.activity_id));
-      persistDismissedIds(next);
+      const next = new Set(dismissedActivityIdsRef.current);
+      activityIdsToDismiss.forEach((id) => next.add(id));
+      persistDismissedIds(user.uid, next);
+      persistDismissedBefore(user.uid, dismissBeforeMs);
+    }
+
+    const ok = await clearBellItems(bellTab, activityIdsToDismiss, dismissBeforeIso);
+    if (!ok && (bellTab === "ALL" || bellTab === "RELEASES")) {
+      await deleteAllNotifications(user.uid, bellTab);
     }
   };
 
@@ -312,13 +486,8 @@ export function Header() {
     > = [];
 
     if (bellTab === "ALL" || bellTab === "RELEASES") {
-      notifications.forEach((n) => {
-        if (
-          bellTab === "RELEASES" &&
-          n.type !== "SYSTEM" &&
-          n.type !== "APP_UPDATE" &&
-          n.type !== "NEW_EPISODE_THREAD"
-        ) {
+      visibleNotifications.forEach((n) => {
+        if (bellTab === "RELEASES" && !isReleaseNotification(n)) {
           return;
         }
         items.push({ kind: "NOTIF", timestamp: n.timestamp, data: n });
@@ -337,7 +506,7 @@ export function Header() {
           new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
       )
       .slice(0, 35);
-  }, [bellTab, notifications, visibleCommunityUpdates]);
+  }, [bellTab, visibleNotifications, visibleCommunityUpdates]);
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-gray-800 bg-[#0f1115]/85 backdrop-blur-md">

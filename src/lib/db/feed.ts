@@ -415,6 +415,7 @@ export async function getInAppNotifications(userId: string): Promise<InAppNotifi
     const notifications: InAppNotification[] = [];
     snap.forEach(d => {
       const data = d.data();
+      if (data.deleted === true) return;
       if (data.type === "NEW_EPISODE_THREAD" || data.type === "COMMENT_ON_THREAD") return;
       notifications.push({
         ...data,
@@ -429,6 +430,28 @@ export async function getInAppNotifications(userId: string): Promise<InAppNotifi
   }
 }
 
+async function callDismissApi(payload: Record<string, unknown>): Promise<boolean> {
+  try {
+    const { auth } = await import("@/lib/firebase");
+    const currentUser = auth?.currentUser;
+    if (!currentUser) return false;
+    const token = await currentUser.getIdToken();
+    const res = await fetch("/api/notifications/dismiss", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    });
+    return res.ok;
+  } catch (err) {
+    console.error("Error calling /api/notifications/dismiss:", err);
+    return false;
+  }
+}
+
 export async function markNotificationRead(notificationId: string): Promise<void> {
   if (!db || !notificationId) return;
   try {
@@ -440,17 +463,37 @@ export async function markNotificationRead(notificationId: string): Promise<void
 }
 
 export async function deleteNotification(notificationId: string): Promise<void> {
-  if (!db || !notificationId) return;
+  if (!notificationId) return;
+  const ok = await callDismissApi({
+    action: "delete_notification",
+    notificationId,
+  });
+  if (ok || !db) return;
+
+  // Fallback if API request failed (e.g. offline): try soft-delete directly
   try {
     const notifRef = doc(db, "notifications", notificationId);
-    await deleteDoc(notifRef);
+    await updateDoc(notifRef, {
+      deleted: true,
+      read: true,
+      deleted_at: new Date().toISOString(),
+    });
   } catch (err) {
     console.error("Error deleting notification:", err);
   }
 }
 
-export async function deleteAllNotifications(userId: string): Promise<void> {
-  if (!db || !userId) return;
+export async function deleteAllNotifications(
+  userId: string,
+  tab: "ALL" | "RELEASES" = "ALL"
+): Promise<void> {
+  if (!userId) return;
+  const ok = await callDismissApi({
+    action: "delete_all_notifications",
+    tab,
+  });
+  if (ok || !db) return;
+
   const { writeBatch } = await import("firebase/firestore");
   try {
     const notifRef = collection(db, "notifications");
@@ -458,15 +501,53 @@ export async function deleteAllNotifications(userId: string): Promise<void> {
     const snap = await getDocs(q);
     if (snap.empty) return;
 
-    for (let i = 0; i < snap.docs.length; i += 400) {
-      const chunk = snap.docs.slice(i, i + 400);
+    const nowIso = new Date().toISOString();
+    const targets = snap.docs.filter((d) => {
+      const data = d.data();
+      if (data?.deleted === true) return false;
+      if (
+        tab === "RELEASES" &&
+        data?.type !== "SYSTEM" &&
+        data?.type !== "APP_UPDATE" &&
+        data?.type !== "NEW_EPISODE_THREAD"
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    for (let i = 0; i < targets.length; i += 400) {
+      const chunk = targets.slice(i, i + 400);
       const batch = writeBatch(db);
-      chunk.forEach((d) => batch.delete(d.ref));
+      chunk.forEach((d) =>
+        batch.update(d.ref, { deleted: true, read: true, deleted_at: nowIso })
+      );
       await batch.commit();
     }
   } catch (err) {
     console.error("Error in deleteAllNotifications:", err);
   }
+}
+
+export async function dismissCommunityActivity(activityId: string): Promise<void> {
+  if (!activityId) return;
+  await callDismissApi({
+    action: "dismiss_activity",
+    activityId,
+  });
+}
+
+export async function clearBellItems(
+  tab: "ALL" | "RELEASES" | "COMMUNITY",
+  activityIds: string[],
+  dismissBefore: string
+): Promise<boolean> {
+  return callDismissApi({
+    action: "clear_bell",
+    tab,
+    activityIds,
+    dismissBefore,
+  });
 }
 
 export async function toggleLike(activityId: string, userId: string): Promise<void> {

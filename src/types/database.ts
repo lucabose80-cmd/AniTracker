@@ -32,6 +32,8 @@ export interface UserProfile {
     last_active?: number;
   };
   last_maintenance_timestamp?: number;
+  dismissed_activity_ids?: string[];
+  dismissed_activities_before?: string;
 }
 
 export interface Work {
@@ -183,4 +185,6 @@ export interface InAppNotification {
   text: string;
   timestamp: string;
   read: boolean;
+  deleted?: boolean;
+  deleted_at?: string;
 }

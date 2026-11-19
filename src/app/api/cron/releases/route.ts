@@ -400,19 +400,22 @@ export async function GET(req: Request) {
             });
 
             const notifRef = adminDb.collection("notifications").doc(`wishlist_${userId}_${workId}`);
-            await notifRef.set({
-              notification_id: notifRef.id,
-              user_id: userId,
-              actor_id: "SYSTEM",
-              actor_name: "AniPulse",
-              actor_avatar: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
-              type: "SYSTEM",
-              work_id: String(workId),
-              work_title: title,
-              text: `${title} aus der Wunschliste ist jetzt erschienen und wurde zu 'Aktiv' verschoben!`,
-              timestamp: nowIsoStr,
-              read: false,
-            });
+            const wishlistNotifSnap = await notifRef.get();
+            if (!wishlistNotifSnap.exists) {
+              await notifRef.set({
+                notification_id: notifRef.id,
+                user_id: userId,
+                actor_id: "SYSTEM",
+                actor_name: "AniPulse",
+                actor_avatar: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
+                type: "SYSTEM",
+                work_id: String(workId),
+                work_title: title,
+                text: `${title} aus der Wunschliste ist jetzt erschienen und wurde zu 'Aktiv' verschoben!`,
+                timestamp: nowIsoStr,
+                read: false,
+              });
+            }
 
             // 3. FCM Push
             const userDoc = await adminDb.collection("users").doc(userId).get();

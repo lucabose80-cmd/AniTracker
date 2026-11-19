@@ -170,7 +170,9 @@ service cloud.firestore {
              (!('fcm_tokens' in data) || isValidList(data.fcm_tokens, 50)) &&
              (!('weekly_ranking_anime' in data) || data.weekly_ranking_anime is map) &&
              (!('weekly_ranking_manga' in data) || data.weekly_ranking_manga is map) &&
-             (!('last_maintenance_timestamp' in data) || data.last_maintenance_timestamp is number);
+             (!('last_maintenance_timestamp' in data) || data.last_maintenance_timestamp is number) &&
+             (!('dismissed_activity_ids' in data) || isValidList(data.dismissed_activity_ids, 1000)) &&
+             (!('dismissed_activities_before' in data) || (data.dismissed_activities_before is string && data.dismissed_activities_before.size() <= 50));
     }
 
     function isValidUserSubWork(data) {
@@ -267,7 +269,9 @@ service cloud.firestore {
              (!('comment_id' in data) || (data.comment_id is string && data.comment_id.size() <= 128)) &&
              data.text is string && data.text.size() <= 1000 &&
              data.timestamp is string && data.timestamp.size() <= 50 &&
-             data.read is bool;
+             data.read is bool &&
+             (!('deleted' in data) || data.deleted is bool) &&
+             (!('deleted_at' in data) || (data.deleted_at is string && data.deleted_at.size() <= 50));
     }
 
     function isValidCalendarOverride(data) {
@@ -403,8 +407,10 @@ service cloud.firestore {
       allow create: if isAuthenticated() && isValidNotification(request.resource.data);
       allow update: if isAuthenticated() &&
                        resource.data.user_id == request.auth.uid &&
-                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']) &&
-                       request.resource.data.read is bool;
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'deleted', 'deleted_at']) &&
+                       (!('read' in request.resource.data) || request.resource.data.read is bool) &&
+                       (!('deleted' in request.resource.data) || request.resource.data.deleted is bool) &&
+                       (!('deleted_at' in request.resource.data) || (request.resource.data.deleted_at is string && request.resource.data.deleted_at.size() <= 50));
       allow delete: if isAuthenticated() && resource.data.user_id == request.auth.uid;
     }
 
