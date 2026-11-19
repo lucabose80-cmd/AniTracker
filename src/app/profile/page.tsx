@@ -1,6 +1,6 @@
 "use client";
 
-import { User as UserIcon, Settings, LogOut, LogIn, Bell, Star } from "lucide-react";
+import { User as UserIcon, Settings, LogOut, LogIn, Bell, Star, ChevronDown, ChevronUp } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import { signOut, onAuthStateChanged, User } from "firebase/auth";
 import { useRouter } from "next/navigation";
@@ -24,7 +24,7 @@ function FavoriteItem({ id, index, workDetails }: { id: string, index: number, w
         <Link href={`/work/${id}`} className="absolute inset-0 block h-full w-full group">
           <img src={workDetails.coverImage?.extraLarge || workDetails.coverImage?.large} alt="Cover" className="h-full w-full object-cover transition-transform group-hover:scale-105" />
           <div className="absolute bottom-0 w-full bg-black/80 backdrop-blur-md text-[10px] text-center text-blue-400 py-1 font-bold">
-            â˜… {workDetails.userScore?.toFixed(1) || "?"}
+            ★ {workDetails.userScore?.toFixed(1) || "?"}
           </div>
         </Link>
       ) : (
@@ -41,6 +41,7 @@ export default function ProfilePage() {
   const [user, setUser] = useState<User | null>(null);
   const [dbUser, setDbUser] = useState<any>(null);
   const [isPushEnabled, setIsPushEnabled] = useState(false);
+  const [showPushSection, setShowPushSection] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -293,245 +294,266 @@ export default function ProfilePage() {
       <ProfileStats allWorks={allWorks} aniListDetails={aniListDetails} />
 
       {user && (
-        <section className="bg-[#1a1d24] border border-gray-800 rounded-2xl p-5 shadow-lg">
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <h3 className="text-lg font-bold flex items-center gap-2">
-              <Bell size={20} className="text-blue-500" />
-              Push-Benachrichtigungen
-            </h3>
-            <div className="flex items-center gap-2 flex-wrap">
-              {isPushEnabled && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!user) return;
-                    setIsSaving(true);
-                    try {
-                      // Ensure current device token is registered before sending test pushes
-                      await requestForToken(user.uid).catch(() => {});
-
-                      const testScenarios = [
-                        {
-                          type: "releases",
-                          tag: `test-1-anime-release-${Date.now()}`,
-                          title: "[Test 1/9 · Anime-Release] Neue Folge verfügbar!",
-                          body: "Episode 12 von Solo Leveling Season 2 ist jetzt online.",
-                          link: "/calendar",
-                        },
-                        {
-                          type: "releases",
-                          tag: `test-2-manga-release-${Date.now()}`,
-                          title: "[Test 2/9 · Manga-Release] Neues Kapitel verfügbar!",
-                          body: "Kapitel 1140 von One Piece ist jetzt online.",
-                          link: "/calendar",
-                        },
-                        {
-                          type: "releases",
-                          tag: `test-3-wishlist-release-${Date.now()}`,
-                          title: "[Test 3/9 · Wunschliste -> Aktiv] 🎉 Jetzt verfügbar!",
-                          body: "Chainsaw Man Movie: Reze Arc ist erschienen und wurde in deine Aktiv-Liste verschoben!",
-                          link: "/library",
-                        },
-                        {
-                          type: "social",
-                          tag: `test-4-review-list-${Date.now()}`,
-                          title: "[Test 4/9 · Neues Review] Neues Review von Lugga! 🌟",
-                          body: "Lugga hat 3 Folgen/Kapitel bewertet (Frieren Ep. 28: 10/10 · Dandadan Ep. 12: 9.5/10).",
-                          link: "/feed",
-                        },
-                        {
-                          type: "social",
-                          tag: `test-5-rating-${Date.now()}`,
-                          title: "[Test 5/9 · Werk-Bewertung] Neue Gesamtbewertung",
-                          body: "Lugga hat Attack on Titan insgesamt mit 9.8/10 bewertet.",
-                          link: "/feed",
-                        },
-                        {
-                          type: "social",
-                          tag: `test-6-weekly-ranking-${Date.now()}`,
-                          title: "[Test 6/9 · Wochen-Ranking] Neues Wochen-Ranking!",
-                          body: "Lugga hat sein neues Anime-Wochen-Ranking veröffentlicht.",
-                          link: "/feed",
-                        },
-                        {
-                          type: "replies",
-                          tag: `test-7-review-reply-${Date.now()}`,
-                          title: "[Test 7/9 · Antwort/Meinung] Lugga zu deinem Review (Folge 12)",
-                          body: "„Stimme dir komplett zu, das Pacing und die Animation am Ende waren eine glatte 10/10!“",
-                          link: "/feed",
-                        },
-                        {
-                          type: "likes",
-                          tag: `test-8-comment-like-${Date.now()}`,
-                          title: "[Test 8/9 · Kommentar-Like] Lugga gefällt deine Meinung in Frieren",
-                          body: "„Beste Folge der gesamten Staffel!“",
-                          link: "/feed",
-                        },
-                        {
-                          type: "likes",
-                          tag: `test-9-work-upvote-${Date.now()}`,
-                          title: "[Test 9/9 · Upvote] Neuer Like auf deine Meinung",
-                          body: "Jemand hat deine Meinung zu Kapitel 180 gelikt!",
-                          link: "/feed",
-                        },
-                      ];
-
-                      // Short 3-second countdown so user can optionally lock their phone screen to test Lock-Screen delivery
-                      await new Promise((r) => setTimeout(r, 3000));
-
-                      let totalSent = 0;
-                      for (let i = 0; i < testScenarios.length; i++) {
-                        const item = testScenarios[i];
-                        const res = await fetch("/api/notify", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            targetUserId: user.uid,
-                            type: item.type,
-                            title: item.title,
-                            body: item.body,
-                            link: item.link,
-                            tag: item.tag,
-                            forceNotification: true,
-                          }),
-                        });
-                        const data = await res.json();
-                        if (data.success && data.successCount > 0) {
-                          totalSent++;
-                        }
-                        // Slight stagger (350ms) so Android doesn't drop rapid burst notifications
-                        if (i < testScenarios.length - 1) {
-                          await new Promise((r) => setTimeout(r, 350));
-                        }
-                      }
-
-                      if (totalSent > 0) {
-                        alert(
-                          `${totalSent}/9 Test-Push-Benachrichtigungen (alle 9 Kategorien) wurden an dein Gerät gesendet!`
-                        );
-                      } else {
-                        alert(
-                          "Dein gespeicherter Push-Token war abgelaufen. Bitte klicke einmal auf 'Reparieren', um dieses Gerät neu zu verbinden."
-                        );
-                      }
-                    } catch (err) {
-                      console.error(err);
-                      alert("Fehler beim Senden der Test-Benachrichtigungen.");
-                    } finally {
-                      setIsSaving(false);
-                    }
-                  }}
-                  disabled={isSaving}
-                  className="text-[11px] bg-blue-600/20 hover:bg-blue-600/35 text-blue-300 border border-blue-500/30 px-2.5 py-1 rounded-lg font-semibold transition"
-                >
-                  {isSaving ? "Sende 9 Tests (3s)..." : "Alle 9 Push-Arten testen"}
-                </button>
-              )}
-              {isPushEnabled && (
-                <button
-                  type="button"
-                  onClick={handleRepairPush}
-                  disabled={isSaving}
-                  className="text-[11px] bg-amber-600/20 hover:bg-amber-600/35 text-amber-300 border border-amber-500/30 px-2.5 py-1 rounded-lg font-semibold transition"
-                >
-                  {isSaving ? "..." : "Reparieren"}
-                </button>
-              )}
-            </div>
-          </div>
-          {isPushEnabled && (
-            <p className="text-[11px] text-gray-400 mb-3 leading-relaxed">
-              💡 <strong>Tipp für den Sperrbildschirm-Test:</strong> Nach Klick auf{" "}
-              <span className="text-blue-300 font-semibold">„Alle 9 Push-Arten testen“</span> startet ein{" "}
-              <strong>3-Sekunden-Countdown</strong> – sperre in diesen 3 Sekunden direkt dein Handy, damit du alle 9 Benachrichtigungen live auf dem Lock-Screen siehst!
-            </p>
-          )}
-
-          {typeof window !== "undefined" &&
-            typeof Notification !== "undefined" &&
-            Notification.permission !== "granted" &&
-            isPushEnabled && (
-              <div className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200 flex items-center justify-between gap-2">
-                <span>
-                  Auf diesem Gerät/Browser sind Push-Mitteilungen noch nicht erlaubt.
-                </span>
-                <button
-                  type="button"
-                  onClick={enablePush}
-                  disabled={isSaving}
-                  className="px-3 py-1.5 rounded-lg bg-amber-500 text-black font-bold shrink-0"
-                >
-                  Hier aktivieren
-                </button>
-              </div>
-            )}
-
-          {!isPushEnabled ? (
-            <div className="text-center">
-              <p className="text-xs text-gray-400 mb-4">
-                Erlaube Push-Benachrichtigungen, um über neue Folgen, Kapitel und Reviews informiert zu werden.
-              </p>
-              <button 
-                onClick={enablePush}
-                disabled={isSaving}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition disabled:opacity-50"
+        <section className="bg-[#1a1d24] border border-gray-800 rounded-2xl shadow-lg overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowPushSection((prev) => !prev)}
+            className="w-full flex items-center justify-between px-5 py-4 hover:bg-white/[0.03] transition text-left"
+          >
+            <div className="flex items-center gap-2.5">
+              <Bell size={18} className="text-blue-500 shrink-0" />
+              <span className="text-base font-bold text-white">Push-Benachrichtigungen</span>
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                  isPushEnabled
+                    ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
+                    : "bg-gray-800 border-gray-700 text-gray-400"
+                }`}
               >
-                {isSaving ? "Aktiviert..." : "Push-Benachrichtigungen aktivieren"}
-              </button>
+                {isPushEnabled ? "Aktiv" : "Inaktiv"}
+              </span>
             </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-bold text-white">Neue Folgen &amp; Kapitel</div>
-                  <div className="text-xs text-gray-500">Für Werke aus deiner Bibliothek</div>
-                </div>
-                <button 
-                  onClick={() => handleToggle("releases")}
-                  className={`w-12 h-6 rounded-full transition-colors relative ${notifySettings.releases ? "bg-blue-500" : "bg-gray-700"}`}
-                >
-                  <span className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${notifySettings.releases ? "translate-x-6" : "translate-x-0"}`} />
-                </button>
-              </div>
+            <div className="flex items-center gap-1.5 text-xs text-gray-400 font-semibold">
+              <span>{showPushSection ? "Einklappen" : "Einstellungen"}</span>
+              {showPushSection ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </div>
+          </button>
 
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-bold text-white">Likes &amp; Reaktionen</div>
-                  <div className="text-xs text-gray-500">Wenn jemand auf deine Beiträge reagiert</div>
-                </div>
-                <button 
-                  onClick={() => handleToggle("likes")}
-                  className={`w-12 h-6 rounded-full transition-colors relative ${notifySettings.likes ? "bg-blue-500" : "bg-gray-700"}`}
-                >
-                  <span className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${notifySettings.likes ? "translate-x-6" : "translate-x-0"}`} />
-                </button>
-              </div>
+          {showPushSection && (
+            <div className="px-5 pb-5 pt-2 border-t border-gray-800/80">
+              {isPushEnabled && (
+                <div className="flex items-center justify-end gap-2 flex-wrap mb-3">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!user) return;
+                      setIsSaving(true);
+                      try {
+                        // Ensure current device token is registered before sending test pushes
+                        await requestForToken(user.uid).catch(() => {});
 
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-bold text-white">Antworten &amp; Meinungen</div>
-                  <div className="text-xs text-gray-500">Auf deine Reviews und Kommentare</div>
-                </div>
-                <button 
-                  onClick={() => handleToggle("replies")}
-                  className={`w-12 h-6 rounded-full transition-colors relative ${notifySettings.replies ? "bg-blue-500" : "bg-gray-700"}`}
-                >
-                  <span className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${notifySettings.replies ? "translate-x-6" : "translate-x-0"}`} />
-                </button>
-              </div>
+                        const testScenarios = [
+                          {
+                            type: "releases",
+                            tag: `test-1-anime-release-${Date.now()}`,
+                            title: "[Test 1/9 · Anime-Release] Neue Folge verfügbar!",
+                            body: "Episode 12 von Solo Leveling Season 2 ist jetzt online.",
+                            link: "/calendar",
+                          },
+                          {
+                            type: "releases",
+                            tag: `test-2-manga-release-${Date.now()}`,
+                            title: "[Test 2/9 · Manga-Release] Neues Kapitel verfügbar!",
+                            body: "Kapitel 1140 von One Piece ist jetzt online.",
+                            link: "/calendar",
+                          },
+                          {
+                            type: "releases",
+                            tag: `test-3-wishlist-release-${Date.now()}`,
+                            title: "[Test 3/9 · Wunschliste -> Aktiv] 🎉 Jetzt verfügbar!",
+                            body: "Chainsaw Man Movie: Reze Arc ist erschienen und wurde in deine Aktiv-Liste verschoben!",
+                            link: "/library",
+                          },
+                          {
+                            type: "social",
+                            tag: `test-4-review-list-${Date.now()}`,
+                            title: "[Test 4/9 · Neues Review] Neues Review von Lugga! 🌟",
+                            body: "Lugga hat 3 Folgen/Kapitel bewertet (Frieren Ep. 28: 10/10 · Dandadan Ep. 12: 9.5/10).",
+                            link: "/feed",
+                          },
+                          {
+                            type: "social",
+                            tag: `test-5-rating-${Date.now()}`,
+                            title: "[Test 5/9 · Werk-Bewertung] Neue Gesamtbewertung",
+                            body: "Lugga hat Attack on Titan insgesamt mit 9.8/10 bewertet.",
+                            link: "/feed",
+                          },
+                          {
+                            type: "social",
+                            tag: `test-6-weekly-ranking-${Date.now()}`,
+                            title: "[Test 6/9 · Wochen-Ranking] Neues Wochen-Ranking!",
+                            body: "Lugga hat sein neues Anime-Wochen-Ranking veröffentlicht.",
+                            link: "/feed",
+                          },
+                          {
+                            type: "replies",
+                            tag: `test-7-review-reply-${Date.now()}`,
+                            title: "[Test 7/9 · Antwort/Meinung] Lugga zu deinem Review (Folge 12)",
+                            body: "„Stimme dir komplett zu, das Pacing und die Animation am Ende waren eine glatte 10/10!“",
+                            link: "/feed",
+                          },
+                          {
+                            type: "likes",
+                            tag: `test-8-comment-like-${Date.now()}`,
+                            title: "[Test 8/9 · Kommentar-Like] Lugga gefällt deine Meinung in Frieren",
+                            body: "„Beste Folge der gesamten Staffel!“",
+                            link: "/feed",
+                          },
+                          {
+                            type: "likes",
+                            tag: `test-9-work-upvote-${Date.now()}`,
+                            title: "[Test 9/9 · Upvote] Neuer Like auf deine Meinung",
+                            body: "Jemand hat deine Meinung zu Kapitel 180 gelikt!",
+                            link: "/feed",
+                          },
+                        ];
 
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-bold text-white">Review Feed</div>
-                  <div className="text-xs text-gray-500">Neue Reviews &amp; Beiträge der Community</div>
+                        // Short 3-second countdown so user can optionally lock their phone screen to test Lock-Screen delivery
+                        await new Promise((r) => setTimeout(r, 3000));
+
+                        let totalSent = 0;
+                        for (let i = 0; i < testScenarios.length; i++) {
+                          const item = testScenarios[i];
+                          const res = await fetch("/api/notify", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              targetUserId: user.uid,
+                              type: item.type,
+                              title: item.title,
+                              body: item.body,
+                              link: item.link,
+                              tag: item.tag,
+                              forceNotification: true,
+                            }),
+                          });
+                          const data = await res.json();
+                          if (data.success && data.successCount > 0) {
+                            totalSent++;
+                          }
+                          // Slight stagger (350ms) so Android doesn't drop rapid burst notifications
+                          if (i < testScenarios.length - 1) {
+                            await new Promise((r) => setTimeout(r, 350));
+                          }
+                        }
+
+                        if (totalSent > 0) {
+                          alert(
+                            `${totalSent}/9 Test-Push-Benachrichtigungen (alle 9 Kategorien) wurden an dein Gerät gesendet!`
+                          );
+                        } else {
+                          alert(
+                            "Dein gespeicherter Push-Token war abgelaufen. Bitte klicke einmal auf 'Reparieren', um dieses Gerät neu zu verbinden."
+                          );
+                        }
+                      } catch (err) {
+                        console.error(err);
+                        alert("Fehler beim Senden der Test-Benachrichtigungen.");
+                      } finally {
+                        setIsSaving(false);
+                      }
+                    }}
+                    disabled={isSaving}
+                    className="text-[11px] bg-blue-600/20 hover:bg-blue-600/35 text-blue-300 border border-blue-500/30 px-2.5 py-1 rounded-lg font-semibold transition"
+                  >
+                    {isSaving ? "Sende 9 Tests (3s)..." : "Alle 9 Push-Arten testen"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRepairPush}
+                    disabled={isSaving}
+                    className="text-[11px] bg-amber-600/20 hover:bg-amber-600/35 text-amber-300 border border-amber-500/30 px-2.5 py-1 rounded-lg font-semibold transition"
+                  >
+                    {isSaving ? "..." : "Reparieren"}
+                  </button>
                 </div>
-                <button 
-                  onClick={() => handleToggle("social")}
-                  className={`w-12 h-6 rounded-full transition-colors relative ${notifySettings.social ? "bg-blue-500" : "bg-gray-700"}`}
-                >
-                  <span className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${notifySettings.social ? "translate-x-6" : "translate-x-0"}`} />
-                </button>
-              </div>
+              )}
+
+              {isPushEnabled && (
+                <p className="text-[11px] text-gray-400 mb-3 leading-relaxed">
+                  💡 <strong>Tipp für den Sperrbildschirm-Test:</strong> Nach Klick auf{" "}
+                  <span className="text-blue-300 font-semibold">„Alle 9 Push-Arten testen“</span> startet ein{" "}
+                  <strong>3-Sekunden-Countdown</strong> – sperre in diesen 3 Sekunden direkt dein Handy, damit du alle 9 Benachrichtigungen live auf dem Lock-Screen siehst!
+                </p>
+              )}
+
+              {typeof window !== "undefined" &&
+                typeof Notification !== "undefined" &&
+                Notification.permission !== "granted" &&
+                isPushEnabled && (
+                  <div className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200 flex items-center justify-between gap-2">
+                    <span>
+                      Auf diesem Gerät/Browser sind Push-Mitteilungen noch nicht erlaubt.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={enablePush}
+                      disabled={isSaving}
+                      className="px-3 py-1.5 rounded-lg bg-amber-500 text-black font-bold shrink-0"
+                    >
+                      Hier aktivieren
+                    </button>
+                  </div>
+                )}
+
+              {!isPushEnabled ? (
+                <div className="text-center">
+                  <p className="text-xs text-gray-400 mb-4">
+                    Erlaube Push-Benachrichtigungen, um über neue Folgen, Kapitel und Reviews informiert zu werden.
+                  </p>
+                  <button 
+                    onClick={enablePush}
+                    disabled={isSaving}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition disabled:opacity-50"
+                  >
+                    {isSaving ? "Aktiviert..." : "Push-Benachrichtigungen aktivieren"}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-bold text-white">Neue Folgen &amp; Kapitel</div>
+                      <div className="text-xs text-gray-500">Für Werke aus deiner Bibliothek</div>
+                    </div>
+                    <button 
+                      onClick={() => handleToggle("releases")}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${notifySettings.releases ? "bg-blue-500" : "bg-gray-700"}`}
+                    >
+                      <span className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${notifySettings.releases ? "translate-x-6" : "translate-x-0"}`} />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-bold text-white">Likes &amp; Reaktionen</div>
+                      <div className="text-xs text-gray-500">Wenn jemand auf deine Beiträge reagiert</div>
+                    </div>
+                    <button 
+                      onClick={() => handleToggle("likes")}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${notifySettings.likes ? "bg-blue-500" : "bg-gray-700"}`}
+                    >
+                      <span className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${notifySettings.likes ? "translate-x-6" : "translate-x-0"}`} />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-bold text-white">Antworten &amp; Meinungen</div>
+                      <div className="text-xs text-gray-500">Auf deine Reviews und Kommentare</div>
+                    </div>
+                    <button 
+                      onClick={() => handleToggle("replies")}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${notifySettings.replies ? "bg-blue-500" : "bg-gray-700"}`}
+                    >
+                      <span className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${notifySettings.replies ? "translate-x-6" : "translate-x-0"}`} />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-bold text-white">Review Feed</div>
+                      <div className="text-xs text-gray-500">Neue Reviews &amp; Beiträge der Community</div>
+                    </div>
+                    <button 
+                      onClick={() => handleToggle("social")}
+                      className={`w-12 h-6 rounded-full transition-colors relative ${notifySettings.social ? "bg-blue-500" : "bg-gray-700"}`}
+                    >
+                      <span className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${notifySettings.social ? "translate-x-6" : "translate-x-0"}`} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </section>
