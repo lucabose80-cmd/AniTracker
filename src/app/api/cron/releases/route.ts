@@ -255,10 +255,12 @@ export async function GET(req: Request) {
               },
               notification: { 
                 icon: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
-                badge: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
+                badge: "https://anitracker-delta.vercel.app/anipulse-badge-96.png",
                 requireInteraction: true,
                 tag: `release-${schedule.mediaId}-${schedule.episode}`,
-                renotify: true
+                renotify: true,
+                silent: false,
+                vibrate: [200, 100, 200],
               },
               fcmOptions: { link: `/work/${schedule.mediaId}` }
             },
@@ -369,10 +371,12 @@ export async function GET(req: Request) {
                     },
                     notification: { 
                       icon: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
-                      badge: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
+                      badge: "https://anitracker-delta.vercel.app/anipulse-badge-96.png",
                       requireInteraction: true,
                       tag: `wishlist-${workId}`,
-                      renotify: true
+                      renotify: true,
+                      silent: false,
+                      vibrate: [200, 100, 200],
                     },
                     fcmOptions: { link: `/work/${workId}` }
                   },

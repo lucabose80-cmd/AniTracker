@@ -51,12 +51,20 @@ export function ServiceWorkerManager() {
       ) {
         navigator.serviceWorker.ready
           .then((reg) => {
+            const notifTag =
+              payload.data?.tag ||
+              `anipulse-fg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
             reg.showNotification(payload.notification.title || 'AniPulse', {
               body: payload.notification.body || '',
               icon: '/anipulse-192x192.png',
-              badge: '/anipulse-192x192.png',
+              badge: '/anipulse-badge-96.png',
+              tag: notifTag,
+              renotify: true,
+              requireInteraction: true,
+              silent: false,
+              vibrate: [200, 100, 200],
               data: payload.data,
-            });
+            } as NotificationOptions);
           })
           .catch(() => {});
       }

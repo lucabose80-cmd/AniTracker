@@ -3,13 +3,26 @@ import { NextResponse } from "next/server";
 export async function POST(req: Request) {
   try {
     const { adminDb, adminMessaging } = await import("@/lib/firebase-admin");
-    const { targetUserId, title, body, type, link, excludeUserId } = await req.json();
+    const {
+      targetUserId,
+      title,
+      body,
+      type,
+      link,
+      excludeUserId,
+      tag: customTag,
+      forceNotification,
+    } = await req.json();
 
     if (!targetUserId || !title || !body || !type) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
     const iconUrl = "https://anitracker-delta.vercel.app/anipulse-192x192.png";
+    // Android status bar & lock screen require a monochrome transparent PNG for the small badge icon
+    const badgeUrl = "https://anitracker-delta.vercel.app/anipulse-badge-96.png";
+    const resolvedTag =
+      customTag || `anipulse-${type}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
     if (targetUserId === "ALL") {
       const usersSnap = await adminDb.collection("users").get();
@@ -25,7 +38,10 @@ export async function POST(req: Request) {
           replies: true,
           social: true,
         };
-        if (settings[type] !== false && Array.isArray(userData.fcm_tokens)) {
+        if (
+          (forceNotification || settings[type] !== false) &&
+          Array.isArray(userData.fcm_tokens)
+        ) {
           userData.fcm_tokens.forEach((tk: string) => {
             if (!tk) return;
             if (!tokenToUserIds.has(tk)) {
@@ -43,18 +59,23 @@ export async function POST(req: Request) {
 
       const payload = {
         notification: { title, body },
-        data: { link: link || "/", type },
+        data: { link: link || "/", type, tag: resolvedTag },
         webpush: {
           headers: {
             Urgency: "high",
             TTL: "86400",
           },
           notification: {
+            title,
+            body,
             icon: iconUrl,
-            badge: iconUrl,
+            badge: badgeUrl,
             requireInteraction: true,
-            tag: `notify-${type}-${Date.now()}`,
+            tag: resolvedTag,
             renotify: true,
+            silent: false,
+            vibrate: [200, 100, 200],
+            timestamp: Date.now(),
           },
           fcmOptions: { link: link || "/" },
         },
@@ -114,7 +135,7 @@ export async function POST(req: Request) {
       ? userData.fcm_tokens
       : [];
 
-    if (settings[type] === false) {
+    if (!forceNotification && settings[type] === false) {
       return NextResponse.json({ message: "Notification disabled by user" });
     }
 
@@ -124,18 +145,23 @@ export async function POST(req: Request) {
 
     const payload = {
       notification: { title, body },
-      data: { link: link || "/", type },
+      data: { link: link || "/", type, tag: resolvedTag },
       webpush: {
         headers: {
           Urgency: "high",
           TTL: "86400",
         },
         notification: {
+          title,
+          body,
           icon: iconUrl,
-          badge: iconUrl,
+          badge: badgeUrl,
           requireInteraction: true,
-          tag: `notify-${type}-${Date.now()}`,
+          tag: resolvedTag,
           renotify: true,
+          silent: false,
+          vibrate: [200, 100, 200],
+          timestamp: Date.now(),
         },
         fcmOptions: { link: link || "/" },
       },

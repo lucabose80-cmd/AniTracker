@@ -299,7 +299,7 @@ export default function ProfilePage() {
               <Bell size={20} className="text-blue-500" />
               Push-Benachrichtigungen
             </h3>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {isPushEnabled && (
                 <button
                   type="button"
@@ -307,22 +307,115 @@ export default function ProfilePage() {
                     if (!user) return;
                     setIsSaving(true);
                     try {
-                      // Ensure current device token is registered before sending test push
+                      // Ensure current device token is registered before sending test pushes
                       await requestForToken(user.uid).catch(() => {});
-                      const res = await fetch("/api/notify", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          targetUserId: user.uid,
+
+                      const testScenarios = [
+                        {
                           type: "releases",
-                          title: "AniPulse Test-Push",
-                          body: "Push-Benachrichtigungen funktionieren auf diesem Gerät!",
-                          link: "/profile",
-                        }),
-                      });
-                      const data = await res.json();
-                      if (data.success && data.successCount > 0) {
-                        alert("Test-Push erfolgreich gesendet!");
+                          tag: `test-1-anime-release-${Date.now()}`,
+                          title: "[Test 1/10 · Anime-Release] Neue Folge verfügbar!",
+                          body: "Episode 12 von Solo Leveling Season 2 ist jetzt online.",
+                          link: "/calendar",
+                        },
+                        {
+                          type: "releases",
+                          tag: `test-2-manga-release-${Date.now()}`,
+                          title: "[Test 2/10 · Manga-Release] Neues Kapitel verfügbar!",
+                          body: "Kapitel 1140 von One Piece ist jetzt online.",
+                          link: "/calendar",
+                        },
+                        {
+                          type: "releases",
+                          tag: `test-3-wishlist-release-${Date.now()}`,
+                          title: "[Test 3/10 · Wunschliste -> Aktiv] 🎉 Jetzt verfügbar!",
+                          body: "Chainsaw Man Movie: Reze Arc ist erschienen und wurde in deine Aktiv-Liste verschoben!",
+                          link: "/library",
+                        },
+                        {
+                          type: "social",
+                          tag: `test-4-review-list-${Date.now()}`,
+                          title: "[Test 4/10 · Neues Review] Neues Review von Lugga! 🌟",
+                          body: "Lugga hat 3 Folgen/Kapitel bewertet (Frieren Ep. 28: 10/10 · Dandadan Ep. 12: 9.5/10).",
+                          link: "/feed",
+                        },
+                        {
+                          type: "social",
+                          tag: `test-5-episode-thread-${Date.now()}`,
+                          title: "[Test 5/10 · Episoden-Thread] Neuer Thread in Jujutsu Kaisen (Folge 24)",
+                          body: "Lugga hat eine Diskussion zu Folge 24 gestartet.",
+                          link: "/feed",
+                        },
+                        {
+                          type: "social",
+                          tag: `test-6-rating-${Date.now()}`,
+                          title: "[Test 6/10 · Werk-Bewertung] Neue Gesamtbewertung",
+                          body: "Lugga hat Attack on Titan insgesamt mit 9.8/10 bewertet.",
+                          link: "/feed",
+                        },
+                        {
+                          type: "social",
+                          tag: `test-7-weekly-ranking-${Date.now()}`,
+                          title: "[Test 7/10 · Wochen-Ranking] Neues Wochen-Ranking!",
+                          body: "Lugga hat sein neues Anime-Wochen-Ranking veröffentlicht.",
+                          link: "/feed",
+                        },
+                        {
+                          type: "replies",
+                          tag: `test-8-review-reply-${Date.now()}`,
+                          title: "[Test 8/10 · Antwort/Meinung] Lugga zu deinem Review (Folge 12)",
+                          body: "„Stimme dir komplett zu, das Pacing und die Animation am Ende waren eine glatte 10/10!“",
+                          link: "/feed",
+                        },
+                        {
+                          type: "likes",
+                          tag: `test-9-comment-like-${Date.now()}`,
+                          title: "[Test 9/10 · Kommentar-Like] Lugga gefällt deine Meinung in Frieren",
+                          body: "„Beste Folge der gesamten Staffel!“",
+                          link: "/feed",
+                        },
+                        {
+                          type: "likes",
+                          tag: `test-10-work-upvote-${Date.now()}`,
+                          title: "[Test 10/10 · Upvote] Neuer Like auf deinen Werk-Kommentar",
+                          body: "Jemand hat deinen Kommentar zu Kapitel 180 gelikt!",
+                          link: "/feed",
+                        },
+                      ];
+
+                      // Short 3-second countdown so user can optionally lock their phone screen to test Lock-Screen delivery
+                      await new Promise((r) => setTimeout(r, 3000));
+
+                      let totalSent = 0;
+                      for (let i = 0; i < testScenarios.length; i++) {
+                        const item = testScenarios[i];
+                        const res = await fetch("/api/notify", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            targetUserId: user.uid,
+                            type: item.type,
+                            title: item.title,
+                            body: item.body,
+                            link: item.link,
+                            tag: item.tag,
+                            forceNotification: true,
+                          }),
+                        });
+                        const data = await res.json();
+                        if (data.success && data.successCount > 0) {
+                          totalSent++;
+                        }
+                        // Slight stagger (350ms) so Android doesn't drop rapid burst notifications
+                        if (i < testScenarios.length - 1) {
+                          await new Promise((r) => setTimeout(r, 350));
+                        }
+                      }
+
+                      if (totalSent > 0) {
+                        alert(
+                          `${totalSent}/10 Test-Push-Benachrichtigungen (alle 10 Kategorien) wurden an dein Gerät gesendet!`
+                        );
                       } else {
                         alert(
                           "Dein gespeicherter Push-Token war abgelaufen. Bitte klicke einmal auf 'Reparieren', um dieses Gerät neu zu verbinden."
@@ -330,7 +423,7 @@ export default function ProfilePage() {
                       }
                     } catch (err) {
                       console.error(err);
-                      alert("Fehler beim Senden der Test-Benachrichtigung.");
+                      alert("Fehler beim Senden der Test-Benachrichtigungen.");
                     } finally {
                       setIsSaving(false);
                     }
@@ -338,7 +431,7 @@ export default function ProfilePage() {
                   disabled={isSaving}
                   className="text-[11px] bg-blue-600/20 hover:bg-blue-600/35 text-blue-300 border border-blue-500/30 px-2.5 py-1 rounded-lg font-semibold transition"
                 >
-                  Test-Push senden
+                  {isSaving ? "Sende 10 Tests (3s)..." : "Alle 10 Push-Arten testen"}
                 </button>
               )}
               {isPushEnabled && (
@@ -353,6 +446,13 @@ export default function ProfilePage() {
               )}
             </div>
           </div>
+          {isPushEnabled && (
+            <p className="text-[11px] text-gray-400 mb-3 leading-relaxed">
+              💡 <strong>Tipp für den Sperrbildschirm-Test:</strong> Nach Klick auf{" "}
+              <span className="text-blue-300 font-semibold">„Alle 10 Push-Arten testen“</span> startet ein{" "}
+              <strong>3-Sekunden-Countdown</strong> – sperre in diesen 3 Sekunden direkt dein Handy, damit du alle 10 Benachrichtigungen live auf dem Lock-Screen siehst!
+            </p>
+          )}
 
           {typeof window !== "undefined" &&
             typeof Notification !== "undefined" &&
