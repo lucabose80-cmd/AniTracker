@@ -332,6 +332,71 @@ export const GET_WORKS_BATCH = `
           airingAt
           timeUntilAiring
         }
+        relations {
+          edges {
+            relationType
+            node {
+              id
+              type
+              status
+              title {
+                romaji
+                english
+              }
+              coverImage {
+                medium
+                large
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+export const GET_RECOMMENDATIONS_FOR_WORKS = `
+  query($ids: [Int], $recPerPage: Int = 12) {
+    Page(page: 1, perPage: 15) {
+      media(id_in: $ids) {
+        id
+        type
+        title {
+          romaji
+          english
+        }
+        genres
+        recommendations(sort: RATING_DESC, page: 1, perPage: $recPerPage) {
+          nodes {
+            rating
+            mediaRecommendation {
+              id
+              type
+              title {
+                romaji
+                english
+              }
+              coverImage {
+                extraLarge
+                large
+              }
+              format
+              status
+              episodes
+              chapters
+              averageScore
+              genres
+              relations {
+                edges {
+                  relationType
+                  node {
+                    id
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

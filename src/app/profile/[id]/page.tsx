@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState, use } from "react";
 import { getUserProfile } from "@/lib/db/users";
 import { getAllUserWorks } from "@/lib/db/works";
 import { fetchAniListBatch } from "@/lib/anilist";
+import { auth } from "@/lib/firebase";
+import { onAuthStateChanged } from "firebase/auth";
 import Link from "next/link";
-import { User as UserIcon } from "lucide-react";
+import { User as UserIcon, ChevronDown, ChevronUp } from "lucide-react";
 import { ProfileStats } from "@/components/ui/ProfileStats";
 import { useAppStore } from "@/lib/store";
 
@@ -39,6 +41,9 @@ export default function PublicProfilePage({ params }: { params: Promise<{ id: st
   const [favItems, setFavItems] = useState<any[]>([]);
   const [aniListDetails, setAniListDetails] = useState<Record<string, any>>({});
   const [allWorks, setAllWorks] = useState<any[]>([]);
+  const [myWorks, setMyWorks] = useState<any[]>([]);
+  const [isOwnProfile, setIsOwnProfile] = useState(false);
+  const [showTasteDetails, setShowTasteDetails] = useState(false);
   const [onlyMalOpen, setOnlyMalOpen] = useState(false);
 
   const ratedWorks = useMemo(() => {
@@ -51,6 +56,98 @@ export default function PublicProfilePage({ params }: { params: Promise<{ id: st
       )
       .sort((a, b) => (b.evaluation?.overallScore || 0) - (a.evaluation?.overallScore || 0));
   }, [allWorks, aniListDetails, contentType, onlyMalOpen]);
+
+  // Taste compatibility calculation with the logged-in user
+  const tasteMatch = useMemo(() => {
+    if (isOwnProfile || myWorks.length === 0 || allWorks.length === 0) return null;
+
+    const myRatedMap = new Map<string, number>();
+    myWorks.forEach((w) => {
+      const score = Number(w.evaluation?.overallScore) || 0;
+      if (score > 0) myRatedMap.set(w.work_id, score);
+    });
+    if (myRatedMap.size === 0) return null;
+
+    type SharedRating = {
+      workId: string;
+      title: string;
+      myScore: number;
+      friendScore: number;
+      diff: number;
+      type?: string;
+    };
+
+    const allShared: SharedRating[] = [];
+    allWorks.forEach((w) => {
+      const friendScore = Number(w.evaluation?.overallScore) || 0;
+      if (friendScore <= 0) return;
+      const myScore = myRatedMap.get(w.work_id);
+      if (myScore === undefined) return;
+      const details = aniListDetails[w.work_id];
+      allShared.push({
+        workId: w.work_id,
+        title: details?.title?.english || details?.title?.romaji || `Werk #${w.work_id}`,
+        myScore,
+        friendScore,
+        diff: Math.abs(myScore - friendScore),
+        type: details?.type,
+      });
+    });
+
+    if (allShared.length === 0) return null;
+
+    const typedShared = allShared.filter((s) => s.type === contentType);
+    const activeShared = typedShared.length > 0 ? typedShared : allShared;
+    const isScopedToType = typedShared.length > 0;
+
+    const avgDiff =
+      activeShared.reduce((acc, item) => acc + item.diff, 0) / activeShared.length;
+    const matchPercent = Math.round(
+      Math.max(0, Math.min(100, (1 - avgDiff / 6) * 100))
+    );
+
+    const agreements = [...activeShared]
+      .filter((s) => s.diff <= 1.2)
+      .sort((a, b) => a.diff - b.diff || (b.myScore + b.friendScore) - (a.myScore + a.friendScore))
+      .slice(0, 3);
+
+    const controversies = [...activeShared]
+      .filter((s) => s.diff >= 1.5)
+      .sort((a, b) => b.diff - a.diff)
+      .slice(0, 3);
+
+    return {
+      matchPercent,
+      sharedCount: activeShared.length,
+      isScopedToType,
+      agreements,
+      controversies,
+    };
+  }, [isOwnProfile, myWorks, allWorks, aniListDetails, contentType]);
+
+  useEffect(() => {
+    if (!auth) return;
+    const unsub = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser) {
+        setMyWorks([]);
+        setIsOwnProfile(false);
+        return;
+      }
+      if (currentUser.uid === userId) {
+        setIsOwnProfile(true);
+        setMyWorks([]);
+        return;
+      }
+      setIsOwnProfile(false);
+      try {
+        const works = await getAllUserWorks(currentUser.uid);
+        setMyWorks(works);
+      } catch (err) {
+        console.warn("Could not load viewer works for taste match:", err);
+      }
+    });
+    return () => unsub();
+  }, [userId]);
 
   useEffect(() => {
     async function load() {
@@ -94,22 +191,94 @@ export default function PublicProfilePage({ params }: { params: Promise<{ id: st
     return <div className="p-10 text-center text-red-400">Profil nicht gefunden.</div>;
   }
 
+  const friendShortName = profile.username || "Freund";
+
   return (
     <div className="flex flex-col gap-6 px-4 pt-6 pb-24 max-w-lg mx-auto">
-      <div className="flex items-center gap-4 bg-[#1a1d24] p-4 rounded-xl border border-gray-800 shadow-lg">
-        <button onClick={() => window.history.back()} className="text-gray-400 hover:text-white p-2 shrink-0">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-        </button>
-        <div className="h-20 w-20 rounded-full bg-gray-700 flex items-center justify-center overflow-hidden border-2 border-blue-500 shrink-0">
-          {profile.avatar_url ? (
-            <img src={profile.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
-          ) : (
-            <UserIcon size={32} className="text-gray-400" />
-          )}
+      <div className="flex flex-col bg-[#1a1d24] rounded-xl border border-gray-800 shadow-lg overflow-hidden">
+        <div className="flex items-center gap-4 p-4">
+          <button onClick={() => window.history.back()} className="text-gray-400 hover:text-white p-2 shrink-0">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <div className="h-20 w-20 rounded-full bg-gray-700 flex items-center justify-center overflow-hidden border-2 border-blue-500 shrink-0">
+            {profile.avatar_url ? (
+              <img src={profile.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
+            ) : (
+              <UserIcon size={32} className="text-gray-400" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-2xl font-bold text-white truncate">{friendShortName}</h2>
+            {tasteMatch && (
+              <button
+                type="button"
+                onClick={() => setShowTasteDetails((v) => !v)}
+                className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/25 text-blue-300 transition-colors"
+                title="Übereinstimmungen & Kontroversen anzeigen"
+              >
+                <span className="tabular-nums">{tasteMatch.matchPercent} % Match</span>
+                <span className="text-gray-500">·</span>
+                <span className="text-gray-400">{tasteMatch.sharedCount} gemeinsam</span>
+                {showTasteDetails ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+            )}
+          </div>
         </div>
-        <div>
-          <h2 className="text-2xl font-bold text-white">{profile.username || "Unbekannt"}</h2>
-        </div>
+
+        {/* Collapsible Taste Comparison Details */}
+        {tasteMatch && showTasteDetails && (
+          <div className="border-t border-gray-800/90 bg-[#141720]/70 px-4 py-3 flex flex-col gap-3">
+            {tasteMatch.agreements.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400/90">
+                  Größte Übereinstimmungen
+                </span>
+                <div className="flex flex-col gap-1">
+                  {tasteMatch.agreements.map((item) => (
+                    <Link
+                      key={`agree-${item.workId}`}
+                      href={`/work/${item.workId}`}
+                      className="flex items-center justify-between gap-2 text-xs py-1 px-2 rounded-lg hover:bg-white/[0.04] transition-colors"
+                    >
+                      <span className="text-gray-200 truncate">{item.title}</span>
+                      <span className="text-[11px] text-emerald-300 font-semibold shrink-0 tabular-nums">
+                        Du {item.myScore.toFixed(1)} · {friendShortName} {item.friendScore.toFixed(1)}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {tasteMatch.controversies.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400/90">
+                  Größte Kontroversen
+                </span>
+                <div className="flex flex-col gap-1">
+                  {tasteMatch.controversies.map((item) => (
+                    <Link
+                      key={`contra-${item.workId}`}
+                      href={`/work/${item.workId}`}
+                      className="flex items-center justify-between gap-2 text-xs py-1 px-2 rounded-lg hover:bg-white/[0.04] transition-colors"
+                    >
+                      <span className="text-gray-200 truncate">{item.title}</span>
+                      <span className="text-[11px] text-rose-300 font-semibold shrink-0 tabular-nums">
+                        Du {item.myScore.toFixed(1)} vs. {friendShortName} {item.friendScore.toFixed(1)}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {tasteMatch.agreements.length === 0 && tasteMatch.controversies.length === 0 && (
+              <p className="text-xs text-gray-500">
+                Eure Bewertungen liegen bei den gemeinsamen Werken alle im Mittelfeld beieinander.
+              </p>
+            )}
+          </div>
+        )}
       </div>
       
       <ProfileStats allWorks={allWorks} aniListDetails={aniListDetails} />

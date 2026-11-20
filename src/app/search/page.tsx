@@ -4,9 +4,11 @@ import { useState, useEffect, useMemo, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   fetchAniList,
+  fetchAniListBatch,
   SEARCH_WORKS,
   GET_UPCOMING_WORKS,
   GET_TRENDING_WORKS,
+  GET_RECOMMENDATIONS_FOR_WORKS,
   ANILIST_GENRES,
 } from "@/lib/anilist";
 import { useAppStore } from "@/lib/store";
@@ -21,6 +23,7 @@ import {
   Users,
   X,
   SlidersHorizontal,
+  Wand2,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -59,6 +62,14 @@ type OtherUserTrack = {
   status: string;
 };
 
+type RatedSeedWork = {
+  workId: number;
+  score: number;
+  title?: string;
+  type?: "ANIME" | "MANGA";
+  genres?: string[];
+};
+
 function SearchContent() {
   const searchParams = useSearchParams();
   const query = searchParams?.get("q") || "";
@@ -66,7 +77,7 @@ function SearchContent() {
   const router = useRouter();
 
   const [input, setInput] = useState(query);
-  const [discoverTab, setDiscoverTab] = useState<"SEASON" | "UPCOMING">("SEASON");
+  const [discoverTab, setDiscoverTab] = useState<"SEASON" | "UPCOMING" | "FOR_YOU">("SEASON");
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [showGenreFilter, setShowGenreFilter] = useState(false);
   const genreMenuRef = useRef<HTMLDivElement>(null);
@@ -81,6 +92,11 @@ function SearchContent() {
   const [queryExcludeIds, setQueryExcludeIds] = useState<number[]>([]);
   // All works in the user's library (for sequel/spin-off relation detection)
   const [allMyLibraryIds, setAllMyLibraryIds] = useState<Set<number>>(new Set());
+  // User's previously rated works for "Für dich / Ähnlich zu..." discovery
+  const [myRatedWorksRaw, setMyRatedWorksRaw] = useState<Array<{ workId: number; score: number }>>([]);
+  const [ratedMediaMap, setRatedMediaMap] = useState<Record<number, any>>({});
+  const [selectedSeedWorkId, setSelectedSeedWorkId] = useState<string>("ALL");
+  const [recReasonByWorkId, setRecReasonByWorkId] = useState<Record<number, string>>({});
   // Other users' active / wishlist tracking per workId
   const [communityTracksByWork, setCommunityTracksByWork] = useState<
     Record<number, OtherUserTrack[]>
@@ -91,6 +107,11 @@ function SearchContent() {
   useEffect(() => {
     setInput(query);
   }, [query]);
+
+  // Reset specific seed work when switching Anime/Manga
+  useEffect(() => {
+    setSelectedSeedWorkId("ALL");
+  }, [contentType]);
 
   useEffect(() => {
     if (!showGenreFilter) return;
@@ -120,6 +141,8 @@ function SearchContent() {
         setHiddenMyWorkIds(new Set());
         setQueryExcludeIds([]);
         setAllMyLibraryIds(new Set());
+        setMyRatedWorksRaw([]);
+        setRatedMediaMap({});
         setCommunityTracksByWork({});
         setIsLibraryLoaded(true);
         return;
@@ -134,10 +157,15 @@ function SearchContent() {
 
         const hiddenIds = new Set<number>();
         const allMyIds = new Set<number>();
+        const ratedRaw: Array<{ workId: number; score: number }> = [];
         myWorks.forEach((w) => {
           const parsed = parseInt(w.work_id, 10);
           if (!Number.isNaN(parsed)) {
             allMyIds.add(parsed);
+            const score = Number(w.evaluation?.overallScore) || 0;
+            if (score > 0) {
+              ratedRaw.push({ workId: parsed, score });
+            }
             // Hide works the user is actively watching/reading, has on their wishlist, or already completed
             if (
               w.status === "CURRENT" ||
@@ -149,6 +177,8 @@ function SearchContent() {
             }
           }
         });
+        ratedRaw.sort((a, b) => b.score - a.score);
+        setMyRatedWorksRaw(ratedRaw);
         setHiddenMyWorkIds(hiddenIds);
         setQueryExcludeIds(Array.from(hiddenIds));
         setAllMyLibraryIds(allMyIds);
@@ -193,6 +223,22 @@ function SearchContent() {
     return () => unsub();
   }, []);
 
+  // Rated seed works matching current contentType (with titles once loaded)
+  const ratedSeedWorksForType = useMemo<RatedSeedWork[]>(() => {
+    return myRatedWorksRaw
+      .map((r) => {
+        const m = ratedMediaMap[r.workId];
+        return {
+          workId: r.workId,
+          score: r.score,
+          title: m?.title?.english || m?.title?.romaji,
+          type: m?.type,
+          genres: Array.isArray(m?.genres) ? m.genres : undefined,
+        };
+      })
+      .filter((r) => !r.type || r.type === contentType);
+  }, [myRatedWorksRaw, ratedMediaMap, contentType]);
+
   useEffect(() => {
     if (!isLibraryLoaded) return;
 
@@ -205,7 +251,150 @@ function SearchContent() {
           selectedGenres.length > 0 ? selectedGenres : undefined;
 
         if (!query) {
-          if (discoverTab === "SEASON") {
+          if (discoverTab === "FOR_YOU") {
+            if (myRatedWorksRaw.length === 0) {
+              setResults([]);
+              setRecReasonByWorkId({});
+              return;
+            }
+
+            // Lazily load metadata for user's top rated works so we know type/title/genres
+            let currentRatedMap = ratedMediaMap;
+            const topIdsForMeta = myRatedWorksRaw.slice(0, 40).map((r) => r.workId);
+            const missingMetaIds = topIdsForMeta.filter((id) => !currentRatedMap[id]);
+            if (missingMetaIds.length > 0) {
+              const fetched = await fetchAniListBatch(missingMetaIds);
+              const nextMap: Record<number, any> = { ...currentRatedMap };
+              fetched.forEach((m: any) => {
+                if (m?.id) nextMap[m.id] = m;
+              });
+              currentRatedMap = nextMap;
+              setRatedMediaMap(nextMap);
+            }
+
+            const typedRated = myRatedWorksRaw.filter(
+              (r) => currentRatedMap[r.workId]?.type === contentType
+            );
+            if (typedRated.length === 0) {
+              setResults([]);
+              setRecReasonByWorkId({});
+              return;
+            }
+
+            const isSingleSeed = selectedSeedWorkId !== "ALL";
+            const singleSeedNum = isSingleSeed ? parseInt(selectedSeedWorkId, 10) : NaN;
+            const highRated = typedRated.filter((r) => r.score >= 7);
+            const seedPool = isSingleSeed && !Number.isNaN(singleSeedNum)
+              ? typedRated.filter((r) => r.workId === singleSeedNum)
+              : (highRated.length > 0 ? highRated : typedRated).slice(0, 10);
+
+            if (seedPool.length === 0) {
+              setResults([]);
+              setRecReasonByWorkId({});
+              return;
+            }
+
+            const seedScoreMap = new Map<number, number>();
+            seedPool.forEach((s) => seedScoreMap.set(s.workId, s.score));
+
+            const data = await fetchAniList(GET_RECOMMENDATIONS_FOR_WORKS, {
+              ids: seedPool.map((s) => s.workId),
+              recPerPage: isSingleSeed ? 25 : 12,
+            });
+
+            const excludeSet = new Set<number>(queryExcludeIds);
+            const candidateMap = new Map<
+              number,
+              { media: any; weight: number; bestSeedWeight: number; reasonTitle: string }
+            >();
+
+            const seedMedias: any[] = data?.Page?.media || [];
+            seedMedias.forEach((seedMedia) => {
+              const seedTitle =
+                seedMedia?.title?.english || seedMedia?.title?.romaji || "";
+              const userScore = seedScoreMap.get(seedMedia.id) || 7;
+              const nodes: any[] = seedMedia?.recommendations?.nodes || [];
+              nodes.forEach((node) => {
+                const rec = node?.mediaRecommendation;
+                if (!rec || !rec.id) return;
+                if (rec.type !== contentType) return;
+                if (excludeSet.has(rec.id)) return;
+                if (
+                  selectedGenres.length > 0 &&
+                  (!Array.isArray(rec.genres) ||
+                    !selectedGenres.every((g) => rec.genres.includes(g)))
+                ) {
+                  return;
+                }
+                const recRating = Math.max(0, Number(node?.rating) || 0);
+                const weight = userScore * (1 + Math.log1p(recRating));
+                const existing = candidateMap.get(rec.id);
+                if (existing) {
+                  existing.weight += weight;
+                  if (weight > existing.bestSeedWeight && seedTitle) {
+                    existing.bestSeedWeight = weight;
+                    existing.reasonTitle = seedTitle;
+                  }
+                } else {
+                  candidateMap.set(rec.id, {
+                    media: rec,
+                    weight,
+                    bestSeedWeight: weight,
+                    reasonTitle: seedTitle,
+                  });
+                }
+              });
+            });
+
+            let ranked = Array.from(candidateMap.values())
+              .sort((a, b) => b.weight - a.weight)
+              .slice(0, 36);
+
+            // Genre fallback if AniList had very few community recommendations
+            if (ranked.length < 6) {
+              const primarySeed = seedMedias[0] || currentRatedMap[seedPool[0].workId];
+              const seedGenres: string[] = Array.isArray(primarySeed?.genres)
+                ? primarySeed.genres.slice(0, 2)
+                : [];
+              const fallbackGenres =
+                selectedGenres.length > 0
+                  ? selectedGenres
+                  : seedGenres.length > 0
+                  ? seedGenres
+                  : undefined;
+              if (fallbackGenres) {
+                const fallbackData = await fetchAniList(GET_TRENDING_WORKS, {
+                  type: contentType,
+                  perPage: 24,
+                  genre_in: fallbackGenres,
+                  excludeIds: excludeParam,
+                });
+                const fallbackMedia: any[] = fallbackData?.Page?.media || [];
+                const existingIds = new Set(ranked.map((r) => r.media.id));
+                const seedLabel =
+                  primarySeed?.title?.english || primarySeed?.title?.romaji || "";
+                fallbackMedia.forEach((m) => {
+                  if (!m?.id || existingIds.has(m.id) || excludeSet.has(m.id)) return;
+                  existingIds.add(m.id);
+                  ranked.push({
+                    media: m,
+                    weight: 0,
+                    bestSeedWeight: 0,
+                    reasonTitle: seedLabel,
+                  });
+                });
+                ranked = ranked.slice(0, 36);
+              }
+            }
+
+            const reasons: Record<number, string> = {};
+            ranked.forEach((r) => {
+              if (r.reasonTitle) reasons[r.media.id] = r.reasonTitle;
+            });
+            setRecReasonByWorkId(reasons);
+            setResults(ranked.map((r) => r.media));
+          } else if (discoverTab === "SEASON") {
+            setRecReasonByWorkId({});
             // For Anime: current season & year; for Manga: trending/releasing works
             const vars =
               contentType === "ANIME"
@@ -226,6 +415,7 @@ function SearchContent() {
             const data = await fetchAniList(GET_TRENDING_WORKS, vars);
             setResults(data?.Page?.media || []);
           } else {
+            setRecReasonByWorkId({});
             const data = await fetchAniList(GET_UPCOMING_WORKS, {
               type: contentType,
               perPage: 36,
@@ -235,6 +425,7 @@ function SearchContent() {
             setResults(data?.Page?.media || []);
           }
         } else {
+          setRecReasonByWorkId({});
           const data = await fetchAniList(SEARCH_WORKS, {
             search: query,
             type: contentType,
@@ -251,7 +442,17 @@ function SearchContent() {
       }
     }
     doSearch();
-  }, [query, contentType, discoverTab, seasonInfo, isLibraryLoaded, queryExcludeIds, selectedGenres]);
+  }, [
+    query,
+    contentType,
+    discoverTab,
+    seasonInfo,
+    isLibraryLoaded,
+    queryExcludeIds,
+    selectedGenres,
+    myRatedWorksRaw,
+    selectedSeedWorkId,
+  ]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -476,37 +677,72 @@ function SearchContent() {
         </div>
       )}
 
-      {/* Switcher: Diese Season vs. Bald verfügbar */}
+      {/* Switcher: Diese Season vs. Bald verfügbar vs. Für dich */}
       {!query && (
-        <div className="flex items-center justify-between gap-2 bg-[#141720] p-1.5 rounded-xl border border-gray-800">
+        <div className="flex items-center justify-between gap-1.5 bg-[#141720] p-1.5 rounded-xl border border-gray-800">
           <button
             type="button"
             onClick={() => setDiscoverTab("SEASON")}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-extrabold transition-all ${
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-xs font-extrabold transition-all whitespace-nowrap ${
               discoverTab === "SEASON"
                 ? "bg-blue-600 text-white shadow-md shadow-blue-600/25"
                 : "text-gray-400 hover:text-white"
             }`}
           >
-            <Flame size={15} className={discoverTab === "SEASON" ? "text-amber-300" : "text-gray-400"} />
+            <Flame size={14} className={discoverTab === "SEASON" ? "text-amber-300" : "text-gray-400"} />
             <span>
-              {contentType === "ANIME"
-                ? `Diese Season (${seasonInfo.label})`
-                : "Aktuell im Trend"}
+              {contentType === "ANIME" ? "Season" : "Im Trend"}
             </span>
           </button>
           <button
             type="button"
             onClick={() => setDiscoverTab("UPCOMING")}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-extrabold transition-all ${
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-xs font-extrabold transition-all whitespace-nowrap ${
               discoverTab === "UPCOMING"
                 ? "bg-purple-600 text-white shadow-md shadow-purple-600/25"
                 : "text-gray-400 hover:text-white"
             }`}
           >
-            <Sparkles size={15} className={discoverTab === "UPCOMING" ? "text-yellow-300" : "text-gray-400"} />
-            <span>Bald verfügbar</span>
+            <Sparkles size={14} className={discoverTab === "UPCOMING" ? "text-yellow-300" : "text-gray-400"} />
+            <span>Bald</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setDiscoverTab("FOR_YOU")}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 px-2 rounded-lg text-xs font-extrabold transition-all whitespace-nowrap ${
+              discoverTab === "FOR_YOU"
+                ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/25"
+                : "text-gray-400 hover:text-white"
+            }`}
+          >
+            <Wand2 size={14} className={discoverTab === "FOR_YOU" ? "text-emerald-200" : "text-gray-400"} />
+            <span>Für dich</span>
+          </button>
+        </div>
+      )}
+
+      {/* Subtle seed-work selector ONLY in "Für dich" tab */}
+      {!query && discoverTab === "FOR_YOU" && ratedSeedWorksForType.length > 0 && (
+        <div className="flex items-center justify-between gap-2 -mt-2">
+          <span className="text-[11px] text-gray-500 shrink-0">
+            Ähnlich zu:
+          </span>
+          <select
+            value={selectedSeedWorkId}
+            onChange={(e) => setSelectedSeedWorkId(e.target.value)}
+            aria-label="Basis-Werk für Empfehlungen wählen"
+            className="max-w-[75%] sm:max-w-xs truncate rounded-xl border border-gray-800 bg-[#1a1d24] px-3 py-1.5 text-xs font-semibold text-gray-200 focus:border-emerald-500 focus:outline-none"
+          >
+            <option value="ALL">Alle meine Favoriten</option>
+            {ratedSeedWorksForType
+              .filter((w) => w.title)
+              .slice(0, 35)
+              .map((w) => (
+                <option key={w.workId} value={String(w.workId)}>
+                  {w.title} (★ {w.score.toFixed(1)})
+                </option>
+              ))}
+          </select>
         </div>
       )}
 
@@ -518,6 +754,11 @@ function SearchContent() {
             <h2 className="text-base font-bold text-white flex items-center gap-2">
               {query ? (
                 <>Suchergebnisse für „{query}“</>
+              ) : discoverTab === "FOR_YOU" ? (
+                <>
+                  <Wand2 size={17} className="text-emerald-400" />
+                  Empfehlungen für dich
+                </>
               ) : discoverTab === "SEASON" ? (
                 <>
                   <Flame size={18} className="text-orange-400" />
@@ -546,6 +787,7 @@ function SearchContent() {
               const activeFriends = otherTracks.filter((t) => t.status === "CURRENT");
               const wishlistFriends = otherTracks.filter((t) => t.status === "PLANNING");
               const hasFriendTracking = otherTracks.length > 0;
+              const recReason = discoverTab === "FOR_YOU" ? recReasonByWorkId[work.id] : undefined;
 
               return (
                 <Link
@@ -620,6 +862,11 @@ function SearchContent() {
                     <h3 className="font-bold text-white text-xs sm:text-sm line-clamp-2 leading-snug">
                       {work.title.english || work.title.romaji}
                     </h3>
+                    {recReason && (
+                      <p className="text-[10px] text-emerald-300/85 truncate mt-0.5">
+                        Ähnlich zu {recReason}
+                      </p>
+                    )}
                     <div className="flex items-center justify-between gap-2 text-[11px] text-gray-300 mt-1">
                       <div className="flex items-center gap-1">
                         <Star size={11} className="text-yellow-400 fill-yellow-400" />
@@ -656,6 +903,14 @@ function SearchContent() {
               Genre-Filter zurücksetzen
             </button>
           )}
+        </div>
+      ) : discoverTab === "FOR_YOU" && !currentUserUid ? (
+        <div className="text-center text-gray-500 mt-8">
+          Logge dich ein, um Empfehlungen anhand deiner bewerteten Werke zu erhalten.
+        </div>
+      ) : discoverTab === "FOR_YOU" && ratedSeedWorksForType.length === 0 ? (
+        <div className="text-center text-gray-500 mt-8">
+          Bewerte zuerst ein paar {contentType === "ANIME" ? "Anime" : "Manga"} in deiner Bibliothek, damit wir passende Empfehlungen für dich finden können.
         </div>
       ) : (
         <div className="text-center text-gray-500 mt-8 flex flex-col items-center gap-2.5">

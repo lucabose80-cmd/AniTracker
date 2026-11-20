@@ -17,6 +17,11 @@ import {
   LayoutGrid,
   SlidersHorizontal,
   ArrowUpDown,
+  Dices,
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  Star,
 } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import { ANILIST_GENRES, fetchAniListBatch } from "@/lib/anilist";
@@ -173,6 +178,13 @@ export default function LibraryPage() {
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const filterMenuRef = useRef<HTMLDivElement>(null);
 
+  // Subtle Sequel Hint & Random Wishlist Pick State
+  const [showSequels, setShowSequels] = useState(false);
+  const [dismissedSequelIds, setDismissedSequelIds] = useState<Set<string>>(new Set());
+  const [addingSequelId, setAddingSequelId] = useState<string | null>(null);
+  const [randomPickWork, setRandomPickWork] = useState<UserWork | null>(null);
+  const [isStartingRandom, setIsStartingRandom] = useState(false);
+
   // Quick-Edit Modal State
   const [editingWork, setEditingWork] = useState<UserWork | null>(null);
   const [editEpisode, setEditEpisode] = useState<number>(0);
@@ -184,6 +196,13 @@ export default function LibraryPage() {
     try {
       const savedCols = window.localStorage.getItem("weebcheck_lib_cols");
       if (savedCols === "2") setViewColumns(2);
+      const savedDismissedSequels = window.localStorage.getItem("anipulse_dismissed_sequels");
+      if (savedDismissedSequels) {
+        const parsed = JSON.parse(savedDismissedSequels);
+        if (Array.isArray(parsed)) {
+          setDismissedSequelIds(new Set(parsed.filter((x) => typeof x === "string")));
+        }
+      }
     } catch {
       // ignore localStorage errors
     }
@@ -265,6 +284,138 @@ export default function LibraryPage() {
   const contentTypeWorks = useMemo(() => {
     return allWorks.filter((w) => aniListDetails[w.work_id]?.type === contentType);
   }, [allWorks, aniListDetails, contentType]);
+
+  // Detect sequels (RELEASING or NOT_YET_RELEASED) for user's COMPLETED works that aren't in library yet
+  const availableSequels = useMemo(() => {
+    const libraryIdSet = new Set(allWorks.map((w) => String(w.work_id)));
+    const seenSequelIds = new Set<string>();
+    const results: Array<{
+      id: string;
+      title: string;
+      cover?: string;
+      status: "RELEASING" | "NOT_YET_RELEASED";
+      fromTitle: string;
+    }> = [];
+
+    contentTypeWorks.forEach((w) => {
+      if (w.status !== "COMPLETED") return;
+      const details = aniListDetails[w.work_id];
+      const edges = details?.relations?.edges;
+      if (!Array.isArray(edges)) return;
+      const fromTitle = details?.title?.english || details?.title?.romaji || "";
+
+      edges.forEach((edge: any) => {
+        if (edge?.relationType !== "SEQUEL") return;
+        const node = edge?.node;
+        if (!node?.id) return;
+        if (node.type !== contentType) return;
+        if (node.status !== "RELEASING" && node.status !== "NOT_YET_RELEASED") return;
+        const seqId = String(node.id);
+        if (libraryIdSet.has(seqId) || dismissedSequelIds.has(seqId) || seenSequelIds.has(seqId)) {
+          return;
+        }
+        seenSequelIds.add(seqId);
+        results.push({
+          id: seqId,
+          title: node.title?.english || node.title?.romaji || `Werk #${seqId}`,
+          cover: node.coverImage?.medium || node.coverImage?.large,
+          status: node.status,
+          fromTitle,
+        });
+      });
+    });
+
+    return results.sort((a, b) =>
+      a.status === b.status ? a.title.localeCompare(b.title, "de") : a.status === "RELEASING" ? -1 : 1
+    );
+  }, [allWorks, contentTypeWorks, aniListDetails, contentType, dismissedSequelIds]);
+
+  const handleDismissSequel = (sequelId: string) => {
+    setDismissedSequelIds((prev) => {
+      const next = new Set(prev);
+      next.add(sequelId);
+      try {
+        window.localStorage.setItem(
+          "anipulse_dismissed_sequels",
+          JSON.stringify(Array.from(next).slice(-200))
+        );
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  };
+
+  const handleQuickAddSequel = async (sequel: {
+    id: string;
+    status: "RELEASING" | "NOT_YET_RELEASED";
+  }) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || addingSequelId) return;
+    setAddingSequelId(sequel.id);
+    const targetStatus: UserWorkStatus =
+      sequel.status === "RELEASING" ? "CURRENT" : "PLANNING";
+    try {
+      await saveUserWork(uid, sequel.id, {
+        status: targetStatus,
+        added_status: sequel.status,
+        current_episode: 0,
+      });
+      const newEntry: UserWork = {
+        user_id: uid,
+        work_id: sequel.id,
+        status: targetStatus,
+        added_status: sequel.status,
+        current_episode: 0,
+        priority_tier: 2,
+        sync_offset_days: 0,
+        selected_platform: "",
+        adaptationScores: { story: 0, pacing: 0 },
+        classification: {
+          watchMode: "SUB",
+          romanceLevel: 0,
+          confessionTiming: "",
+          intimacyLevel: 0,
+          relationshipDynamics: "",
+          wholesomeLewdScale: 0,
+          comedySeriousScale: 0,
+          actionDialogScale: 0,
+          pacingScale: 0,
+        },
+        evaluation: {
+          plotAndStory: 0,
+          castAndCharacters: 0,
+          sideCharacters: 0,
+          ending: 0,
+          artstyleAndAnimation: 0,
+          introOutro: 0,
+          voiceActing: 0,
+          romanceAndChemistry: 0,
+          bingeFactor: 0,
+          emotionalImpact: "None",
+          comments: "",
+          overallScore: 0,
+        },
+      };
+      setAllWorks((prev) => [...prev, newEntry]);
+      // Load AniList details for the newly added sequel so it appears immediately in the right tab
+      const parsedId = parseInt(sequel.id, 10);
+      if (!Number.isNaN(parsedId)) {
+        const fetched = await fetchAniListBatch([parsedId]).catch(() => []);
+        if (fetched.length > 0) {
+          setAniListDetails((prev) => ({
+            ...prev,
+            [sequel.id]: fetched[0],
+          }));
+        }
+      }
+    } catch (err) {
+      console.error("Failed to add sequel:", err);
+      alert("Fehler beim Hinzufügen der Fortsetzung.");
+    } finally {
+      setAddingSequelId(null);
+    }
+  };
 
   // Available genres present in the user's current Anime/Manga library
   const availableGenres = useMemo(() => {
@@ -503,9 +654,41 @@ export default function LibraryPage() {
         : "Offene Folgen"
       : "Zuletzt";
 
+  const handlePickRandomWishlist = (excludeWorkId?: string) => {
+    if (visibleWorks.length === 0) return;
+    const pool =
+      visibleWorks.length > 1 && excludeWorkId
+        ? visibleWorks.filter((w) => w.work_id !== excludeWorkId)
+        : visibleWorks;
+    const chosen = pool[Math.floor(Math.random() * pool.length)];
+    if (chosen) setRandomPickWork(chosen);
+  };
+
+  const handleStartRandomPick = async () => {
+    if (!randomPickWork || isStartingRandom) return;
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    setIsStartingRandom(true);
+    try {
+      await updateUserWorkStatus(uid, randomPickWork.work_id, "CURRENT");
+      setAllWorks((prev) =>
+        prev.map((w) =>
+          w.work_id === randomPickWork.work_id ? { ...w, status: "CURRENT" } : w
+        )
+      );
+      setRandomPickWork(null);
+      setActiveTab("CURRENT");
+    } catch (err) {
+      console.error("Failed to start random wishlist work:", err);
+      alert("Fehler beim Verschieben auf Aktiv.");
+    } finally {
+      setIsStartingRandom(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-3.5 px-4 pt-4 pb-24 max-w-4xl mx-auto">
-      {/* Compact Top Row: Search + Sort/Filter Button + 1/2 Column Switcher */}
+      {/* Compact Top Row: Search + Sort/Filter Button + (Optional Dice on Planung) + 1/2 Column Switcher */}
       <div className="relative flex items-center gap-2" ref={filterMenuRef}>
         <div className="relative flex-1 min-w-0">
           <Search
@@ -530,6 +713,19 @@ export default function LibraryPage() {
             </button>
           )}
         </div>
+
+        {/* Subtle Random Wishlist Dice Button (ONLY on Planung tab with >= 2 works) */}
+        {activeTab === "PLANNING" && visibleWorks.length >= 2 && (
+          <button
+            type="button"
+            onClick={() => handlePickRandomWishlist()}
+            className="flex items-center justify-center p-2 rounded-xl border border-gray-800 bg-[#1a1d24] text-gray-300 hover:text-purple-300 hover:border-purple-500/40 transition-colors shrink-0"
+            title="Zufälliges Werk aus der Wunschliste wählen"
+            aria-label="Zufall aus Wunschliste"
+          >
+            <Dices size={15} />
+          </button>
+        )}
 
         {/* Sort & Filter Popover Trigger */}
         <button
@@ -732,6 +928,103 @@ export default function LibraryPage() {
           );
         })}
       </div>
+
+      {/* Subtle 1-line Collapsible Sequel Available Hint (only shown when completed works have unadded sequels) */}
+      {!isLoading && availableSequels.length > 0 && (
+        <div className="rounded-xl border border-blue-500/25 bg-[#151925]/90 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowSequels((v) => !v)}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-xs hover:bg-white/[0.03] transition-colors"
+          >
+            <span className="inline-flex items-center gap-1.5 font-semibold text-blue-300 truncate">
+              <Sparkles size={13} className="text-blue-400 shrink-0" />
+              <span>
+                {availableSequels.length === 1
+                  ? "1 Fortsetzung verfügbar"
+                  : `${availableSequels.length} Fortsetzungen verfügbar`}
+              </span>
+            </span>
+            <span className="inline-flex items-center gap-1 text-[11px] text-gray-400 shrink-0">
+              {showSequels ? "Ausblenden" : "Anzeigen"}
+              {showSequels ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            </span>
+          </button>
+
+          {showSequels && (
+            <div className="border-t border-gray-800/80 divide-y divide-gray-800/60">
+              {availableSequels.map((seq) => {
+                const isReleasing = seq.status === "RELEASING";
+                const isBusy = addingSequelId === seq.id;
+                return (
+                  <div
+                    key={seq.id}
+                    className="flex items-center gap-2.5 px-3 py-2 bg-[#121620]/70"
+                  >
+                    <Link
+                      href={`/work/${seq.id}`}
+                      className="w-8 h-11 rounded overflow-hidden bg-gray-800 shrink-0 block"
+                    >
+                      {seq.cover && (
+                        <img
+                          src={seq.cover}
+                          alt={seq.title}
+                          className="w-full h-full object-cover"
+                        />
+                      )}
+                    </Link>
+
+                    <div className="flex-1 min-w-0">
+                      <Link
+                        href={`/work/${seq.id}`}
+                        className="text-xs font-semibold text-white hover:text-blue-300 transition-colors truncate block"
+                      >
+                        {seq.title}
+                      </Link>
+                      <div className="flex items-center gap-1.5 mt-0.5 text-[10px]">
+                        <span
+                          className={`px-1.5 py-0.2 rounded font-semibold ${
+                            isReleasing
+                              ? "bg-emerald-500/15 text-emerald-300"
+                              : "bg-purple-500/15 text-purple-300"
+                          }`}
+                        >
+                          {isReleasing ? "Läuft jetzt" : "Angekündigt"}
+                        </span>
+                        {seq.fromTitle && (
+                          <span className="text-gray-500 truncate">
+                            nach {seq.fromTitle}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => handleQuickAddSequel(seq)}
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 transition-colors disabled:opacity-50 whitespace-nowrap"
+                      >
+                        {isBusy ? "..." : isReleasing ? "+ Aktiv" : "+ Planung"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDismissSequel(seq.id)}
+                        className="p-1 text-gray-500 hover:text-gray-300 transition-colors"
+                        title="Hinweis ausblenden"
+                        aria-label="Hinweis ausblenden"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Watchlist / Tracking Rows or 2-Column Grid */}
       {isLoading ? (
@@ -1238,6 +1531,121 @@ export default function LibraryPage() {
           </div>
         </div>
       )}
+
+      {/* Compact Random Wishlist Pick Modal */}
+      {randomPickWork && (() => {
+        const det = aniListDetails[randomPickWork.work_id];
+        const title =
+          det?.title?.english || det?.title?.romaji || `Werk #${randomPickWork.work_id}`;
+        const cover = det?.coverImage?.extraLarge || det?.coverImage?.large;
+        const genres: string[] = Array.isArray(det?.genres) ? det.genres.slice(0, 3) : [];
+        const totalEps =
+          det?.type === "MANGA" ? det?.chapters : det?.episodes;
+        const score = det?.averageScore ? (det.averageScore / 10).toFixed(1) : null;
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
+            onClick={() => !isStartingRandom && setRandomPickWork(null)}
+          >
+            <div
+              className="w-full max-w-sm rounded-2xl border border-gray-800 bg-[#14171f] p-4 shadow-2xl flex flex-col gap-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between">
+                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-purple-300">
+                  <Dices size={14} />
+                  Zufallsauswahl{selectedGenres.length > 0 ? ` · ${selectedGenres.join(", ")}` : ""}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setRandomPickWork(null)}
+                  className="p-1 text-gray-400 hover:text-white transition-colors"
+                  aria-label="Schließen"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="flex gap-3.5 items-start">
+                <Link
+                  href={`/work/${randomPickWork.work_id}`}
+                  className="w-20 h-28 rounded-xl overflow-hidden bg-gray-800 shrink-0 block"
+                >
+                  {cover && (
+                    <img
+                      src={cover}
+                      alt={title}
+                      className="w-full h-full object-cover"
+                    />
+                  )}
+                </Link>
+                <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                  <Link
+                    href={`/work/${randomPickWork.work_id}`}
+                    className="text-sm font-bold text-white hover:text-blue-400 transition-colors line-clamp-2 leading-snug"
+                  >
+                    {title}
+                  </Link>
+                  <div className="flex items-center gap-2 text-xs text-gray-400">
+                    {score && (
+                      <span className="inline-flex items-center gap-1 text-yellow-400 font-semibold">
+                        <Star size={11} className="fill-yellow-400" />
+                        {score}
+                      </span>
+                    )}
+                    {totalEps && (
+                      <span>
+                        {totalEps} {det?.type === "MANGA" ? "Kap." : "Folgen"}
+                      </span>
+                    )}
+                  </div>
+                  {genres.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-0.5">
+                      {genres.map((g) => (
+                        <span
+                          key={g}
+                          className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#1a1d24] border border-gray-800 text-gray-300"
+                        >
+                          {g}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={isStartingRandom}
+                  onClick={() => handlePickRandomWishlist(randomPickWork.work_id)}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-[#222631] hover:bg-gray-700 text-gray-200 transition-colors"
+                >
+                  <Dices size={13} />
+                  Nochmal
+                </button>
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/work/${randomPickWork.work_id}`}
+                    className="px-3 py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white bg-[#1a1d24] border border-gray-800 transition-colors"
+                  >
+                    Details
+                  </Link>
+                  <button
+                    type="button"
+                    disabled={isStartingRandom}
+                    onClick={handleStartRandomPick}
+                    className="px-3.5 py-2 rounded-xl text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 transition-colors"
+                  >
+                    {isStartingRandom ? "..." : "Starten"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
