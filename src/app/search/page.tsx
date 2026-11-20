@@ -24,6 +24,8 @@ import {
   X,
   SlidersHorizontal,
   Wand2,
+  ChevronDown,
+  Check,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -66,6 +68,7 @@ type RatedSeedWork = {
   workId: number;
   score: number;
   title?: string;
+  cover?: string;
   type?: "ANIME" | "MANGA";
   genres?: string[];
 };
@@ -96,6 +99,9 @@ function SearchContent() {
   const [myRatedWorksRaw, setMyRatedWorksRaw] = useState<Array<{ workId: number; score: number }>>([]);
   const [ratedMediaMap, setRatedMediaMap] = useState<Record<number, any>>({});
   const [selectedSeedWorkId, setSelectedSeedWorkId] = useState<string>("ALL");
+  const [showSeedPicker, setShowSeedPicker] = useState(false);
+  const [seedPickerQuery, setSeedPickerQuery] = useState("");
+  const seedPickerRef = useRef<HTMLDivElement>(null);
   const [recReasonByWorkId, setRecReasonByWorkId] = useState<Record<number, string>>({});
   // Other users' active / wishlist tracking per workId
   const [communityTracksByWork, setCommunityTracksByWork] = useState<
@@ -111,6 +117,8 @@ function SearchContent() {
   // Reset specific seed work when switching Anime/Manga
   useEffect(() => {
     setSelectedSeedWorkId("ALL");
+    setShowSeedPicker(false);
+    setSeedPickerQuery("");
   }, [contentType]);
 
   useEffect(() => {
@@ -123,6 +131,24 @@ function SearchContent() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showGenreFilter]);
+
+  useEffect(() => {
+    if (!showSeedPicker) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (seedPickerRef.current && !seedPickerRef.current.contains(e.target as Node)) {
+        setShowSeedPicker(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowSeedPicker(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showSeedPicker]);
 
   const toggleGenre = (genre: string) => {
     setSelectedGenres((prev) =>
@@ -223,7 +249,7 @@ function SearchContent() {
     return () => unsub();
   }, []);
 
-  // Rated seed works matching current contentType (with titles once loaded)
+  // Rated seed works matching current contentType (with titles & covers once loaded)
   const ratedSeedWorksForType = useMemo<RatedSeedWork[]>(() => {
     return myRatedWorksRaw
       .map((r) => {
@@ -232,12 +258,28 @@ function SearchContent() {
           workId: r.workId,
           score: r.score,
           title: m?.title?.english || m?.title?.romaji,
+          cover: m?.coverImage?.large || m?.coverImage?.extraLarge,
           type: m?.type,
           genres: Array.isArray(m?.genres) ? m.genres : undefined,
         };
       })
       .filter((r) => !r.type || r.type === contentType);
   }, [myRatedWorksRaw, ratedMediaMap, contentType]);
+
+  const activeSeedWork = useMemo(() => {
+    if (selectedSeedWorkId === "ALL") return null;
+    return (
+      ratedSeedWorksForType.find((w) => String(w.workId) === selectedSeedWorkId) ||
+      null
+    );
+  }, [ratedSeedWorksForType, selectedSeedWorkId]);
+
+  const filteredSeedWorks = useMemo(() => {
+    const q = seedPickerQuery.trim().toLowerCase();
+    const withTitle = ratedSeedWorksForType.filter((w) => w.title);
+    if (!q) return withTitle.slice(0, 50);
+    return withTitle.filter((w) => w.title?.toLowerCase().includes(q));
+  }, [ratedSeedWorksForType, seedPickerQuery]);
 
   useEffect(() => {
     if (!isLibraryLoaded) return;
@@ -260,7 +302,7 @@ function SearchContent() {
 
             // Lazily load metadata for user's top rated works so we know type/title/genres
             let currentRatedMap = ratedMediaMap;
-            const topIdsForMeta = myRatedWorksRaw.slice(0, 40).map((r) => r.workId);
+            const topIdsForMeta = myRatedWorksRaw.slice(0, 50).map((r) => r.workId);
             const missingMetaIds = topIdsForMeta.filter((id) => !currentRatedMap[id]);
             if (missingMetaIds.length > 0) {
               const fetched = await fetchAniListBatch(missingMetaIds);
@@ -721,28 +763,202 @@ function SearchContent() {
         </div>
       )}
 
-      {/* Subtle seed-work selector ONLY in "Für dich" tab */}
+      {/* Subtle custom seed-work selector ONLY in "Für dich" tab */}
       {!query && discoverTab === "FOR_YOU" && ratedSeedWorksForType.length > 0 && (
-        <div className="flex items-center justify-between gap-2 -mt-2">
-          <span className="text-[11px] text-gray-500 shrink-0">
+        <div className="relative flex items-center gap-2 -mt-2" ref={seedPickerRef}>
+          <span className="text-[11px] font-medium text-gray-500 shrink-0">
             Ähnlich zu:
           </span>
-          <select
-            value={selectedSeedWorkId}
-            onChange={(e) => setSelectedSeedWorkId(e.target.value)}
-            aria-label="Basis-Werk für Empfehlungen wählen"
-            className="max-w-[75%] sm:max-w-xs truncate rounded-xl border border-gray-800 bg-[#1a1d24] px-3 py-1.5 text-xs font-semibold text-gray-200 focus:border-emerald-500 focus:outline-none"
-          >
-            <option value="ALL">Alle meine Favoriten</option>
-            {ratedSeedWorksForType
-              .filter((w) => w.title)
-              .slice(0, 35)
-              .map((w) => (
-                <option key={w.workId} value={String(w.workId)}>
-                  {w.title} (★ {w.score.toFixed(1)})
-                </option>
-              ))}
-          </select>
+
+          <div className="flex items-center gap-1.5 min-w-0 flex-1 sm:flex-initial">
+            <button
+              type="button"
+              onClick={() => {
+                setShowSeedPicker((v) => !v);
+                setSeedPickerQuery("");
+              }}
+              aria-expanded={showSeedPicker}
+              aria-label="Basis-Werk für Empfehlungen wählen"
+              className={`flex items-center gap-2 max-w-full sm:max-w-xs rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-colors ${
+                showSeedPicker || activeSeedWork
+                  ? "bg-emerald-600/15 border-emerald-500/40 text-emerald-100"
+                  : "bg-[#1a1d24] border-gray-800 text-gray-200 hover:border-gray-700"
+              }`}
+            >
+              {activeSeedWork ? (
+                <>
+                  {activeSeedWork.cover && (
+                    <img
+                      src={activeSeedWork.cover}
+                      alt=""
+                      className="w-4 h-5 rounded object-cover shrink-0"
+                    />
+                  )}
+                  <span className="truncate">{activeSeedWork.title}</span>
+                  <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-amber-300 shrink-0 tabular-nums">
+                    <Star size={10} className="fill-amber-400 text-amber-400" />
+                    {activeSeedWork.score.toFixed(1)}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Sparkles size={12} className="text-emerald-400 shrink-0" />
+                  <span className="truncate">Alle meine Favoriten</span>
+                </>
+              )}
+              <ChevronDown
+                size={13}
+                className={`text-gray-400 shrink-0 transition-transform ${
+                  showSeedPicker ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+
+            {activeSeedWork && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedSeedWorkId("ALL");
+                  setShowSeedPicker(false);
+                }}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors shrink-0"
+                title="Zurück zu allen Favoriten"
+                aria-label="Zurück zu allen Favoriten"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
+          {showSeedPicker && (
+            <div className="absolute left-0 right-0 sm:right-auto sm:w-96 top-full mt-2 z-30 rounded-2xl border border-gray-700/90 bg-[#161922] p-2.5 shadow-2xl flex flex-col gap-2">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                  Basis für Empfehlungen
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowSeedPicker(false)}
+                  className="text-gray-400 hover:text-white p-0.5"
+                  aria-label="Schließen"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              {ratedSeedWorksForType.filter((w) => w.title).length > 5 && (
+                <div className="relative">
+                  <SearchIcon
+                    size={13}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500"
+                  />
+                  <input
+                    type="text"
+                    value={seedPickerQuery}
+                    onChange={(e) => setSeedPickerQuery(e.target.value)}
+                    placeholder="Bewertetes Werk suchen..."
+                    className="w-full rounded-xl border border-gray-800 bg-[#0f1219] pl-8 pr-7 py-1.5 text-xs text-white placeholder:text-gray-500 focus:border-emerald-500/60 focus:outline-none"
+                  />
+                  {seedPickerQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSeedPickerQuery("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white"
+                      aria-label="Filter leeren"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div className="max-h-64 overflow-y-auto flex flex-col gap-1 pr-0.5">
+                {!seedPickerQuery.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedSeedWorkId("ALL");
+                      setShowSeedPicker(false);
+                    }}
+                    className={`flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-left transition-colors ${
+                      selectedSeedWorkId === "ALL"
+                        ? "bg-emerald-600/20 border border-emerald-500/40"
+                        : "hover:bg-white/[0.04] border border-transparent"
+                    }`}
+                  >
+                    <div className="w-7 h-10 rounded-md bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                      <Sparkles size={14} className="text-emerald-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-white">
+                        Alle meine Favoriten
+                      </p>
+                      <p className="text-[10px] text-gray-400 truncate">
+                        Mix aus deinen bestbewerteten Werken
+                      </p>
+                    </div>
+                    {selectedSeedWorkId === "ALL" && (
+                      <Check size={14} className="text-emerald-400 shrink-0" />
+                    )}
+                  </button>
+                )}
+
+                {filteredSeedWorks.length > 0 ? (
+                  filteredSeedWorks.map((w) => {
+                    const isSelected = selectedSeedWorkId === String(w.workId);
+                    return (
+                      <button
+                        key={w.workId}
+                        type="button"
+                        onClick={() => {
+                          setSelectedSeedWorkId(String(w.workId));
+                          setShowSeedPicker(false);
+                        }}
+                        className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl text-left transition-colors ${
+                          isSelected
+                            ? "bg-emerald-600/20 border border-emerald-500/40"
+                            : "hover:bg-white/[0.04] border border-transparent"
+                        }`}
+                      >
+                        {w.cover ? (
+                          <img
+                            src={w.cover}
+                            alt=""
+                            className="w-7 h-10 rounded-md object-cover bg-gray-800 shrink-0"
+                          />
+                        ) : (
+                          <div className="w-7 h-10 rounded-md bg-gray-800 shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-white truncate">
+                            {w.title}
+                          </p>
+                          {w.genres && w.genres.length > 0 && (
+                            <p className="text-[10px] text-gray-500 truncate">
+                              {w.genres.slice(0, 2).join(" · ")}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-amber-300 tabular-nums">
+                            <Star size={10} className="fill-amber-400 text-amber-400" />
+                            {w.score.toFixed(1)}
+                          </span>
+                          {isSelected && (
+                            <Check size={14} className="text-emerald-400" />
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <p className="text-center text-xs text-gray-500 py-4">
+                    Kein passendes bewertetes Werk gefunden.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

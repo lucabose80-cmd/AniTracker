@@ -88,6 +88,56 @@ function getTotalCount(
   return details?.episodes || null;
 }
 
+function isWishlistWorkEligibleForDice(
+  work: UserWork,
+  details: any,
+  globalOverride?: CalendarOverride
+): boolean {
+  if (!details) return false;
+  if (details.status === "NOT_YET_RELEASED" || details.status === "CANCELLED") {
+    return false;
+  }
+
+  if (globalOverride?.manualAvailableEps != null) {
+    return Number(globalOverride.manualAvailableEps) > 0;
+  }
+  if (work.manual_available_eps != null) {
+    return Number(work.manual_available_eps) > 0;
+  }
+
+  const total = getTotalCount(work, details, globalOverride);
+
+  if (details.type === "MANGA") {
+    if (
+      details.status === "FINISHED" ||
+      details.status === "RELEASING" ||
+      details.status === "HIATUS"
+    ) {
+      if (typeof details.chapters === "number" && details.chapters <= 0) {
+        return false;
+      }
+      return total === null || total > 0;
+    }
+    return false;
+  }
+
+  // ANIME
+  if (details.nextAiringEpisode?.episode) {
+    const releaseInfo = computeWorkReleaseInfo({
+      media: details,
+      override: globalOverride,
+      userWork: work,
+    });
+    return releaseInfo.availableEpisodes > 0;
+  }
+
+  if (details.status === "FINISHED" || details.status === "RELEASING") {
+    return total !== null && total > 0;
+  }
+
+  return false;
+}
+
 function getNextReleaseTimestampMs(
   details: any,
   globalOverride?: CalendarOverride
@@ -654,12 +704,23 @@ export default function LibraryPage() {
         : "Offene Folgen"
       : "Zuletzt";
 
+  const randomEligibleWishlistWorks = useMemo(() => {
+    if (activeTab !== "PLANNING") return [];
+    return visibleWorks.filter((w) =>
+      isWishlistWorkEligibleForDice(
+        w,
+        aniListDetails[w.work_id],
+        globalOverrides[w.work_id]
+      )
+    );
+  }, [activeTab, visibleWorks, aniListDetails, globalOverrides]);
+
   const handlePickRandomWishlist = (excludeWorkId?: string) => {
-    if (visibleWorks.length === 0) return;
+    if (randomEligibleWishlistWorks.length === 0) return;
     const pool =
-      visibleWorks.length > 1 && excludeWorkId
-        ? visibleWorks.filter((w) => w.work_id !== excludeWorkId)
-        : visibleWorks;
+      randomEligibleWishlistWorks.length > 1 && excludeWorkId
+        ? randomEligibleWishlistWorks.filter((w) => w.work_id !== excludeWorkId)
+        : randomEligibleWishlistWorks;
     const chosen = pool[Math.floor(Math.random() * pool.length)];
     if (chosen) setRandomPickWork(chosen);
   };
@@ -714,13 +775,13 @@ export default function LibraryPage() {
           )}
         </div>
 
-        {/* Subtle Random Wishlist Dice Button (ONLY on Planung tab with >= 2 works) */}
-        {activeTab === "PLANNING" && visibleWorks.length >= 2 && (
+        {/* Subtle Random Wishlist Dice Button (ONLY on Planung tab with released works) */}
+        {activeTab === "PLANNING" && randomEligibleWishlistWorks.length >= 1 && (
           <button
             type="button"
             onClick={() => handlePickRandomWishlist()}
             className="flex items-center justify-center p-2 rounded-xl border border-gray-800 bg-[#1a1d24] text-gray-300 hover:text-purple-300 hover:border-purple-500/40 transition-colors shrink-0"
-            title="Zufälliges Werk aus der Wunschliste wählen"
+            title="Zufälliges bereits erschienenes Werk aus der Wunschliste wählen"
             aria-label="Zufall aus Wunschliste"
           >
             <Dices size={15} />
@@ -1110,6 +1171,10 @@ export default function LibraryPage() {
               !isCompleted &&
               releaseInfo.maxAllowedProgress !== null &&
               current >= releaseInfo.maxAllowedProgress;
+            const userScore =
+              Number(work.evaluation?.overallScore) ||
+              Number(work.evaluation?.manualScore) ||
+              0;
 
             return (
               <div
@@ -1144,9 +1209,20 @@ export default function LibraryPage() {
                     >
                       {title}
                     </Link>
-                    <span className="text-[11px] font-semibold text-gray-400 tabular-nums">
-                      {unitPrefix} {current} / {total ?? "?"}
-                    </span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-semibold text-gray-400 tabular-nums">
+                        {unitPrefix} {current} / {total ?? "?"}
+                      </span>
+                      {isCompleted && userScore > 0 && (
+                        <span
+                          className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-amber-300 tabular-nums"
+                          title={`Deine Bewertung: ${userScore.toFixed(1)} / 10`}
+                        >
+                          <Star size={10} className="fill-amber-400 text-amber-400" />
+                          {userScore.toFixed(1)}
+                        </span>
+                      )}
+                    </div>
                     {isPaused && (
                       <div className="flex items-center gap-1 flex-wrap mt-0.5">
                         <span className="inline-flex items-center rounded bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.2 text-[9px] font-bold text-amber-300">
@@ -1262,6 +1338,10 @@ export default function LibraryPage() {
               !isCompleted &&
               releaseInfo.maxAllowedProgress !== null &&
               current >= releaseInfo.maxAllowedProgress;
+            const userScore =
+              Number(work.evaluation?.overallScore) ||
+              Number(work.evaluation?.manualScore) ||
+              0;
 
             return (
               <div
@@ -1335,6 +1415,15 @@ export default function LibraryPage() {
                           {nextReleaseText}
                         </span>
                       )
+                    )}
+                    {isCompleted && userScore > 0 && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 text-[11px] font-semibold text-amber-300 tabular-nums"
+                        title={`Deine Bewertung: ${userScore.toFixed(1)} / 10`}
+                      >
+                        <Star size={11} className="fill-amber-400 text-amber-400" />
+                        {userScore.toFixed(1)}
+                      </span>
                     )}
                     {behindCount > 0 && (
                       <span className="inline-flex items-center rounded-full bg-blue-500/15 border border-blue-500/30 px-2 py-0.5 text-[10px] font-semibold text-blue-400">
@@ -1616,15 +1705,19 @@ export default function LibraryPage() {
               </div>
 
               <div className="flex items-center justify-between gap-2 pt-1">
-                <button
-                  type="button"
-                  disabled={isStartingRandom}
-                  onClick={() => handlePickRandomWishlist(randomPickWork.work_id)}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-[#222631] hover:bg-gray-700 text-gray-200 transition-colors"
-                >
-                  <Dices size={13} />
-                  Nochmal
-                </button>
+                {randomEligibleWishlistWorks.length > 1 ? (
+                  <button
+                    type="button"
+                    disabled={isStartingRandom}
+                    onClick={() => handlePickRandomWishlist(randomPickWork.work_id)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-[#222631] hover:bg-gray-700 text-gray-200 transition-colors"
+                  >
+                    <Dices size={13} />
+                    Nochmal
+                  </button>
+                ) : (
+                  <span />
+                )}
                 <div className="flex items-center gap-2">
                   <Link
                     href={`/work/${randomPickWork.work_id}`}
