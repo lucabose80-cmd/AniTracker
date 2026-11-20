@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore } from "@/lib/store";
 import Image from "next/image";
 import Link from "next/link";
@@ -19,7 +19,7 @@ import {
   ArrowUpDown,
 } from "lucide-react";
 import { auth } from "@/lib/firebase";
-import { fetchAniListBatch } from "@/lib/anilist";
+import { ANILIST_GENRES, fetchAniListBatch } from "@/lib/anilist";
 import { UserWork, UserWorkStatus } from "@/types/database";
 import {
   getAllUserWorks,
@@ -168,8 +168,10 @@ export default function LibraryPage() {
   const [sortBy, setSortBy] = useState<SortOption>("RECENT");
   const [activeTab, setActiveTab] = useState<TabStatus>("CURRENT");
   const [onlyMalOpen, setOnlyMalOpen] = useState(false);
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [viewColumns, setViewColumns] = useState<1 | 2>(1);
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const filterMenuRef = useRef<HTMLDivElement>(null);
 
   // Quick-Edit Modal State
   const [editingWork, setEditingWork] = useState<UserWork | null>(null);
@@ -186,6 +188,23 @@ export default function LibraryPage() {
       // ignore localStorage errors
     }
   }, []);
+
+  useEffect(() => {
+    if (!showFilterMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (filterMenuRef.current && !filterMenuRef.current.contains(e.target as Node)) {
+        setShowFilterMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showFilterMenu]);
+
+  const toggleGenre = (genre: string) => {
+    setSelectedGenres((prev) =>
+      prev.includes(genre) ? prev.filter((g) => g !== genre) : [...prev, genre]
+    );
+  };
 
   const handleToggleColumns = (cols: 1 | 2) => {
     setViewColumns(cols);
@@ -247,6 +266,41 @@ export default function LibraryPage() {
     return allWorks.filter((w) => aniListDetails[w.work_id]?.type === contentType);
   }, [allWorks, aniListDetails, contentType]);
 
+  // Available genres present in the user's current Anime/Manga library
+  const availableGenres = useMemo(() => {
+    const present = new Set<string>();
+    contentTypeWorks.forEach((w) => {
+      const genres: unknown = aniListDetails[w.work_id]?.genres;
+      if (Array.isArray(genres)) {
+        genres.forEach((g) => {
+          if (typeof g === "string" && g.trim()) present.add(g);
+        });
+      }
+    });
+    if (present.size === 0) {
+      return [...ANILIST_GENRES];
+    }
+    const ordered: string[] = [];
+    ANILIST_GENRES.forEach((g) => {
+      if (present.has(g)) {
+        ordered.push(g);
+        present.delete(g);
+      }
+    });
+    const remaining = Array.from(present).sort((a, b) => a.localeCompare(b));
+    return [...ordered, ...remaining];
+  }, [contentTypeWorks, aniListDetails]);
+
+  // Works filtered by selected genres
+  const genreFilteredWorks = useMemo(() => {
+    if (selectedGenres.length === 0) return contentTypeWorks;
+    return contentTypeWorks.filter((w) => {
+      const workGenres: unknown = aniListDetails[w.work_id]?.genres;
+      if (!Array.isArray(workGenres)) return false;
+      return selectedGenres.every((g) => workGenres.includes(g));
+    });
+  }, [contentTypeWorks, selectedGenres, aniListDetails]);
+
   // Live counts per status
   const statusCounts = useMemo(() => {
     const counts: Record<TabStatus, number> = {
@@ -256,19 +310,19 @@ export default function LibraryPage() {
       PAUSED: 0,
       DROPPED: 0,
     };
-    contentTypeWorks.forEach((w) => {
+    genreFilteredWorks.forEach((w) => {
       if (w.status in counts) {
         counts[w.status as TabStatus] += 1;
       }
     });
     return counts;
-  }, [contentTypeWorks]);
+  }, [genreFilteredWorks]);
 
   // Filtered & sorted works for active tab
   const visibleWorks = useMemo(() => {
     const queryLower = searchQuery.trim().toLowerCase();
 
-    return contentTypeWorks
+    return genreFilteredWorks
       .filter((w) => w.status === activeTab)
       .filter((w) => !onlyMalOpen || ((w.evaluation?.overallScore || 0) > 0 && !w.mal_rated))
       .filter((w) => {
@@ -313,7 +367,7 @@ export default function LibraryPage() {
         return parseInt(b.work_id, 10) - parseInt(a.work_id, 10);
       });
   }, [
-    contentTypeWorks,
+    genreFilteredWorks,
     activeTab,
     onlyMalOpen,
     searchQuery,
@@ -452,7 +506,7 @@ export default function LibraryPage() {
   return (
     <div className="flex flex-col gap-3.5 px-4 pt-4 pb-24 max-w-4xl mx-auto">
       {/* Compact Top Row: Search + Sort/Filter Button + 1/2 Column Switcher */}
-      <div className="relative flex items-center gap-2">
+      <div className="relative flex items-center gap-2" ref={filterMenuRef}>
         <div className="relative flex-1 min-w-0">
           <Search
             className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500"
@@ -482,7 +536,7 @@ export default function LibraryPage() {
           type="button"
           onClick={() => setShowFilterMenu((v) => !v)}
           className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold shrink-0 transition-colors ${
-            showFilterMenu || sortBy !== "RECENT" || onlyMalOpen
+            showFilterMenu || sortBy !== "RECENT" || onlyMalOpen || selectedGenres.length > 0
               ? "bg-blue-600/20 border-blue-500/50 text-blue-300"
               : "bg-[#1a1d24] border-gray-800 text-gray-300 hover:text-white"
           }`}
@@ -490,6 +544,11 @@ export default function LibraryPage() {
         >
           <ArrowUpDown size={14} />
           <span>{activeSortLabel}</span>
+          {selectedGenres.length > 0 && (
+            <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-blue-500 text-white text-[10px] font-bold">
+              {selectedGenres.length}
+            </span>
+          )}
           {onlyMalOpen && (
             <span className="w-2 h-2 rounded-full bg-amber-400" />
           )}
@@ -527,7 +586,7 @@ export default function LibraryPage() {
 
         {/* Collapsible Sort & Filter Popover */}
         {showFilterMenu && (
-          <div className="absolute right-0 top-full mt-2 z-30 w-64 rounded-2xl border border-gray-700 bg-[#161922] p-3 shadow-2xl flex flex-col gap-3">
+          <div className="absolute right-0 top-full mt-2 z-30 w-72 rounded-2xl border border-gray-700 bg-[#161922] p-3 shadow-2xl flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
                 <SlidersHorizontal size={12} />
@@ -584,9 +643,73 @@ export default function LibraryPage() {
                 {onlyMalOpen && <Check size={13} />}
               </button>
             </div>
+
+            {/* Subtle Genre Filter Section */}
+            <div className="border-t border-gray-800 pt-2.5 flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">
+                  Genre
+                </span>
+                {selectedGenres.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGenres([])}
+                    className="text-[11px] font-semibold text-gray-400 hover:text-white transition-colors"
+                  >
+                    Zurücksetzen
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto pr-0.5">
+                {availableGenres.map((genre) => {
+                  const active = selectedGenres.includes(genre);
+                  return (
+                    <button
+                      key={genre}
+                      type="button"
+                      onClick={() => toggleGenre(genre)}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                        active
+                          ? "bg-blue-600/25 border-blue-500/60 text-blue-200"
+                          : "bg-[#1a1d24] border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
+                      }`}
+                    >
+                      {genre}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         )}
       </div>
+
+      {/* Slim active genre chips (only shown when a genre filter is active) */}
+      {selectedGenres.length > 0 && (
+        <div className="flex items-center flex-wrap gap-1.5 -mt-1">
+          {selectedGenres.map((genre) => (
+            <button
+              key={genre}
+              type="button"
+              onClick={() => toggleGenre(genre)}
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-600/15 border border-blue-500/35 text-blue-300 hover:bg-blue-600/25 transition-colors"
+              title={`${genre}-Filter entfernen`}
+            >
+              <span>{genre}</span>
+              <X size={11} />
+            </button>
+          ))}
+          {selectedGenres.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setSelectedGenres([])}
+              className="text-[11px] text-gray-500 hover:text-gray-300 px-1 transition-colors"
+            >
+              Alle löschen
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Status Pill-Tabs with live counts */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
@@ -636,10 +759,24 @@ export default function LibraryPage() {
             ))}
         </div>
       ) : visibleWorks.length === 0 ? (
-        <div className="rounded-2xl border border-gray-800 bg-[#1a1d24] p-10 text-center text-sm text-gray-400">
-          {searchQuery
-            ? "Keine passenden Einträge in dieser Kategorie gefunden."
-            : "Keine Werke in dieser Kategorie vorhanden."}
+        <div className="rounded-2xl border border-gray-800 bg-[#1a1d24] p-10 text-center text-sm text-gray-400 flex flex-col items-center gap-2.5">
+          <p>
+            {searchQuery || selectedGenres.length > 0 || onlyMalOpen
+              ? "Keine passenden Einträge für deine Filter in dieser Kategorie gefunden."
+              : "Keine Werke in dieser Kategorie vorhanden."}
+          </p>
+          {(selectedGenres.length > 0 || onlyMalOpen) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedGenres([]);
+                setOnlyMalOpen(false);
+              }}
+              className="text-xs font-semibold text-blue-400 hover:text-blue-300 underline"
+            >
+              Filter zurücksetzen
+            </button>
+          )}
         </div>
       ) : viewColumns === 2 ? (
         <div className="grid grid-cols-2 gap-2.5">

@@ -129,6 +129,28 @@ export async function fetchAniListBatch(ids: number[]) {
   return results;
 }
 
+// -- Official AniList Genres (ordered by popularity) --
+export const ANILIST_GENRES = [
+  "Action",
+  "Romance",
+  "Fantasy",
+  "Comedy",
+  "Drama",
+  "Adventure",
+  "Slice of Life",
+  "Sci-Fi",
+  "Supernatural",
+  "Mystery",
+  "Psychological",
+  "Thriller",
+  "Sports",
+  "Horror",
+  "Mecha",
+  "Music",
+  "Ecchi",
+  "Mahou Shoujo",
+] as const;
+
 // -- Queries --
 
 export const GET_TRENDING_WORKS = `
@@ -166,9 +188,9 @@ export const GET_TRENDING_WORKS = `
 `;
 
 export const SEARCH_WORKS = `
-  query($search: String, $type: MediaType, $page: Int = 1, $perPage: Int = 24, $excludeIds: [Int]) {
+  query($search: String, $type: MediaType, $page: Int = 1, $perPage: Int = 24, $genre_in: [String], $excludeIds: [Int]) {
     Page(page: $page, perPage: $perPage) {
-      media(search: $search, type: $type, id_not_in: $excludeIds) {
+      media(search: $search, type: $type, genre_in: $genre_in, id_not_in: $excludeIds) {
         id
         title {
           romaji
@@ -183,6 +205,7 @@ export const SEARCH_WORKS = `
         episodes
         chapters
         averageScore
+        genres
         relations {
           edges {
             relationType
@@ -197,9 +220,9 @@ export const SEARCH_WORKS = `
 `;
 
 export const GET_UPCOMING_WORKS = `
-  query($type: MediaType, $season: MediaSeason, $seasonYear: Int, $page: Int = 1, $perPage: Int = 30, $excludeIds: [Int]) {
+  query($type: MediaType, $season: MediaSeason, $seasonYear: Int, $page: Int = 1, $perPage: Int = 30, $genre_in: [String], $excludeIds: [Int]) {
     Page(page: $page, perPage: $perPage) {
-      media(type: $type, status: NOT_YET_RELEASED, sort: POPULARITY_DESC, season: $season, seasonYear: $seasonYear, id_not_in: $excludeIds) {
+      media(type: $type, status: NOT_YET_RELEASED, sort: POPULARITY_DESC, season: $season, seasonYear: $seasonYear, genre_in: $genre_in, id_not_in: $excludeIds) {
         id
         title {
           romaji
@@ -214,6 +237,7 @@ export const GET_UPCOMING_WORKS = `
         episodes
         chapters
         averageScore
+        genres
         relations {
           edges {
             relationType
@@ -302,6 +326,7 @@ export const GET_WORKS_BATCH = `
         episodes
         chapters
         duration
+        genres
         nextAiringEpisode {
           episode
           airingAt

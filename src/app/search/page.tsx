@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useMemo, Suspense } from "react";
+import { useState, useEffect, useMemo, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   fetchAniList,
   SEARCH_WORKS,
   GET_UPCOMING_WORKS,
   GET_TRENDING_WORKS,
+  ANILIST_GENRES,
 } from "@/lib/anilist";
 import { useAppStore } from "@/lib/store";
 import {
@@ -19,6 +20,7 @@ import {
   Flame,
   Users,
   X,
+  SlidersHorizontal,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -65,6 +67,9 @@ function SearchContent() {
 
   const [input, setInput] = useState(query);
   const [discoverTab, setDiscoverTab] = useState<"SEASON" | "UPCOMING">("SEASON");
+  const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [showGenreFilter, setShowGenreFilter] = useState(false);
+  const genreMenuRef = useRef<HTMLDivElement>(null);
   const [results, setResults] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -86,6 +91,23 @@ function SearchContent() {
   useEffect(() => {
     setInput(query);
   }, [query]);
+
+  useEffect(() => {
+    if (!showGenreFilter) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (genreMenuRef.current && !genreMenuRef.current.contains(e.target as Node)) {
+        setShowGenreFilter(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showGenreFilter]);
+
+  const toggleGenre = (genre: string) => {
+    setSelectedGenres((prev) =>
+      prev.includes(genre) ? prev.filter((g) => g !== genre) : [...prev, genre]
+    );
+  };
 
   useEffect(() => {
     if (!auth) {
@@ -179,6 +201,8 @@ function SearchContent() {
       try {
         const excludeParam =
           queryExcludeIds.length > 0 ? queryExcludeIds : undefined;
+        const genreParam =
+          selectedGenres.length > 0 ? selectedGenres : undefined;
 
         if (!query) {
           if (discoverTab === "SEASON") {
@@ -190,11 +214,13 @@ function SearchContent() {
                     season: seasonInfo.season,
                     seasonYear: seasonInfo.seasonYear,
                     perPage: 36,
+                    genre_in: genreParam,
                     excludeIds: excludeParam,
                   }
                 : {
                     type: contentType,
                     perPage: 36,
+                    genre_in: genreParam,
                     excludeIds: excludeParam,
                   };
             const data = await fetchAniList(GET_TRENDING_WORKS, vars);
@@ -203,6 +229,7 @@ function SearchContent() {
             const data = await fetchAniList(GET_UPCOMING_WORKS, {
               type: contentType,
               perPage: 36,
+              genre_in: genreParam,
               excludeIds: excludeParam,
             });
             setResults(data?.Page?.media || []);
@@ -212,6 +239,7 @@ function SearchContent() {
             search: query,
             type: contentType,
             perPage: 24,
+            genre_in: genreParam,
             excludeIds: excludeParam,
           });
           setResults(data?.Page?.media || []);
@@ -223,7 +251,7 @@ function SearchContent() {
       }
     }
     doSearch();
-  }, [query, contentType, discoverTab, seasonInfo, isLibraryLoaded, queryExcludeIds]);
+  }, [query, contentType, discoverTab, seasonInfo, isLibraryLoaded, queryExcludeIds, selectedGenres]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -303,33 +331,136 @@ function SearchContent() {
 
   return (
     <div className="flex flex-col gap-5 px-4 pt-6 pb-24 max-w-4xl mx-auto">
-      <form onSubmit={handleSearch} className="relative">
-        <SearchIcon
-          className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500"
-          size={18}
-        />
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={`Neue ${contentType === "ANIME" ? "Anime" : "Manga"} entdecken oder suchen...`}
-          className="w-full rounded-xl border border-gray-800 bg-[#1a1d24] p-3 pl-10 pr-10 text-sm text-white focus:border-blue-500 focus:outline-none shadow-sm"
-        />
-        { (input || query) && (
+      <div className="flex flex-col gap-2" ref={genreMenuRef}>
+        <div className="relative flex items-center gap-2">
+          <form onSubmit={handleSearch} className="relative flex-1 min-w-0">
+            <SearchIcon
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500"
+              size={18}
+            />
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder={`Neue ${contentType === "ANIME" ? "Anime" : "Manga"} entdecken oder suchen...`}
+              className="w-full rounded-xl border border-gray-800 bg-[#1a1d24] p-3 pl-10 pr-10 text-sm text-white focus:border-blue-500 focus:outline-none shadow-sm"
+            />
+            {(input || query) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setInput("");
+                  router.push("/search");
+                }}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-1"
+                title="Suche zurücksetzen"
+              >
+                <X size={16} />
+              </button>
+            )}
+            <button type="submit" className="hidden" />
+          </form>
+
+          {/* Subtle Genre Filter Trigger */}
           <button
             type="button"
-            onClick={() => {
-              setInput("");
-              router.push("/search");
-            }}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white p-1"
-            title="Suche zurücksetzen"
+            onClick={() => setShowGenreFilter((v) => !v)}
+            className={`flex items-center gap-1.5 px-3 py-3 rounded-xl border text-xs font-semibold shrink-0 transition-colors ${
+              showGenreFilter || selectedGenres.length > 0
+                ? "bg-blue-600/20 border-blue-500/50 text-blue-300"
+                : "bg-[#1a1d24] border-gray-800 text-gray-400 hover:text-white"
+            }`}
+            title="Nach Genre filtern"
+            aria-expanded={showGenreFilter}
           >
-            <X size={16} />
+            <SlidersHorizontal size={15} />
+            <span className="hidden sm:inline">Genre</span>
+            {selectedGenres.length > 0 && (
+              <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-blue-500 text-white text-[10px] font-bold">
+                {selectedGenres.length}
+              </span>
+            )}
           </button>
+
+          {/* Subtle Collapsible Genre Popover */}
+          {showGenreFilter && (
+            <div className="absolute right-0 top-full mt-2 z-30 w-72 sm:w-80 rounded-2xl border border-gray-700/90 bg-[#161922] p-3 shadow-2xl flex flex-col gap-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                  <SlidersHorizontal size={12} />
+                  Genre filtern
+                </span>
+                <div className="flex items-center gap-2">
+                  {selectedGenres.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedGenres([])}
+                      className="text-[11px] font-semibold text-gray-400 hover:text-white transition-colors"
+                    >
+                      Zurücksetzen
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowGenreFilter(false)}
+                    className="text-gray-400 hover:text-white"
+                    aria-label="Schließen"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 max-h-56 overflow-y-auto pr-0.5">
+                {ANILIST_GENRES.map((genre) => {
+                  const active = selectedGenres.includes(genre);
+                  return (
+                    <button
+                      key={genre}
+                      type="button"
+                      onClick={() => toggleGenre(genre)}
+                      className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
+                        active
+                          ? "bg-blue-600/25 border-blue-500/60 text-blue-200"
+                          : "bg-[#1a1d24] border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
+                      }`}
+                    >
+                      {genre}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Slim active genre chips when filter is applied */}
+        {selectedGenres.length > 0 && (
+          <div className="flex items-center flex-wrap gap-1.5">
+            {selectedGenres.map((genre) => (
+              <button
+                key={genre}
+                type="button"
+                onClick={() => toggleGenre(genre)}
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-600/15 border border-blue-500/35 text-blue-300 hover:bg-blue-600/25 transition-colors"
+                title={`${genre}-Filter entfernen`}
+              >
+                <span>{genre}</span>
+                <X size={11} />
+              </button>
+            ))}
+            {selectedGenres.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setSelectedGenres([])}
+                className="text-[11px] text-gray-500 hover:text-gray-300 px-1 transition-colors"
+              >
+                Alle löschen
+              </button>
+            )}
+          </div>
         )}
-        <button type="submit" className="hidden" />
-      </form>
+      </div>
 
       {!query && searchHistory.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
@@ -510,12 +641,38 @@ function SearchContent() {
           </div>
         </div>
       ) : query ? (
-        <div className="text-center text-gray-500 mt-8">
-          Keine neuen Ergebnisse für „{query}“ gefunden (bereits in deiner Bibliothek befindliche Werke sind ausgeblendet).
+        <div className="text-center text-gray-500 mt-8 flex flex-col items-center gap-2.5">
+          <p>
+            Keine neuen Ergebnisse für „{query}“
+            {selectedGenres.length > 0 ? ` (${selectedGenres.join(", ")})` : ""}{" "}
+            gefunden (bereits in deiner Bibliothek befindliche Werke sind ausgeblendet).
+          </p>
+          {selectedGenres.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedGenres([])}
+              className="text-xs font-semibold text-blue-400 hover:text-blue-300 underline"
+            >
+              Genre-Filter zurücksetzen
+            </button>
+          )}
         </div>
       ) : (
-        <div className="text-center text-gray-500 mt-8">
-          Keine neuen Werke in dieser Ansicht gefunden.
+        <div className="text-center text-gray-500 mt-8 flex flex-col items-center gap-2.5">
+          <p>
+            Keine neuen Werke
+            {selectedGenres.length > 0 ? ` für ${selectedGenres.join(", ")}` : ""}{" "}
+            in dieser Ansicht gefunden.
+          </p>
+          {selectedGenres.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedGenres([])}
+              className="text-xs font-semibold text-blue-400 hover:text-blue-300 underline"
+            >
+              Genre-Filter zurücksetzen
+            </button>
+          )}
         </div>
       )}
     </div>
