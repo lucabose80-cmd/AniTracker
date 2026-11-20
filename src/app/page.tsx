@@ -369,6 +369,8 @@ export default function Home() {
         currentUserUid={currentUserUid}
         userWorks={userWorks}
         userAniListDetails={userAniListDetails}
+        calendarOverrides={calendarOverrides}
+        pausedWorksMap={pausedWorksMap}
         onProgressUpdated={handleProgressUpdatedFromFeed}
       />
     </div>

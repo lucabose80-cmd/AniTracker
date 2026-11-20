@@ -46,6 +46,8 @@ import {
   updateReviewList,
 } from "@/lib/db/feedback";
 import { updateEpisodeProgress } from "@/lib/db/works";
+import { CalendarOverride, computeWorkReleaseInfo } from "@/lib/db/calendar";
+import { WorkPauseRecord } from "@/lib/db/pauses";
 import { fetchAniList, SEARCH_WORKS } from "@/lib/anilist";
 import { useAppStore } from "@/lib/store";
 
@@ -61,6 +63,9 @@ interface SelectableWork {
   cover?: string;
   media_type: "ANIME" | "MANGA";
   current_episode: number;
+  max_allowed: number | null;
+  open_count: number;
+  is_caught_up: boolean;
 }
 
 interface ComparisonEntry {
@@ -78,6 +83,8 @@ interface WhatsAppReviewFeedProps {
   currentUserUid?: string;
   userWorks: UserWork[];
   userAniListDetails: Record<string, any>;
+  calendarOverrides?: Record<string, CalendarOverride>;
+  pausedWorksMap?: Record<string, WorkPauseRecord>;
   onProgressUpdated?: (workId: string, newEp: number) => void;
 }
 
@@ -157,6 +164,8 @@ export default function WhatsAppReviewFeed({
   currentUserUid,
   userWorks,
   userAniListDetails,
+  calendarOverrides = {},
+  pausedWorksMap = {},
   onProgressUpdated,
 }: WhatsAppReviewFeedProps) {
   const isOnline = useAppStore((s) => s.isOnline);
@@ -269,7 +278,45 @@ export default function WhatsAppReviewFeed({
     };
   }, [currentUserUid]);
 
-  // Build quick-select list from user's CURRENT works matching composerMediaType
+  // Helper: check if a user work has a new episode/chapter available to review
+  const evaluateReviewAvailability = useMemo(() => {
+    return (
+      userWork: UserWork | undefined,
+      media: any
+    ): { max_allowed: number | null; open_count: number; is_caught_up: boolean } => {
+      if (!userWork) {
+        if (media?.status === "NOT_YET_RELEASED") {
+          return { max_allowed: 0, open_count: 0, is_caught_up: true };
+        }
+        return { max_allowed: null, open_count: 0, is_caught_up: false };
+      }
+
+      const currentEp = Number(userWork.current_episode) || 0;
+      if (userWork.status === "COMPLETED") {
+        return { max_allowed: currentEp, open_count: 0, is_caught_up: true };
+      }
+
+      const releaseInfo = computeWorkReleaseInfo({
+        media,
+        override: calendarOverrides[userWork.work_id],
+        pauseInfo: pausedWorksMap[userWork.work_id],
+        userWork,
+      });
+      const maxAllowed = releaseInfo.maxAllowedProgress;
+      if (maxAllowed !== null) {
+        const openCount = Math.max(0, maxAllowed - currentEp);
+        return {
+          max_allowed: maxAllowed,
+          open_count: openCount,
+          is_caught_up: currentEp >= maxAllowed,
+        };
+      }
+
+      return { max_allowed: null, open_count: 0, is_caught_up: false };
+    };
+  }, [calendarOverrides, pausedWorksMap]);
+
+  // Build quick-select list from user's CURRENT works that have a new episode/chapter available
   const activeSelectableWorks = useMemo<SelectableWork[]>(() => {
     return userWorks
       .filter((w) => w.status === "CURRENT")
@@ -283,16 +330,19 @@ export default function WhatsAppReviewFeed({
           details?.coverImage?.large || details?.coverImage?.extraLarge;
         const mediaType: "ANIME" | "MANGA" =
           details?.type === "MANGA" ? "MANGA" : "ANIME";
+        const avail = evaluateReviewAvailability(w, details);
         return {
           work_id: w.work_id,
           title: workTitle,
           cover,
           media_type: mediaType,
           current_episode: Number(w.current_episode) || 0,
+          ...avail,
         };
       })
-      .filter((w) => w.media_type === composerMediaType);
-  }, [userWorks, userAniListDetails, composerMediaType]);
+      .filter((w) => w.media_type === composerMediaType && !w.is_caught_up)
+      .sort((a, b) => b.open_count - a.open_count || a.title.localeCompare(b.title, "de"));
+  }, [userWorks, userAniListDetails, composerMediaType, evaluateReviewAvailability]);
 
   // All library works for local search fallback matching composerMediaType
   const allLibrarySelectableWorks = useMemo<SelectableWork[]>(() => {
@@ -307,16 +357,18 @@ export default function WhatsAppReviewFeed({
           details?.coverImage?.large || details?.coverImage?.extraLarge;
         const mediaType: "ANIME" | "MANGA" =
           details?.type === "MANGA" ? "MANGA" : "ANIME";
+        const avail = evaluateReviewAvailability(w, details);
         return {
           work_id: w.work_id,
           title: workTitle,
           cover,
           media_type: mediaType,
           current_episode: Number(w.current_episode) || 0,
+          ...avail,
         };
       })
       .filter((w) => w.media_type === composerMediaType);
-  }, [userWorks, userAniListDetails, composerMediaType]);
+  }, [userWorks, userAniListDetails, composerMediaType, evaluateReviewAvailability]);
 
   // Search AniList when pickerSearch has >= 2 chars (only for composerMediaType)
   useEffect(() => {
@@ -343,6 +395,8 @@ export default function WhatsAppReviewFeed({
         (res?.Page?.media || []).forEach((m: any) => {
           const idStr = m.id.toString();
           const existing = userWorkById.get(idStr);
+          const mergedMedia = userAniListDetails[idStr] || m;
+          const avail = evaluateReviewAvailability(existing, mergedMedia);
           combined.push({
             work_id: idStr,
             title: m.title?.english || m.title?.romaji || "Unbekannt",
@@ -351,6 +405,7 @@ export default function WhatsAppReviewFeed({
             current_episode: existing
               ? Number(existing.current_episode) || 0
               : 0,
+            ...avail,
           });
         });
 
@@ -363,7 +418,14 @@ export default function WhatsAppReviewFeed({
     }, 350);
 
     return () => clearTimeout(timer);
-  }, [pickerSearch, isPickerOpen, userWorks, composerMediaType]);
+  }, [
+    pickerSearch,
+    isPickerOpen,
+    userWorks,
+    userAniListDetails,
+    composerMediaType,
+    evaluateReviewAvailability,
+  ]);
 
   // Filtered feed: ONLY show REVIEW_LIST and RATING activities
   const visibleActivities = useMemo(() => {
@@ -486,6 +548,8 @@ export default function WhatsAppReviewFeed({
     if (!item) return;
 
     const existingUserWork = userWorks.find((w) => w.work_id === item.work_id);
+    const details = userAniListDetails[item.work_id];
+    const avail = evaluateReviewAvailability(existingUserWork, details);
     setEditingDraftIndex(idx);
     setSelectedWork({
       work_id: item.work_id,
@@ -495,6 +559,7 @@ export default function WhatsAppReviewFeed({
       current_episode: existingUserWork
         ? Number(existingUserWork.current_episode) || 0
         : item.episode_num,
+      ...avail,
     });
 
     if (Array.isArray(item.episodes) && item.episodes.length > 1) {
@@ -527,15 +592,29 @@ export default function WhatsAppReviewFeed({
   };
 
   const handleSelectWork = (work: SelectableWork) => {
-    const nextEp = work.current_episode > 0 ? work.current_episode + 1 : 1;
+    if (work.is_caught_up) return;
+    const rawNextEp = work.current_episode > 0 ? work.current_episode + 1 : 1;
+    const nextEp =
+      work.max_allowed !== null
+        ? Math.max(1, Math.min(rawNextEp, work.max_allowed))
+        : rawNextEp;
+    const defaultRangeEnd =
+      work.max_allowed !== null
+        ? Math.max(nextEp, work.max_allowed)
+        : Math.max(
+            nextEp + 1,
+            work.current_episode > 0 ? work.current_episode + 5 : 10
+          );
     setSelectedWork(work);
     setEpMode("SINGLE");
     setEpNum(nextEp);
-    setEpEndNum(
-      Math.max(nextEp + 1, work.current_episode > 0 ? work.current_episode + 5 : 10)
-    );
+    setEpEndNum(defaultRangeEnd);
     setMultiEps([nextEp]);
-    setMultiEpCandidate(nextEp + 1);
+    setMultiEpCandidate(
+      work.max_allowed !== null
+        ? Math.min(nextEp + 1, work.max_allowed)
+        : nextEp + 1
+    );
     setReviewText("");
     setRating(undefined);
     setUpdateProgress(true);
@@ -546,24 +625,44 @@ export default function WhatsAppReviewFeed({
     if (mode === "RANGE") {
       const start =
         selectedWork && selectedWork.current_episode === 0 ? 1 : epNum;
-      const end = Math.max(start + 1, epEndNum, epNum);
+      const rawEnd = Math.max(start + 1, epEndNum, epNum);
+      const end =
+        selectedWork && selectedWork.max_allowed !== null
+          ? Math.max(start, Math.min(rawEnd, selectedWork.max_allowed))
+          : rawEnd;
       setEpNum(start);
       setEpEndNum(end);
     } else if (mode === "MULTI") {
       const base = Math.max(1, epNum || 1);
       if (multiEps.length === 0) {
         setMultiEps([base]);
-        setMultiEpCandidate(base + 1);
+        setMultiEpCandidate(
+          selectedWork && selectedWork.max_allowed !== null
+            ? Math.min(base + 1, selectedWork.max_allowed)
+            : base + 1
+        );
       }
     }
   };
 
   const handleAddMultiEp = (numToAdd?: number) => {
-    const val = Math.max(1, numToAdd ?? multiEpCandidate);
+    const rawVal = Math.max(1, numToAdd ?? multiEpCandidate);
+    const val =
+      editingDraftIndex === null &&
+      selectedWork &&
+      selectedWork.max_allowed !== null
+        ? Math.min(rawVal, selectedWork.max_allowed)
+        : rawVal;
     setMultiEps((prev) => {
       const next = Array.from(new Set([...prev, val])).sort((a, b) => a - b);
       const maxVal = next[next.length - 1] || val;
-      setMultiEpCandidate(maxVal + 1);
+      const nextCand =
+        editingDraftIndex === null &&
+        selectedWork &&
+        selectedWork.max_allowed !== null
+          ? Math.min(maxVal + 1, selectedWork.max_allowed)
+          : maxVal + 1;
+      setMultiEpCandidate(nextCand);
       return next;
     });
   };
@@ -578,21 +677,31 @@ export default function WhatsAppReviewFeed({
     if (!trimmedText && rating === undefined) return;
     if (epMode === "MULTI" && multiEps.length === 0) return;
 
-    let finalEpNum = Math.max(1, epNum || 1);
+    const maxAllowed =
+      editingDraftIndex === null && selectedWork.max_allowed !== null
+        ? Math.max(1, selectedWork.max_allowed)
+        : null;
+    const clampEp = (val: number) =>
+      maxAllowed !== null ? Math.min(Math.max(1, val), maxAllowed) : Math.max(1, val);
+
+    let finalEpNum = clampEp(epNum || 1);
     let finalEpEnd: number | undefined = undefined;
     let finalEpisodes: number[] | undefined = undefined;
 
     if (epMode === "RANGE") {
-      const start = Math.max(1, Math.min(epNum || 1, epEndNum || 1));
-      const end = Math.max(start, epEndNum || start);
+      const start = clampEp(Math.min(epNum || 1, epEndNum || 1));
+      const end = clampEp(Math.max(start, epEndNum || start));
       finalEpNum = start;
       if (end > start) {
         finalEpEnd = end;
       }
     } else if (epMode === "MULTI") {
-      const sorted = Array.from(new Set(multiEps.filter((n) => n >= 1))).sort(
-        (a, b) => a - b
-      );
+      const sorted = Array.from(
+        new Set(
+          multiEps
+            .filter((n) => n >= 1 && (maxAllowed === null || n <= maxAllowed))
+        )
+      ).sort((a, b) => a - b);
       if (sorted.length === 0) return;
       finalEpNum = sorted[sorted.length - 1];
       if (sorted.length > 1) {
@@ -988,10 +1097,15 @@ export default function WhatsAppReviewFeed({
   const localFilteredWorks = useMemo(() => {
     const q = pickerSearch.trim().toLowerCase();
     if (!q) return activeSelectableWorks;
-    return allLibrarySelectableWorks.filter((w) =>
-      w.title.toLowerCase().includes(q)
-    );
+    return allLibrarySelectableWorks
+      .filter((w) => w.title.toLowerCase().includes(q))
+      .sort((a, b) => Number(a.is_caught_up) - Number(b.is_caught_up) || a.title.localeCompare(b.title, "de"));
   }, [pickerSearch, activeSelectableWorks, allLibrarySelectableWorks]);
+
+  const pickerMaxAllowed =
+    editingDraftIndex === null && selectedWork && selectedWork.max_allowed !== null
+      ? Math.max(1, selectedWork.max_allowed)
+      : null;
 
   return (
     <section className="flex flex-col gap-4">
@@ -1840,19 +1954,43 @@ export default function WhatsAppReviewFeed({
                 </div>
 
                 <div className="overflow-y-auto flex-1 flex flex-col gap-2 pr-1">
+                  {!pickerSearch.trim() && localFilteredWorks.length === 0 && (
+                    <div className="py-6 px-3 text-center rounded-xl bg-[#0b101b]/70 border border-white/5">
+                      <p className="text-xs font-medium text-gray-300">
+                        Du bist bei allen aktiven{" "}
+                        {composerMediaType === "MANGA" ? "Mangas" : "Animes"}{" "}
+                        auf dem aktuellen Stand.
+                      </p>
+                      <p className="text-[11px] text-gray-500 mt-1">
+                        Sobald{" "}
+                        {composerMediaType === "MANGA"
+                          ? "ein neues Kapitel"
+                          : "eine neue Folge"}{" "}
+                        verfügbar ist, erscheint das Werk hier automatisch.
+                      </p>
+                    </div>
+                  )}
+
                   {localFilteredWorks.length > 0 && (
                     <div className="flex flex-col gap-1.5">
                       <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400">
                         {pickerSearch.trim()
                           ? "Aus deiner Bibliothek"
-                          : "Aktuell aktiv"}
+                          : composerMediaType === "MANGA"
+                          ? "Neue Kapitel verfügbar"
+                          : "Neue Folgen verfügbar"}
                       </span>
                       {localFilteredWorks.map((work) => (
                         <button
                           key={`lib-${work.work_id}`}
                           type="button"
+                          disabled={work.is_caught_up}
                           onClick={() => handleSelectWork(work)}
-                          className="flex items-center gap-2.5 p-2 rounded-xl bg-[#0b101b] hover:bg-[#192234] border border-white/5 text-left transition-colors"
+                          className={`flex items-center gap-2.5 p-2 rounded-xl border border-white/5 text-left transition-colors ${
+                            work.is_caught_up
+                              ? "bg-[#0b101b]/60 opacity-45 cursor-not-allowed"
+                              : "bg-[#0b101b] hover:bg-[#192234]"
+                          }`}
                         >
                           {work.cover ? (
                             <img
@@ -1873,6 +2011,15 @@ export default function WhatsAppReviewFeed({
                               {work.current_episode}
                             </p>
                           </div>
+                          {work.is_caught_up ? (
+                            <span className="shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full bg-white/5 text-gray-400 border border-white/10">
+                              Aktuell
+                            </span>
+                          ) : work.open_count > 0 ? (
+                            <span className="shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                              +{work.open_count} offen
+                            </span>
+                          ) : null}
                         </button>
                       ))}
                     </div>
@@ -1890,8 +2037,13 @@ export default function WhatsAppReviewFeed({
                         <button
                           key={`al-${work.media_type}-${work.work_id}`}
                           type="button"
+                          disabled={work.is_caught_up}
                           onClick={() => handleSelectWork(work)}
-                          className="flex items-center gap-2.5 p-2 rounded-xl bg-[#0b101b] hover:bg-[#192234] border border-white/5 text-left transition-colors"
+                          className={`flex items-center gap-2.5 p-2 rounded-xl border border-white/5 text-left transition-colors ${
+                            work.is_caught_up
+                              ? "bg-[#0b101b]/60 opacity-45 cursor-not-allowed"
+                              : "bg-[#0b101b] hover:bg-[#192234]"
+                          }`}
                         >
                           {work.cover ? (
                             <img
@@ -1908,8 +2060,21 @@ export default function WhatsAppReviewFeed({
                             </p>
                             <p className="text-xs text-gray-400">
                               {work.media_type}
+                              {work.current_episode > 0 &&
+                                ` • Stand: ${
+                                  work.media_type === "MANGA" ? "Kap." : "Folge"
+                                } ${work.current_episode}`}
                             </p>
                           </div>
+                          {work.is_caught_up ? (
+                            <span className="shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full bg-white/5 text-gray-400 border border-white/10">
+                              Aktuell
+                            </span>
+                          ) : work.open_count > 0 ? (
+                            <span className="shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                              +{work.open_count} offen
+                            </span>
+                          ) : null}
                         </button>
                       ))}
                     </div>
@@ -1990,18 +2155,35 @@ export default function WhatsAppReviewFeed({
                         <input
                           type="number"
                           min={1}
+                          max={pickerMaxAllowed ?? undefined}
                           value={epNum}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            const parsed = Math.max(
+                              1,
+                              parseInt(e.target.value, 10) || 1
+                            );
                             setEpNum(
-                              Math.max(1, parseInt(e.target.value, 10) || 1)
-                            )
-                          }
+                              pickerMaxAllowed !== null
+                                ? Math.min(parsed, pickerMaxAllowed)
+                                : parsed
+                            );
+                          }}
                           className="w-14 text-center bg-transparent text-sm font-bold text-white focus:outline-none"
                         />
                         <button
                           type="button"
-                          onClick={() => setEpNum((prev) => prev + 1)}
-                          className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"
+                          disabled={
+                            pickerMaxAllowed !== null &&
+                            epNum >= pickerMaxAllowed
+                          }
+                          onClick={() =>
+                            setEpNum((prev) =>
+                              pickerMaxAllowed !== null
+                                ? Math.min(prev + 1, pickerMaxAllowed)
+                                : prev + 1
+                            )
+                          }
+                          className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center text-white"
                         >
                           <Plus className="w-3.5 h-3.5" />
                         </button>
@@ -2032,22 +2214,36 @@ export default function WhatsAppReviewFeed({
                             <input
                               type="number"
                               min={1}
+                              max={pickerMaxAllowed ?? undefined}
                               value={epNum}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                const parsed = Math.max(
+                                  1,
+                                  parseInt(e.target.value, 10) || 1
+                                );
                                 setEpNum(
-                                  Math.max(1, parseInt(e.target.value, 10) || 1)
-                                )
-                              }
+                                  pickerMaxAllowed !== null
+                                    ? Math.min(parsed, pickerMaxAllowed)
+                                    : parsed
+                                );
+                              }}
                               className="w-full text-center bg-transparent text-sm font-bold text-white focus:outline-none"
                             />
                             <button
                               type="button"
+                              disabled={
+                                pickerMaxAllowed !== null &&
+                                epNum >= pickerMaxAllowed
+                              }
                               onClick={() => {
-                                const next = epNum + 1;
+                                const next =
+                                  pickerMaxAllowed !== null
+                                    ? Math.min(epNum + 1, pickerMaxAllowed)
+                                    : epNum + 1;
                                 setEpNum(next);
                                 if (epEndNum < next) setEpEndNum(next);
                               }}
-                              className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-white shrink-0"
+                              className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center text-white shrink-0"
                             >
                               <Plus className="w-3 h-3" />
                             </button>
@@ -2076,18 +2272,35 @@ export default function WhatsAppReviewFeed({
                             <input
                               type="number"
                               min={1}
+                              max={pickerMaxAllowed ?? undefined}
                               value={epEndNum}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                const parsed = Math.max(
+                                  1,
+                                  parseInt(e.target.value, 10) || 1
+                                );
                                 setEpEndNum(
-                                  Math.max(1, parseInt(e.target.value, 10) || 1)
-                                )
-                              }
+                                  pickerMaxAllowed !== null
+                                    ? Math.min(parsed, pickerMaxAllowed)
+                                    : parsed
+                                );
+                              }}
                               className="w-full text-center bg-transparent text-sm font-bold text-white focus:outline-none"
                             />
                             <button
                               type="button"
-                              onClick={() => setEpEndNum((prev) => prev + 1)}
-                              className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 flex items-center justify-center text-white shrink-0"
+                              disabled={
+                                pickerMaxAllowed !== null &&
+                                epEndNum >= pickerMaxAllowed
+                              }
+                              onClick={() =>
+                                setEpEndNum((prev) =>
+                                  pickerMaxAllowed !== null
+                                    ? Math.min(prev + 1, pickerMaxAllowed)
+                                    : prev + 1
+                                )
+                              }
+                              className="w-7 h-7 rounded bg-white/10 hover:bg-white/20 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center text-white shrink-0"
                             >
                               <Plus className="w-3 h-3" />
                             </button>
@@ -2111,7 +2324,14 @@ export default function WhatsAppReviewFeed({
                             type="button"
                             onClick={() => {
                               setEpNum(1);
-                              setEpEndNum(selectedWork.current_episode);
+                              setEpEndNum(
+                                pickerMaxAllowed !== null
+                                  ? Math.min(
+                                      selectedWork.current_episode,
+                                      pickerMaxAllowed
+                                    )
+                                  : selectedWork.current_episode
+                              );
                             }}
                             className="text-[11px] px-2 py-0.5 rounded bg-white/5 hover:bg-white/10 text-emerald-300 border border-white/10"
                           >
@@ -2146,20 +2366,35 @@ export default function WhatsAppReviewFeed({
                           <input
                             type="number"
                             min={1}
+                            max={pickerMaxAllowed ?? undefined}
                             value={multiEpCandidate}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const parsed = Math.max(
+                                1,
+                                parseInt(e.target.value, 10) || 1
+                              );
                               setMultiEpCandidate(
-                                Math.max(1, parseInt(e.target.value, 10) || 1)
-                              )
-                            }
+                                pickerMaxAllowed !== null
+                                  ? Math.min(parsed, pickerMaxAllowed)
+                                  : parsed
+                              );
+                            }}
                             className="w-12 text-center bg-[#111827] border border-white/10 rounded-lg py-1 text-sm font-bold text-white focus:outline-none"
                           />
                           <button
                             type="button"
-                            onClick={() =>
-                              setMultiEpCandidate((prev) => prev + 1)
+                            disabled={
+                              pickerMaxAllowed !== null &&
+                              multiEpCandidate >= pickerMaxAllowed
                             }
-                            className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 flex items-center justify-center text-white"
+                            onClick={() =>
+                              setMultiEpCandidate((prev) =>
+                                pickerMaxAllowed !== null
+                                  ? Math.min(prev + 1, pickerMaxAllowed)
+                                  : prev + 1
+                              )
+                            }
+                            className="w-7 h-7 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-35 disabled:cursor-not-allowed flex items-center justify-center text-white"
                           >
                             <Plus className="w-3 h-3" />
                           </button>
