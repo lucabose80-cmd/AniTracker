@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { fetchAniList, GET_WORK_DETAILS } from "@/lib/anilist";
 import { calculateOverallScore } from "@/lib/scoring";
@@ -74,6 +74,8 @@ export default function WorkDetailPage() {
     average: null,
     count: 0,
   });
+  const lastSavedScoreRef = useRef<number>(0);
+  const lastSavedCommentRef = useRef<string>("");
 
   useEffect(() => {
     let isMounted = true;
@@ -144,6 +146,11 @@ export default function WorkDetailPage() {
             ...userWork.evaluation,
             rewatchPotential: userWork.evaluation?.rewatchPotential ?? 0,
           });
+          lastSavedScoreRef.current =
+            Number(userWork.evaluation?.overallScore) ||
+            Number(userWork.evaluation?.manualScore) ||
+            0;
+          lastSavedCommentRef.current = (userWork.evaluation?.comments || "").trim();
           setWatchMode(userWork.classification?.watchMode || "SUB");
           setMalRated(userWork.mal_rated || false);
           setSynchroOffset(userWork.synchro_offset_episodes || 0);
@@ -157,6 +164,8 @@ export default function WorkDetailPage() {
           setCurrentEpisode(0);
           setDroppedReason("");
           setHasRomance(isRomance);
+          lastSavedScoreRef.current = 0;
+          lastSavedCommentRef.current = "";
         }
       } catch (err) {
         console.error(err);
@@ -367,19 +376,32 @@ export default function WorkDetailPage() {
         console.warn(e);
       }
 
-      // Create Feed Activity for High Ratings
-      if (currentScore >= 7) {
+      // Notify & create Feed Activity whenever the rating or review comment changed
+      const prevScore = lastSavedScoreRef.current;
+      const prevComment = lastSavedCommentRef.current;
+      const trimmedComment = (finalEval.comments || "").trim();
+      const scoreChanged =
+        currentScore > 0 && Math.abs(currentScore - prevScore) >= 0.05;
+      const commentChanged =
+        trimmedComment.length > 0 && trimmedComment !== prevComment;
+      const workTitle =
+        work?.title?.english || work?.title?.romaji || `Werk #${id}`;
+
+      if (scoreChanged || commentChanged) {
         try {
-          await createActivity(
-            user.uid,
-            "RATING",
-            id,
-            `Hat ${work?.title?.english || work?.title?.romaji} mit ${currentScore.toFixed(1)}/10 bewertet!`
-          );
+          const activityText = scoreChanged
+            ? prevScore > 0
+              ? `Hat die Bewertung von ${workTitle} angepasst: ${prevScore.toFixed(1)} → ${currentScore.toFixed(1)}/10`
+              : `Hat ${workTitle} mit ${currentScore.toFixed(1)}/10 bewertet!`
+            : `Hat die Review zu ${workTitle}${currentScore > 0 ? ` (${currentScore.toFixed(1)}/10)` : ""} aktualisiert`;
+          await createActivity(user.uid, "RATING", id, activityText);
         } catch (e) {
           console.warn(e);
         }
       }
+
+      lastSavedScoreRef.current = currentScore;
+      lastSavedCommentRef.current = trimmedComment;
 
       setInLibrary(true);
       setSaveMessage("Gespeichert!");

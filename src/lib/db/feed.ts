@@ -61,18 +61,64 @@ export async function createActivity(
       })
     }).catch(console.error);
   } else if (action_type === "RATING") {
+    let actorName = "Jemand";
+    let actorAvatar = "";
+    try {
+      const actorProfile = await getUserProfile(user_id);
+      if (actorProfile?.username) actorName = actorProfile.username;
+      if (actorProfile?.avatar_url) actorAvatar = actorProfile.avatar_url;
+    } catch (e) {
+      console.error("Failed to fetch actor profile for rating notification:", e);
+    }
+
+    const isUpdate = Boolean(
+      text && /(angepasst|geändert|aktualisiert)/i.test(text)
+    );
+    const pushTitle = isUpdate
+      ? `${actorName} hat eine Bewertung angepasst`
+      : `${actorName} hat ein Werk bewertet`;
+    const bodyText = text || `${actorName} hat ein Werk bewertet.`;
+
+    try {
+      const usersSnap = await getDocs(collection(db, "users"));
+      const notifCol = collection(db, "notifications");
+      await Promise.all(
+        usersSnap.docs
+          .filter((uDoc) => uDoc.id !== user_id)
+          .map((uDoc) => {
+            const notifRef = doc(notifCol);
+            const payload: Record<string, any> = {
+              notification_id: notifRef.id,
+              user_id: uDoc.id,
+              actor_id: user_id,
+              actor_name: actorName,
+              actor_avatar: actorAvatar,
+              type: "REPLY_TO_COMMENT",
+              activity_id,
+              text: bodyText,
+              timestamp,
+              read: false,
+            };
+            if (work_id) payload.work_id = work_id;
+            return setDoc(notifRef, payload);
+          })
+      );
+    } catch (e) {
+      console.warn("Could not create in-app notifications for rating:", e);
+    }
+
     fetch("/api/notify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         targetUserId: "ALL",
         excludeUserId: user_id,
-        title: "Neue Bewertung",
-        body: text || "Jemand hat ein Werk bewertet.",
+        title: pushTitle,
+        body: bodyText,
         type: "social",
-        link: "/feed",
+        link: work_id ? `/work/${work_id}` : "/",
         ...(work_id ? { workId: work_id } : {}),
-      })
+      }),
     }).catch(console.error);
   } else if (action_type === "EPISODE_THREAD") {
     let workTitle = "";

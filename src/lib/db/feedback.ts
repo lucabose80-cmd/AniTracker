@@ -77,6 +77,202 @@ function sortFeedbackDesc(a: EpisodeFeedback, b: EpisodeFeedback): number {
   return b.timestamp.localeCompare(a.timestamp);
 }
 
+function formatReviewItemEpLabel(item: ReviewListItem): string {
+  const unit = item.media_type === "MANGA" ? "Kap." : "Folge";
+  if (
+    typeof item.episode_end === "number" &&
+    !Number.isNaN(item.episode_end) &&
+    item.episode_end > item.episode_num
+  ) {
+    return `${unit} ${item.episode_num}–${item.episode_end}`;
+  }
+  if (Array.isArray(item.episodes) && item.episodes.length > 1) {
+    const sorted = [...item.episodes].sort((a, b) => a - b);
+    return `${unit} ${sorted.join(", ")}`;
+  }
+  return `${unit} ${item.episode_num}`;
+}
+
+function getReviewItemEpisodeKey(item: ReviewListItem): string {
+  const eps = Array.isArray(item.episodes)
+    ? [...item.episodes].sort((a, b) => a - b).join(",")
+    : "";
+  const end =
+    typeof item.episode_end === "number" && item.episode_end > item.episode_num
+      ? item.episode_end
+      : "";
+  return `${item.episode_num}|${end}|${eps}`;
+}
+
+function areReviewItemsEqual(a: ReviewListItem, b: ReviewListItem): boolean {
+  return (
+    a.work_id === b.work_id &&
+    getReviewItemEpisodeKey(a) === getReviewItemEpisodeKey(b) &&
+    (a.rating ?? null) === (b.rating ?? null) &&
+    (a.text || "").trim() === (b.text || "").trim()
+  );
+}
+
+interface ReviewUpdateAnalysis {
+  hasChanges: boolean;
+  addedItems: ReviewListItem[];
+  modifiedItems: Array<{
+    item: ReviewListItem;
+    episodesChanged: boolean;
+    ratingChanged: boolean;
+    textChanged: boolean;
+  }>;
+  removedCount: number;
+  titleChanged: boolean;
+  highlightItem?: ReviewListItem;
+}
+
+function analyzeReviewListUpdate(
+  oldTitle: string,
+  oldItems: ReviewListItem[],
+  newTitle: string,
+  newItems: ReviewListItem[]
+): ReviewUpdateAnalysis {
+  const usedOldIndices = new Set<number>();
+  const unmatchedNew: ReviewListItem[] = [];
+
+  // Pass 1: exact matches (unchanged items)
+  for (const newItem of newItems) {
+    const exactIdx = oldItems.findIndex(
+      (oldItem, idx) => !usedOldIndices.has(idx) && areReviewItemsEqual(oldItem, newItem)
+    );
+    if (exactIdx !== -1) {
+      usedOldIndices.add(exactIdx);
+    } else {
+      unmatchedNew.push(newItem);
+    }
+  }
+
+  // Pass 2: match modified items by work_id vs newly added items
+  const addedItems: ReviewListItem[] = [];
+  const modifiedItems: ReviewUpdateAnalysis["modifiedItems"] = [];
+
+  for (const newItem of unmatchedNew) {
+    const sameWorkIdx = oldItems.findIndex(
+      (oldItem, idx) => !usedOldIndices.has(idx) && oldItem.work_id === newItem.work_id
+    );
+    if (sameWorkIdx !== -1) {
+      usedOldIndices.add(sameWorkIdx);
+      const prevItem = oldItems[sameWorkIdx];
+      modifiedItems.push({
+        item: newItem,
+        episodesChanged:
+          getReviewItemEpisodeKey(prevItem) !== getReviewItemEpisodeKey(newItem),
+        ratingChanged: (prevItem.rating ?? null) !== (newItem.rating ?? null),
+        textChanged: (prevItem.text || "").trim() !== (newItem.text || "").trim(),
+      });
+    } else {
+      addedItems.push(newItem);
+    }
+  }
+
+  const removedCount = Math.max(0, oldItems.length - usedOldIndices.size);
+  const titleChanged = oldTitle.trim() !== newTitle.trim();
+  const hasChanges =
+    addedItems.length > 0 ||
+    modifiedItems.length > 0 ||
+    removedCount > 0 ||
+    titleChanged;
+
+  const highlightItem =
+    addedItems[0] ||
+    modifiedItems.find((m) => m.episodesChanged)?.item ||
+    modifiedItems.find((m) => m.ratingChanged)?.item ||
+    modifiedItems[0]?.item ||
+    newItems[0];
+
+  return {
+    hasChanges,
+    addedItems,
+    modifiedItems,
+    removedCount,
+    titleChanged,
+    highlightItem,
+  };
+}
+
+async function notifyOtherUsersAboutReview(params: {
+  userId: string;
+  activityId?: string;
+  pushTitle: (actorName: string) => string;
+  bodyText: string;
+  link?: string;
+  highlightItem?: ReviewListItem;
+  timestamp: string;
+}) {
+  if (!db) return;
+
+  let actorName = "Jemand";
+  let actorAvatar = "";
+  try {
+    const profile = await getUserProfile(params.userId);
+    if (profile?.username) {
+      actorName = profile.username;
+    }
+    if (profile?.avatar_url) {
+      actorAvatar = profile.avatar_url;
+    }
+  } catch (e) {
+    console.error("Failed to fetch actor profile for notification:", e);
+  }
+
+  const highlight = params.highlightItem;
+
+  // Create in-app notifications for other users
+  try {
+    const usersSnap = await getDocs(collection(db, "users"));
+    const notifCol = collection(db, "notifications");
+    await Promise.all(
+      usersSnap.docs
+        .filter((uDoc) => uDoc.id !== params.userId)
+        .map((uDoc) => {
+          const notifRef = doc(notifCol);
+          const payload: Record<string, any> = {
+            notification_id: notifRef.id,
+            user_id: uDoc.id,
+            actor_id: params.userId,
+            actor_name: actorName,
+            actor_avatar: actorAvatar,
+            type: "REPLY_TO_COMMENT",
+            text: params.bodyText,
+            timestamp: params.timestamp,
+            read: false,
+          };
+          if (params.activityId) payload.activity_id = params.activityId;
+          if (highlight?.work_id) payload.work_id = highlight.work_id;
+          if (highlight?.work_title) payload.work_title = highlight.work_title;
+          if (highlight?.media_type) payload.media_type = highlight.media_type;
+          if (typeof highlight?.episode_num === "number") {
+            payload.episode_num = getReviewItemTargetEpisode(highlight);
+          }
+          return setDoc(notifRef, payload);
+        })
+    );
+  } catch (e) {
+    console.warn("Could not create in-app notifications for review:", e);
+  }
+
+  fetch("/api/notify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      targetUserId: "ALL",
+      excludeUserId: params.userId,
+      type: "social",
+      title: params.pushTitle(actorName),
+      body: params.bodyText,
+      link: params.link || "/",
+      icon: highlight?.work_cover,
+      workId: highlight?.work_id,
+    }),
+  }).catch(console.error);
+}
+
 /**
  * Creates a REVIEW_LIST activity feed post and individual episode_feedback
  * documents for each item so ratings/notes are queryable per work and episode.
@@ -131,20 +327,6 @@ export async function createReviewList(
     })
   );
 
-  let actorName = "Jemand";
-  let actorAvatar = "";
-  try {
-    const profile = await getUserProfile(userId);
-    if (profile?.username) {
-      actorName = profile.username;
-    }
-    if (profile?.avatar_url) {
-      actorAvatar = profile.avatar_url;
-    }
-  } catch (e) {
-    console.error("Failed to fetch actor profile for notification:", e);
-  }
-
   const workSummary = sanitizedItems
     .map((i) => i.work_title)
     .filter(Boolean)
@@ -152,66 +334,29 @@ export async function createReviewList(
     .join(", ");
 
   const firstItem = sanitizedItems[0];
+  const bodyText =
+    title.trim() ||
+    (workSummary
+      ? `Neues Review zu ${workSummary}`
+      : "Neue Episoden-Reviews im Feed.");
 
-  // Create in-app notifications for other users
-  try {
-    const usersSnap = await getDocs(collection(db, "users"));
-    const notifCol = collection(db, "notifications");
-    await Promise.all(
-      usersSnap.docs
-        .filter((uDoc) => uDoc.id !== userId)
-        .map((uDoc) => {
-          const notifRef = doc(notifCol);
-          const payload: Record<string, any> = {
-            notification_id: notifRef.id,
-            user_id: uDoc.id,
-            actor_id: userId,
-            actor_name: actorName,
-            actor_avatar: actorAvatar,
-            type: "REPLY_TO_COMMENT",
-            activity_id,
-            text:
-              title.trim() ||
-              (workSummary
-                ? `Neues Review zu ${workSummary}`
-                : "Neue Episoden-Reviews im Feed."),
-            timestamp,
-            read: false,
-          };
-          if (firstItem?.work_id) payload.work_id = firstItem.work_id;
-          if (firstItem?.work_title) payload.work_title = firstItem.work_title;
-          if (firstItem?.media_type) payload.media_type = firstItem.media_type;
-          if (typeof firstItem?.episode_num === "number") {
-            payload.episode_num = firstItem.episode_num;
-          }
-          return setDoc(notifRef, payload);
-        })
-    );
-  } catch (e) {
-    console.warn("Could not create in-app notifications for review list:", e);
-  }
-
-  fetch("/api/notify", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      targetUserId: "ALL",
-      excludeUserId: userId,
-      type: "social",
-      title: `${actorName} hat ein Review gepostet`,
-      body: title.trim() || workSummary || "Neue Episoden-Reviews im Feed.",
-      link: "/",
-      icon: firstItem?.work_cover,
-      workId: firstItem?.work_id,
-    }),
-  }).catch(console.error);
+  await notifyOtherUsersAboutReview({
+    userId,
+    activityId: activity_id,
+    pushTitle: (actorName) => `${actorName} hat ein Review gepostet`,
+    bodyText,
+    link: "/",
+    highlightItem: firstItem,
+    timestamp,
+  });
 
   return newActivity;
 }
 
 /**
- * Updates an existing REVIEW_LIST activity (verifying ownership) and syncs all
- * linked episode_feedback documents.
+ * Updates an existing REVIEW_LIST activity (verifying ownership), syncs all
+ * linked episode_feedback documents, and notifies other users when meaningful
+ * changes (new chapters/episodes, rating changes, text edits, etc.) were made.
  */
 export async function updateReviewList(
   activityId: string,
@@ -230,6 +375,8 @@ export async function updateReviewList(
     throw new Error("Nicht berechtigt, diese Review-Liste zu bearbeiten.");
   }
 
+  const oldTitle = data.text || "";
+  const oldItems = Array.isArray(data.review_items) ? data.review_items : [];
   const sanitizedItems = newItems.map(sanitizeReviewItem);
   const work_ids = Array.from(new Set(sanitizedItems.map((i) => i.work_id)));
 
@@ -266,6 +413,81 @@ export async function updateReviewList(
       return setDoc(fbRef, feedbackDoc);
     })
   );
+
+  // Notify other users if anything in the review was added or modified
+  const analysis = analyzeReviewListUpdate(
+    oldTitle,
+    oldItems,
+    newTitle,
+    sanitizedItems
+  );
+  if (analysis.hasChanges) {
+    const addedSummaries = analysis.addedItems.map((item) => {
+      const epLabel = formatReviewItemEpLabel(item);
+      const ratingPart =
+        typeof item.rating === "number" ? ` · ★ ${item.rating}` : "";
+      return `${item.work_title} (${epLabel}${ratingPart})`;
+    });
+
+    const modifiedSummaries = analysis.modifiedItems.map((m) => {
+      const epLabel = formatReviewItemEpLabel(m.item);
+      if (m.episodesChanged) {
+        const ratingPart =
+          typeof m.item.rating === "number" ? ` · ★ ${m.item.rating}` : "";
+        return `${m.item.work_title} (${epLabel}${ratingPart})`;
+      }
+      if (m.ratingChanged) {
+        const ratingPart =
+          typeof m.item.rating === "number"
+            ? `★ ${m.item.rating}/10`
+            : "Bewertung entfernt";
+        return `${m.item.work_title} (${epLabel} · ${ratingPart})`;
+      }
+      return `${m.item.work_title} (${epLabel} bearbeitet)`;
+    });
+
+    const combinedSummaries = [...addedSummaries, ...modifiedSummaries];
+    let bodyText = "";
+    if (addedSummaries.length > 0 && modifiedSummaries.length === 0) {
+      const extra =
+        addedSummaries.length > 2 ? ` (+${addedSummaries.length - 2})` : "";
+      bodyText = `Neu im Review: ${addedSummaries.slice(0, 2).join(", ")}${extra}`;
+    } else if (addedSummaries.length > 0) {
+      const extra =
+        combinedSummaries.length > 2
+          ? ` (+${combinedSummaries.length - 2})`
+          : "";
+      bodyText = `Review ergänzt: ${combinedSummaries.slice(0, 2).join(", ")}${extra}`;
+    } else if (modifiedSummaries.length > 0) {
+      const extra =
+        modifiedSummaries.length > 2
+          ? ` (+${modifiedSummaries.length - 2})`
+          : "";
+      bodyText = `Review angepasst: ${modifiedSummaries.slice(0, 2).join(", ")}${extra}`;
+    } else {
+      bodyText = newTitle.trim() || "Ein Review wurde aktualisiert.";
+    }
+
+    const hasNewEpisodesOrItems =
+      analysis.addedItems.length > 0 ||
+      analysis.modifiedItems.some((m) => m.episodesChanged);
+    const hasRatingChange = analysis.modifiedItems.some((m) => m.ratingChanged);
+
+    await notifyOtherUsersAboutReview({
+      userId,
+      activityId,
+      pushTitle: (actorName) =>
+        hasNewEpisodesOrItems
+          ? `${actorName} hat ein Review ergänzt`
+          : hasRatingChange
+          ? `${actorName} hat eine Bewertung angepasst`
+          : `${actorName} hat ein Review aktualisiert`,
+      bodyText,
+      link: "/",
+      highlightItem: analysis.highlightItem,
+      timestamp: new Date().toISOString(),
+    });
+  }
 
   return {
     ...data,
@@ -304,6 +526,19 @@ export async function addSingleEpisodeFeedback(
   }
 
   await setDoc(fbRef, feedbackDoc);
+
+  const epLabel = formatReviewItemEpLabel(item);
+  const ratingPart =
+    typeof feedbackDoc.rating === "number" ? ` · ★ ${feedbackDoc.rating}/10` : "";
+  await notifyOtherUsersAboutReview({
+    userId,
+    pushTitle: (actorName) => `${actorName} hat ein Feedback gepostet`,
+    bodyText: `${item.work_title} (${epLabel}${ratingPart}): ${item.text.slice(0, 100)}`,
+    link: `/work/${item.work_id}`,
+    highlightItem: item,
+    timestamp,
+  });
+
   return feedbackDoc;
 }
 
