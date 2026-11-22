@@ -22,6 +22,10 @@ const GET_RECENT_RELEASES = `
         mediaId
         episode
         media {
+          type
+          status
+          episodes
+          chapters
           title {
             romaji
             english
@@ -42,10 +46,18 @@ const GET_MEDIA_STATUS_BATCH = `
     Page(page: 1, perPage: 50) {
       media(id_in: $ids) {
         id
+        type
         status
+        episodes
+        chapters
+        nextAiringEpisode {
+          episode
+          airingAt
+        }
         title {
           romaji
           english
+          native
         }
         coverImage {
           large
@@ -56,9 +68,49 @@ const GET_MEDIA_STATUS_BATCH = `
   }
 `;
 
+async function fetchAniListMediaBatch(ids: number[]): Promise<Record<string, any>> {
+  const uniqueIds = [...new Set(ids.filter((id) => Number.isInteger(id) && id > 0))];
+  const mediaMap: Record<string, any> = {};
+  for (let i = 0; i < uniqueIds.length; i += 50) {
+    const chunk = uniqueIds.slice(i, i + 50);
+    try {
+      const res = await fetch("https://graphql.anilist.co", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ query: GET_MEDIA_STATUS_BATCH, variables: { ids: chunk } }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        (data.data?.Page?.media || []).forEach((m: any) => {
+          if (m?.id) mediaMap[m.id.toString()] = m;
+        });
+      } else {
+        console.warn("AniList batch media non-OK status:", res.status);
+      }
+    } catch (e) {
+      console.error("AniList batch media fetch failed:", e);
+    }
+  }
+  return mediaMap;
+}
+
+function resolveEffectiveMax(over: any, media: any): number | null {
+  if (over?.manualMaxEpisode != null && Number(over.manualMaxEpisode) > 0) {
+    return Number(over.manualMaxEpisode);
+  }
+  if (media?.type === "MANGA" && Number(media?.chapters) > 0) {
+    return Number(media.chapters);
+  }
+  if (media?.type !== "MANGA" && Number(media?.episodes) > 0) {
+    return Number(media.episodes);
+  }
+  return null;
+}
+
 export async function GET(req: Request) {
   try {
     const { adminDb, adminMessaging } = await import("@/lib/firebase-admin");
+    const { FieldValue } = await import("firebase-admin/firestore");
     const authHeader = req.headers.get("authorization");
     if (authHeader !== `Bearer anitracker123` && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -103,7 +155,6 @@ export async function GET(req: Request) {
       console.error("AniList recent releases fetch error:", aniErr);
     }
 
-    const customSchedules: any[] = [];
     const [overridesSnap, pausesSnap] = await Promise.all([
       adminDb.collection("calendar_overrides").get(),
       adminDb.collection("work_pauses").get(),
@@ -123,18 +174,98 @@ export async function GET(req: Request) {
       }
     }
 
-    // Filter out AniList schedules for paused works as well
-    const activeSchedules = schedules.filter(
-      (s: any) => !pausedWorkIds.has(String(s.mediaId))
-    );
+    const overridesByWorkId: Record<string, any> = {};
+    const overrideWorkNumericIds: number[] = [];
+    for (const doc of overridesSnap.docs) {
+      overridesByWorkId[doc.id] = doc.data();
+      const parsed = parseInt(doc.id, 10);
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        overrideWorkNumericIds.push(parsed);
+      }
+    }
+
+    // Batch-fetch AniList metadata for all calendar_overrides BEFORE incrementing so we never
+    // increment past a finished work's total episodes/chapters or notify on finished/cancelled works.
+    const overrideMediaMap =
+      overrideWorkNumericIds.length > 0
+        ? await fetchAniListMediaBatch(overrideWorkNumericIds)
+        : {};
+
+    // Filter AniList schedules for paused, cancelled, or out-of-range episodes
+    const activeSchedules = schedules.filter((s: any) => {
+      const wid = String(s.mediaId);
+      if (pausedWorkIds.has(wid)) return false;
+      if (s.media?.status === "CANCELLED") return false;
+      const effectiveMax = resolveEffectiveMax(overridesByWorkId[wid], s.media);
+      if (effectiveMax !== null && Number(s.episode) > effectiveMax) return false;
+      return true;
+    });
     schedules.length = 0;
     schedules.push(...activeSchedules);
-    
+
+    const scheduleDeletePatch = {
+      airingAt: FieldValue.delete(),
+      weeklyDay: FieldValue.delete(),
+      weeklyTime: FieldValue.delete(),
+      releaseFrequency: FieldValue.delete(),
+      lastIncrementedAt: FieldValue.delete(),
+      rhythmType: FieldValue.delete(),
+      flexibleDayRange: FieldValue.delete(),
+    };
+
+    let healedOverrides = 0;
+
     for (const doc of overridesSnap.docs) {
       const workId = doc.id;
-      if (pausedWorkIds.has(workId)) continue;
-
       const over = doc.data();
+      const media = overrideMediaMap[workId];
+      const effectiveMax = resolveEffectiveMax(over, media);
+      const currentAvail =
+        over.manualAvailableEps != null ? Number(over.manualAvailableEps) : null;
+      const hasRecurringSchedule =
+        over.weeklyDay !== undefined ||
+        over.airingAt !== undefined ||
+        over.flexibleDayRange !== undefined;
+
+      // Guard 1: Work is cancelled -> clear stale schedule, never increment
+      if (media?.status === "CANCELLED") {
+        if (hasRecurringSchedule) {
+          await doc.ref.update(scheduleDeletePatch).catch(() => {});
+          healedOverrides++;
+        }
+        continue;
+      }
+
+      // Guard 2: Work has reached or exceeded its total episodes/chapters -> self-heal & stop forever
+      if (effectiveMax !== null && currentAvail !== null && currentAvail >= effectiveMax) {
+        const healPatch: Record<string, any> = {};
+        if (currentAvail > effectiveMax) {
+          healPatch.manualAvailableEps = effectiveMax;
+        }
+        if (hasRecurringSchedule) {
+          Object.assign(healPatch, scheduleDeletePatch);
+        }
+        if (Object.keys(healPatch).length > 0) {
+          await doc.ref.update(healPatch).catch(() => {});
+          healedOverrides++;
+        }
+        continue;
+      }
+
+      // Guard 3: Finished work with no known remaining episodes (e.g. no manualAvailableEps < effectiveMax)
+      if (media?.status === "FINISHED" && (effectiveMax === null || currentAvail === null)) {
+        if (hasRecurringSchedule) {
+          await doc.ref.update(scheduleDeletePatch).catch(() => {});
+          healedOverrides++;
+        }
+        continue;
+      }
+
+      // Guard 4: Work hasn't started yet or is paused -> skip without clearing schedule
+      if (media?.status === "NOT_YET_RELEASED" || pausedWorkIds.has(workId)) {
+        continue;
+      }
+
       const freqWeeks = Math.max(1, Number(over.releaseFrequency) || 1);
       const lastInc = Number(over.lastIncrementedAt) || 0;
       const threshold = freqWeeks * 7 * 24 * 3600 - 4 * 3600;
@@ -189,49 +320,34 @@ export async function GET(req: Request) {
       }
 
       if (shouldTriggerNow) {
-        const newEps = (Number(over.manualAvailableEps) || 0) + 1;
+        const newEps = (currentAvail ?? 0) + 1;
+        if (effectiveMax !== null && newEps > effectiveMax) {
+          continue;
+        }
+
         const nextUpdate: Record<string, any> = {
           manualAvailableEps: newEps,
           lastIncrementedAt: now,
         };
-        if (typeof over.airingAt === "number" && over.airingAt > 0 && freqWeeks >= 1) {
+
+        // If this increment reaches the final episode/chapter, automatically retire the recurring schedule
+        if (effectiveMax !== null && newEps >= effectiveMax) {
+          Object.assign(nextUpdate, scheduleDeletePatch);
+          nextUpdate.lastIncrementedAt = now;
+        } else if (typeof over.airingAt === "number" && over.airingAt > 0 && freqWeeks >= 1) {
           nextUpdate.airingAt = over.airingAt + freqWeeks * 7 * 24 * 3600;
         }
-        await adminDb.collection("calendar_overrides").doc(doc.id).update(nextUpdate);
-        customSchedules.push({ mediaId: doc.id, episode: newEps, type: "MANGA" });
-      }
-    }
 
-    if (customSchedules.length > 0) {
-      const customIds = customSchedules
-        .map(s => parseInt(s.mediaId, 10))
-        .filter((id) => !Number.isNaN(id) && id > 0);
-      if (customIds.length > 0) {
-        try {
-          const mediaResp = await fetch("https://graphql.anilist.co", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
-            body: JSON.stringify({
-              query: `query($in: [Int]) { Page { media(id_in: $in) { id type title { romaji english native } coverImage { large medium } } } }`,
-              variables: { in: customIds }
-            }),
+        await doc.ref.update(nextUpdate);
+
+        if (media) {
+          schedules.push({
+            mediaId: doc.id,
+            episode: newEps,
+            type: media.type || "MANGA",
+            media,
+            isCustomOverride: true,
           });
-          if (mediaResp.ok) {
-            const mediaRes = await mediaResp.json();
-            const mediaList = mediaRes.data?.Page?.media || [];
-            customSchedules.forEach(cs => {
-              const m = mediaList.find((x: any) => x.id.toString() === cs.mediaId);
-              if (m) {
-                cs.media = m;
-                if (m.type) cs.type = m.type;
-                schedules.push(cs);
-              }
-            });
-          } else {
-            console.warn("AniList custom schedules non-OK status:", mediaResp.status);
-          }
-        } catch (customAniErr) {
-          console.error("AniList custom schedules fetch error:", customAniErr);
         }
       }
     }
@@ -241,91 +357,137 @@ export async function GET(req: Request) {
     if (schedules.length > 0) {
       for (const schedule of schedules) {
         const workIdStr = schedule.mediaId.toString();
-        const querySnap = await adminDb.collection("user_works").where("work_id", "==", workIdStr).get();
+        const querySnap = await adminDb
+          .collection("user_works")
+          .where("work_id", "==", workIdStr)
+          .get();
         if (querySnap.empty) continue;
-        
-        const userIds = [...new Set(querySnap.docs.map((d: any) => d.data().user_id))];
-        if (userIds.length === 0) continue;
-        
-        const tokensToNotify: string[] = [];
-        const tokenToUserIds = new Map<string, string[]>();
-        
-        for (const uid of userIds) {
-          const userDoc = await adminDb.collection("users").doc(uid as string).get();
-          if (userDoc.exists) {
-            const userData = userDoc.data()!;
-            const settings = userData.notification_settings || { releases: true };
-            const tokens: string[] = Array.isArray(userData.fcm_tokens) ? userData.fcm_tokens : [];
-            
-            if (settings.releases !== false) {
-              // Create InAppNotification with deterministic ID to prevent duplicates
-              const notifId = `release_${uid}_${schedule.mediaId}_${schedule.episode}`;
-              const notifRef = adminDb.collection("notifications").doc(notifId);
-              const notifSnap = await notifRef.get();
-              if (!notifSnap.exists) {
-                const workTitle = schedule.media?.title?.english || schedule.media?.title?.native || schedule.media?.title?.romaji || "";
-                await notifRef.set({
-                  notification_id: notifId,
-                  user_id: uid,
-                  actor_id: "SYSTEM",
-                  actor_name: "AniPulse",
-                  actor_avatar: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
-                  type: "SYSTEM",
-                  work_id: String(schedule.mediaId),
-                  work_title: workTitle,
-                  media_type: schedule.type || "ANIME",
-                  episode_num: schedule.episode,
-                  text: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${workTitle} ist jetzt online.`,
-                  timestamp: new Date().toISOString(),
-                  read: false
-                });
 
-                for (const tk of tokens) {
-                  if (!tk) continue;
-                  if (!tokenToUserIds.has(tk)) {
-                    tokenToUserIds.set(tk, []);
-                    tokensToNotify.push(tk);
-                  }
-                  tokenToUserIds.get(tk)!.push(uid as string);
+        // Only notify users actively watching/reading (status === "CURRENT") who haven't watched this episode yet
+        const eligibleByUser = new Map<string, number>();
+        for (const d of querySnap.docs) {
+          const uWork = d.data();
+          if (!uWork?.user_id) continue;
+          if (uWork.status !== "CURRENT") continue;
+
+          const userManualMax =
+            uWork.manual_max_episode != null && Number(uWork.manual_max_episode) > 0
+              ? Number(uWork.manual_max_episode)
+              : null;
+          if (userManualMax !== null && Number(schedule.episode) > userManualMax) {
+            continue;
+          }
+
+          const offset = schedule.isCustomOverride
+            ? 0
+            : Math.max(0, Number(uWork.synchro_offset_episodes) || 0);
+          const targetEpisode = Number(schedule.episode) - offset;
+          if (targetEpisode <= 0) continue;
+
+          const currentEp = Number(uWork.current_episode) || 0;
+          if (currentEp >= targetEpisode) continue;
+
+          eligibleByUser.set(uWork.user_id, targetEpisode);
+        }
+
+        if (eligibleByUser.size === 0) continue;
+
+        // Group tokens by targetEpisode so synchro-offset users get their accurate episode number
+        const tokensByEpisode = new Map<number, { tokens: string[]; tokenToUserIds: Map<string, string[]> }>();
+
+        for (const [uid, targetEpisode] of eligibleByUser.entries()) {
+          const userDoc = await adminDb.collection("users").doc(uid).get();
+          if (!userDoc.exists) continue;
+          const userData = userDoc.data()!;
+          const settings = userData.notification_settings || { releases: true };
+          const tokens: string[] = Array.isArray(userData.fcm_tokens) ? userData.fcm_tokens : [];
+
+          if (settings.releases === false) continue;
+
+          // Create InAppNotification with deterministic ID to prevent duplicates
+          const notifId = `release_${uid}_${schedule.mediaId}_${targetEpisode}`;
+          const notifRef = adminDb.collection("notifications").doc(notifId);
+          const notifSnap = await notifRef.get();
+          if (!notifSnap.exists) {
+            const workTitle =
+              schedule.media?.title?.english ||
+              schedule.media?.title?.native ||
+              schedule.media?.title?.romaji ||
+              "";
+            const mediaType = schedule.type || schedule.media?.type || "ANIME";
+            await notifRef.set({
+              notification_id: notifId,
+              user_id: uid,
+              actor_id: "SYSTEM",
+              actor_name: "AniPulse",
+              actor_avatar: "https://anitracker-delta.vercel.app/anipulse-192x192.png",
+              type: "SYSTEM",
+              work_id: String(schedule.mediaId),
+              work_title: workTitle,
+              media_type: mediaType,
+              episode_num: targetEpisode,
+              text: `${mediaType === "MANGA" ? "Kapitel" : "Episode"} ${targetEpisode} von ${workTitle} ist jetzt online.`,
+              timestamp: new Date().toISOString(),
+              read: false,
+            });
+
+            if (tokens.length > 0) {
+              let bucket = tokensByEpisode.get(targetEpisode);
+              if (!bucket) {
+                bucket = { tokens: [], tokenToUserIds: new Map() };
+                tokensByEpisode.set(targetEpisode, bucket);
+              }
+              for (const tk of tokens) {
+                if (!tk) continue;
+                if (!bucket.tokenToUserIds.has(tk)) {
+                  bucket.tokenToUserIds.set(tk, []);
+                  bucket.tokens.push(tk);
                 }
+                bucket.tokenToUserIds.get(tk)!.push(uid);
               }
             }
           }
         }
-        
-        if (tokensToNotify.length > 0) {
-          const workTitle = schedule.media?.title?.english || schedule.media?.title?.native || schedule.media?.title?.romaji || "Werk";
-          const coverUrl = resolveCoverIcon(schedule.media?.coverImage);
+
+        const workTitle =
+          schedule.media?.title?.english ||
+          schedule.media?.title?.native ||
+          schedule.media?.title?.romaji ||
+          "Werk";
+        const mediaType = schedule.type || schedule.media?.type || "ANIME";
+        const coverUrl = resolveCoverIcon(schedule.media?.coverImage);
+
+        for (const [targetEpisode, bucket] of tokensByEpisode.entries()) {
+          if (bucket.tokens.length === 0) continue;
           const payload = {
             notification: {
-              title: schedule.type === "MANGA" ? "Neues Kapitel verf\u00FCgbar!" : "Neue Folge verf\u00FCgbar!",
-              body: `${schedule.type === "MANGA" ? "Kapitel" : "Episode"} ${schedule.episode} von ${workTitle} ist jetzt online.`,
+              title: mediaType === "MANGA" ? "Neues Kapitel verf\u00FCgbar!" : "Neue Folge verf\u00FCgbar!",
+              body: `${mediaType === "MANGA" ? "Kapitel" : "Episode"} ${targetEpisode} von ${workTitle} ist jetzt online.`,
             },
             data: { link: `/work/${schedule.mediaId}`, type: "releases", icon: coverUrl },
             webpush: {
-              headers: { 
+              headers: {
                 Urgency: "high",
-                TTL: "86400"
+                TTL: "86400",
               },
-              notification: { 
+              notification: {
                 icon: coverUrl,
                 badge: "https://anitracker-delta.vercel.app/anipulse-badge-96.png",
                 requireInteraction: true,
-                tag: `release-${schedule.mediaId}-${schedule.episode}`,
+                tag: `release-${schedule.mediaId}-${targetEpisode}`,
                 renotify: true,
                 silent: false,
                 vibrate: [200, 100, 200],
               },
-              fcmOptions: { link: `/work/${schedule.mediaId}` }
+              fcmOptions: { link: `/work/${schedule.mediaId}` },
             },
-            tokens: tokensToNotify,
+            tokens: bucket.tokens,
           };
           try {
             const res = await adminMessaging.sendEachForMulticast(payload);
             notificationsSent += res.successCount;
 
             if (res.failureCount > 0) {
-              const FieldValue = (await import("firebase-admin/firestore")).FieldValue;
               for (let idx = 0; idx < res.responses.length; idx++) {
                 const resp = res.responses[idx];
                 if (
@@ -333,8 +495,8 @@ export async function GET(req: Request) {
                   (resp.error?.code === "messaging/registration-token-not-registered" ||
                     resp.error?.code === "messaging/invalid-registration-token")
                 ) {
-                  const deadToken = tokensToNotify[idx];
-                  const uids = tokenToUserIds.get(deadToken) || [];
+                  const deadToken = bucket.tokens[idx];
+                  const uids = bucket.tokenToUserIds.get(deadToken) || [];
                   for (const uid of uids) {
                     await adminDb
                       .collection("users")
@@ -362,26 +524,13 @@ export async function GET(req: Request) {
         .get();
 
       if (planningSnap.size > 0) {
-        const planningWorkIds = [...new Set(planningSnap.docs.map(d => parseInt(d.data().work_id, 10)).filter(Boolean))] as number[];
+        const planningWorkIds = [
+          ...new Set(
+            planningSnap.docs.map((d) => parseInt(d.data().work_id, 10)).filter(Boolean)
+          ),
+        ] as number[];
 
-        // Batch-fetch AniList status
-        const aniListStatusMap: Record<string, any> = {};
-        for (let i = 0; i < planningWorkIds.length; i += 50) {
-          const chunk = planningWorkIds.slice(i, i + 50);
-          try {
-            const res = await fetch("https://graphql.anilist.co", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ query: GET_MEDIA_STATUS_BATCH, variables: { ids: chunk } }),
-            });
-            const data = await res.json();
-            (data.data?.Page?.media || []).forEach((m: any) => {
-              aniListStatusMap[m.id.toString()] = m;
-            });
-          } catch (e) {
-            console.error("AniList batch check failed", e);
-          }
-        }
+        const aniListStatusMap = await fetchAniListMediaBatch(planningWorkIds);
 
         for (const docSnap of planningSnap.docs) {
           const uWork = docSnap.data();
@@ -397,6 +546,14 @@ export async function GET(req: Request) {
           }
 
           if (uWork.added_status !== "NOT_YET_RELEASED") continue; // Nur Werke beachten, die bei Hinzufügen noch nicht raus waren
+
+          // Don't move to CURRENT before Episode 1 has actually aired
+          const ep1NotYetAired =
+            aniListInfo.type === "ANIME" &&
+            aniListInfo.status === "RELEASING" &&
+            aniListInfo.nextAiringEpisode?.episode === 1 &&
+            Number(aniListInfo.nextAiringEpisode?.airingAt) > now;
+          if (ep1NotYetAired) continue;
 
           if (aniListInfo.status === "RELEASING" || aniListInfo.status === "FINISHED") {
             const userId = uWork.user_id;
@@ -487,6 +644,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ 
       success: true,
+      healedOverrides,
       notificationsSent,
       wishlistMoved,
       wishlistNotificationsSent,

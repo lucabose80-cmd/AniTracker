@@ -525,12 +525,21 @@ export function computeWorkReleaseInfo(params: {
     }
   }
 
-  const hasSchedule = Boolean(computedAiringAt !== undefined && !isIndefinitePause);
+  const isReleaseComplete =
+    media?.status === "CANCELLED" ||
+    (totalLimit != null && hasKnownAvailableLimit && availableEpisodes >= totalLimit) ||
+    (media?.status === "FINISHED" &&
+      (totalLimit == null || (hasKnownAvailableLimit && availableEpisodes >= totalLimit)));
+
+  const hasSchedule = Boolean(
+    !isReleaseComplete && computedAiringAt !== undefined && !isIndefinitePause
+  );
 
   return {
     hasSchedule,
-    airingAt: isIndefinitePause ? undefined : computedAiringAt,
-    nextEpisodeNumber,
+    airingAt: hasSchedule ? computedAiringAt : undefined,
+    nextEpisodeNumber:
+      totalLimit != null ? Math.min(nextEpisodeNumber, totalLimit) : nextEpisodeNumber,
     availableEpisodes,
     maxAllowedProgress,
     behindCount,
@@ -541,7 +550,7 @@ export function computeWorkReleaseInfo(params: {
     isFlexible,
     flexibleRangeLabel,
     frequencyWeeks: freqWeeks,
-    source,
+    source: hasSchedule ? source : "NONE",
   };
 }
 

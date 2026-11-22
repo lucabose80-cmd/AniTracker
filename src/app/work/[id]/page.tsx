@@ -131,7 +131,19 @@ export default function WorkDetailPage() {
             setManualMaxEpisode(ov.manualMaxEpisode);
           }
           if (ov.manualAvailableEps !== undefined) {
-            setManualAvailableEps(ov.manualAvailableEps);
+            const loadedMax =
+              ov.manualMaxEpisode != null && Number(ov.manualMaxEpisode) > 0
+                ? Number(ov.manualMaxEpisode)
+                : data.Media.type === "MANGA" && Number(data.Media.chapters) > 0
+                ? Number(data.Media.chapters)
+                : data.Media.type !== "MANGA" && Number(data.Media.episodes) > 0
+                ? Number(data.Media.episodes)
+                : null;
+            setManualAvailableEps(
+              loadedMax !== null
+                ? Math.min(Number(ov.manualAvailableEps), loadedMax)
+                : ov.manualAvailableEps
+            );
           }
         }
         const isRomance = data.Media.genres?.includes("Romance") || false;
@@ -917,34 +929,70 @@ export default function WorkDetailPage() {
                     const user = auth?.currentUser;
                     if (user) {
                       if (manualMaxEpisode === "") await clearManualMaxEpisode(id);
-                      const effectiveDay =
-                        customDay === -1
-                          ? (null as any)
-                          : rhythmType === "flexible"
-                          ? flexibleMinDay
-                          : customDay;
+
+                      const effectiveMax =
+                        manualMaxEpisode !== "" && Number(manualMaxEpisode) > 0
+                          ? Number(manualMaxEpisode)
+                          : work?.type === "MANGA" && Number(work?.chapters) > 0
+                          ? Number(work.chapters)
+                          : work?.type !== "MANGA" && Number(work?.episodes) > 0
+                          ? Number(work.episodes)
+                          : null;
+
+                      let sanitizedAvailable: number | null =
+                        manualAvailableEps === "" ? null : Math.max(0, Number(manualAvailableEps));
+                      if (
+                        sanitizedAvailable !== null &&
+                        effectiveMax !== null &&
+                        sanitizedAvailable > effectiveMax
+                      ) {
+                        sanitizedAvailable = effectiveMax;
+                        setManualAvailableEps(effectiveMax);
+                      }
+
+                      const isFinishedByCount =
+                        effectiveMax !== null &&
+                        sanitizedAvailable !== null &&
+                        sanitizedAvailable >= effectiveMax;
+                      const isFinishedWorkWithoutPending =
+                        (work?.status === "FINISHED" || work?.status === "CANCELLED") &&
+                        (effectiveMax === null ||
+                          sanitizedAvailable === null ||
+                          sanitizedAvailable >= effectiveMax);
+                      const shouldClearSchedule =
+                        customDay === -1 || isFinishedByCount || isFinishedWorkWithoutPending;
+
+                      const effectiveDay = shouldClearSchedule
+                        ? (null as any)
+                        : rhythmType === "flexible"
+                        ? flexibleMinDay
+                        : customDay;
 
                       await setCalendarOverride(
                         id,
                         null as any,
                         effectiveDay,
-                        customDay === -1 ? (null as any) : customTime,
+                        shouldClearSchedule ? (null as any) : customTime,
                         manualMaxEpisode === ""
                           ? undefined
                           : (manualMaxEpisode as number),
-                        customDay === -1 ? (null as any) : releaseFrequency,
-                        manualAvailableEps === ""
+                        shouldClearSchedule ? (null as any) : releaseFrequency,
+                        sanitizedAvailable === null
                           ? (null as any)
-                          : (manualAvailableEps as number),
+                          : sanitizedAvailable,
                         undefined,
-                        customDay === -1 || !startDate
+                        shouldClearSchedule || !startDate
                           ? (null as any)
                           : startDate,
-                        customDay === -1 ? (null as any) : rhythmType,
-                        customDay !== -1 && rhythmType === "flexible"
+                        shouldClearSchedule ? (null as any) : rhythmType,
+                        !shouldClearSchedule && rhythmType === "flexible"
                           ? { minDay: flexibleMinDay, maxDay: flexibleMaxDay }
                           : (null as any)
                       );
+
+                      if (shouldClearSchedule && customDay !== -1) {
+                        setCustomDay(-1);
+                      }
 
                       if (inLibrary) {
                         // Update synchro_offset_episodes in DB (manual_available_eps is now global)
@@ -953,7 +1001,7 @@ export default function WorkDetailPage() {
                         });
                       }
                       
-                      setHasCustomOverride(customDay !== -1);
+                      setHasCustomOverride(!shouldClearSchedule);
                       setShowSettingsModal(false);
                       setSaveMessage("Einstellungen für alle gespeichert!");
                       setTimeout(() => setSaveMessage(""), 3000);

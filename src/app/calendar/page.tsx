@@ -291,12 +291,28 @@ export default function CalendarPage() {
     const strId = modalWork.id.toString();
     setIsSavingModal(true);
     try {
-      const availNum =
-        editorAvailableEps === "" ? (null as any) : Number(editorAvailableEps);
+      const existingOverride = globalOverrides[strId];
+      const effectiveMax =
+        existingOverride?.manualMaxEpisode != null && Number(existingOverride.manualMaxEpisode) > 0
+          ? Number(existingOverride.manualMaxEpisode)
+          : modalWork.type === "MANGA" && Number(modalWork.chapters) > 0
+          ? Number(modalWork.chapters)
+          : modalWork.type !== "MANGA" && Number(modalWork.episodes) > 0
+          ? Number(modalWork.episodes)
+          : null;
 
-      if (editorMode === "ANILIST") {
+      let clampedAvail: number | null =
+        editorAvailableEps === "" ? null : Math.max(0, Number(editorAvailableEps));
+      if (clampedAvail !== null && effectiveMax !== null && clampedAvail > effectiveMax) {
+        clampedAvail = effectiveMax;
+      }
+      const availNum = clampedAvail === null ? (null as any) : clampedAvail;
+      const isFinishedByCount =
+        effectiveMax !== null && clampedAvail !== null && clampedAvail >= effectiveMax;
+
+      if (editorMode === "ANILIST" || isFinishedByCount) {
         await resetScheduleOverride(strId);
-        if (editorAvailableEps !== "") {
+        if (clampedAvail !== null) {
           await setCalendarOverride(
             strId,
             undefined,
@@ -304,7 +320,7 @@ export default function CalendarPage() {
             undefined,
             undefined,
             undefined,
-            Number(editorAvailableEps)
+            clampedAvail
           );
         }
       } else if (editorMode === "EXACT") {

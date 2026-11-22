@@ -83,6 +83,15 @@ export function hasUserCheckedLatestEpisode(
 
   let latestReleased = 0;
 
+  const totalLimit =
+    calendarOverride?.manualMaxEpisode != null && Number(calendarOverride.manualMaxEpisode) > 0
+      ? Number(calendarOverride.manualMaxEpisode)
+      : workDetails.type === 'MANGA' && Number(workDetails.chapters) > 0
+      ? Number(workDetails.chapters)
+      : workDetails.type !== 'MANGA' && Number(workDetails.episodes) > 0
+      ? Number(workDetails.episodes)
+      : null;
+
   if (workDetails.type === 'ANIME') {
     if (calendarOverride?.manualAvailableEps !== undefined && calendarOverride?.manualAvailableEps !== null) {
       latestReleased = calendarOverride.manualAvailableEps;
@@ -91,17 +100,18 @@ export function hasUserCheckedLatestEpisode(
     } else if (workDetails.status === 'RELEASING') {
       latestReleased = 0; // Default to 0 if no schedule
     } else {
-      const totalEps = calendarOverride?.manualMaxEpisode ?? workDetails.episodes ?? 0;
-      latestReleased = totalEps;
+      latestReleased = totalLimit ?? 0;
     }
   } else {
     if (calendarOverride?.manualAvailableEps !== undefined && calendarOverride?.manualAvailableEps !== null) {
       latestReleased = calendarOverride.manualAvailableEps;
-    } else if (calendarOverride?.manualMaxEpisode !== undefined && calendarOverride?.manualMaxEpisode !== null) {
-      latestReleased = calendarOverride.manualMaxEpisode;
-    } else if (workDetails.chapters) {
-      latestReleased = workDetails.chapters;
+    } else if (totalLimit !== null) {
+      latestReleased = totalLimit;
     }
+  }
+
+  if (totalLimit !== null && latestReleased > totalLimit) {
+    latestReleased = totalLimit;
   }
 
   return userWork.current_episode >= latestReleased;
