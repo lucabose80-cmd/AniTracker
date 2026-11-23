@@ -1914,10 +1914,19 @@ export default function WhatsAppReviewFeed({
 
       {/* PICKER MODAL FOR "+ Werk hinzufügen" or Editing Draft Item */}
       {isPickerOpen && (
-        <div className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="w-full sm:max-w-md bg-[#111827] border border-white/15 rounded-t-3xl sm:rounded-2xl p-4 pb-8 sm:pb-4 max-h-[85vh] overflow-y-auto flex flex-col gap-3 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-white">
+        <div
+          className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+          onClick={() => {
+            setEditingDraftIndex(null);
+            setIsPickerOpen(false);
+          }}
+        >
+          <div
+            className="w-full sm:max-w-md bg-[#151821] border border-gray-800 rounded-t-3xl sm:rounded-2xl p-4 pb-8 sm:pb-4 max-h-[85vh] overflow-y-auto flex flex-col gap-3 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-gray-800/80">
+              <h3 className="text-sm font-bold text-white">
                 {selectedWork
                   ? editingDraftIndex !== null
                     ? "Review-Eintrag bearbeiten"
@@ -1932,9 +1941,10 @@ export default function WhatsAppReviewFeed({
                   setEditingDraftIndex(null);
                   setIsPickerOpen(false);
                 }}
-                className="text-gray-400 hover:text-white p-1 rounded-lg"
+                className="text-gray-400 hover:text-white hover:bg-white/5 p-1 rounded-lg transition-colors"
+                aria-label="Schließen"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 

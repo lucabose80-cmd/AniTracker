@@ -1478,150 +1478,169 @@ export default function LibraryPage() {
       )}
 
       {/* Quick-Edit Modal */}
-      {editingWork && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-          onClick={() => !isSavingEdit && setEditingWork(null)}
-        >
+      {editingWork && (() => {
+        const editDetails = aniListDetails[editingWork.work_id];
+        const editTitle =
+          editDetails?.title?.english ||
+          editDetails?.title?.romaji ||
+          `Werk #${editingWork.work_id}`;
+        const editCover =
+          editDetails?.coverImage?.large || editDetails?.coverImage?.extraLarge;
+
+        return (
           <div
-            className="w-full max-w-md rounded-2xl border border-gray-800 bg-[#161920] p-5 shadow-2xl flex flex-col gap-5"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
+            onClick={() => !isSavingEdit && setEditingWork(null)}
           >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                  Schnell bearbeiten
-                </p>
-                <h2 className="text-base font-bold text-white line-clamp-2 mt-0.5">
-                  {aniListDetails[editingWork.work_id]?.title?.english ||
-                    aniListDetails[editingWork.work_id]?.title?.romaji ||
-                    `Werk #${editingWork.work_id}`}
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingWork(null)}
-                className="p-1.5 rounded-full text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
-                aria-label="Schließen"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Episode / Chapter Adjuster */}
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-semibold text-gray-300">
-                {contentType === "MANGA"
-                  ? "Dein Stand (gelesene Kapitel)"
-                  : "Dein Stand (gesehene Folgen)"}
-              </label>
-              <div className="flex items-center gap-2">
+            <div
+              className="w-full max-w-md rounded-2xl border border-gray-800 bg-[#151821] shadow-2xl overflow-hidden flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center gap-3 px-4 py-3.5 border-b border-gray-800/80">
+                {editCover && (
+                  <img
+                    src={editCover}
+                    alt=""
+                    className="w-8 h-11 rounded-lg object-cover bg-gray-800 shrink-0"
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                    Schnell bearbeiten
+                  </p>
+                  <h2 className="text-sm font-bold text-white truncate">
+                    {editTitle}
+                  </h2>
+                </div>
                 <button
                   type="button"
-                  onClick={() => setEditEpisode((prev) => Math.max(0, prev - 1))}
-                  className="p-2.5 rounded-xl bg-[#222631] hover:bg-gray-700 text-white transition-colors"
-                  aria-label="Verringern"
+                  onClick={() => !isSavingEdit && setEditingWork(null)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+                  aria-label="Schließen"
                 >
-                  <Minus size={16} />
-                </button>
-                <input
-                  type="number"
-                  min={0}
-                  value={editEpisode}
-                  onChange={(e) =>
-                    setEditEpisode(Math.max(0, parseInt(e.target.value, 10) || 0))
-                  }
-                  className="flex-1 rounded-xl border border-gray-800 bg-[#1a1d24] px-3 py-2 text-center text-base font-bold text-white focus:border-blue-500 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => setEditEpisode((prev) => prev + 1)}
-                  className="p-2.5 rounded-xl bg-[#222631] hover:bg-gray-700 text-white transition-colors"
-                  aria-label="Erhöhen"
-                >
-                  <Plus size={16} />
+                  <X size={17} />
                 </button>
               </div>
-            </div>
 
-            {/* Status Selector */}
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-semibold text-gray-300">Status</label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {STATUS_TABS.map((tab) => (
+              {/* Body */}
+              <div className="p-4 flex flex-col gap-3">
+                {/* Episode / Chapter Adjuster */}
+                <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3.5 flex flex-col gap-2.5">
+                  <label className="text-xs font-bold text-white">
+                    {contentType === "MANGA"
+                      ? "Dein Stand (gelesene Kapitel)"
+                      : "Dein Stand (gesehene Folgen)"}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditEpisode((prev) => Math.max(0, prev - 1))}
+                      className="p-2.5 rounded-xl bg-[#181c27] border border-gray-700 hover:bg-gray-700 text-white transition-colors"
+                      aria-label="Verringern"
+                    >
+                      <Minus size={15} />
+                    </button>
+                    <input
+                      type="number"
+                      min={0}
+                      value={editEpisode}
+                      onChange={(e) =>
+                        setEditEpisode(Math.max(0, parseInt(e.target.value, 10) || 0))
+                      }
+                      className="flex-1 rounded-xl border border-gray-700 bg-[#181c27] px-3 py-2 text-center text-base font-bold text-white focus:border-blue-500 focus:outline-none tabular-nums"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setEditEpisode((prev) => prev + 1)}
+                      className="p-2.5 rounded-xl bg-[#181c27] border border-gray-700 hover:bg-gray-700 text-white transition-colors"
+                      aria-label="Erhöhen"
+                    >
+                      <Plus size={15} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Status Selector */}
+                <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3.5 flex flex-col gap-2.5">
+                  <label className="text-xs font-bold text-white">Status</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {STATUS_TABS.map((tab) => (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setEditStatus(tab.key)}
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${
+                          editStatus === tab.key
+                            ? "bg-blue-600 border-blue-500 text-white shadow-sm"
+                            : "bg-[#181c27] border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
+                        }`}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {editStatus === "DROPPED" && (
+                  <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3.5 flex flex-col gap-2">
+                    <label className="text-xs font-bold text-white">
+                      Grund für Abbruch (optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={editDroppedReason}
+                      onChange={(e) => setEditDroppedReason(e.target.value)}
+                      placeholder="Grund für Abbruch (optional)"
+                      className="w-full rounded-xl border border-gray-700 bg-[#181c27] px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-rose-500 focus:outline-none"
+                    />
+                  </div>
+                )}
+
+                {editStatus === "PAUSED" && (
                   <button
-                    key={tab.key}
                     type="button"
-                    onClick={() => setEditStatus(tab.key)}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${
-                      editStatus === tab.key
-                        ? "bg-blue-600 border-blue-500 text-white"
-                        : "bg-[#1a1d24] border-gray-800 text-gray-400 hover:text-white"
-                    }`}
+                    onClick={() => setEditStatus("CURRENT")}
+                    className="w-full rounded-xl border border-blue-500/40 bg-blue-500/15 hover:bg-blue-500/25 px-3 py-2 text-xs font-semibold text-blue-300 transition-colors"
                   >
-                    {tab.label}
+                    Entpausieren (Aktiv setzen)
                   </button>
-                ))}
+                )}
               </div>
-            </div>
 
-            {editStatus === "DROPPED" && (
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold text-gray-300">
-                  Grund für Abbruch (optional)
-                </label>
-                <input
-                  type="text"
-                  value={editDroppedReason}
-                  onChange={(e) => setEditDroppedReason(e.target.value)}
-                  placeholder="Grund für Abbruch (optional)"
-                  className="w-full rounded-xl border border-gray-800 bg-[#1a1d24] px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-red-500 focus:outline-none"
-                />
-              </div>
-            )}
-
-            {editStatus === "PAUSED" && (
-              <button
-                type="button"
-                onClick={() => setEditStatus("CURRENT")}
-                className="w-full rounded-xl border border-blue-500/40 bg-blue-500/15 hover:bg-blue-500/25 px-3 py-2 text-xs font-semibold text-blue-300 transition-colors"
-              >
-                Entpausieren (Aktiv setzen)
-              </button>
-            )}
-
-            {/* Actions */}
-            <div className="flex items-center justify-between gap-3 pt-1">
-              <Link
-                href={`/work/${editingWork.work_id}`}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors"
-              >
-                <ExternalLink size={14} />
-                Zur Detailseite
-              </Link>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingWork(null)}
-                  disabled={isSavingEdit}
-                  className="px-4 py-2 rounded-full text-xs font-semibold text-gray-300 hover:text-white bg-[#222631] hover:bg-gray-700 transition-colors"
+              {/* Footer */}
+              <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-gray-800/80 bg-[#11141c]">
+                <Link
+                  href={`/work/${editingWork.work_id}`}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors"
                 >
-                  Abbrechen
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveQuickEdit}
-                  disabled={isSavingEdit}
-                  className="px-4 py-2 rounded-full text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 transition-colors"
-                >
-                  {isSavingEdit ? "Speichern..." : "Speichern"}
-                </button>
+                  <ExternalLink size={14} />
+                  Zur Detailseite
+                </Link>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingWork(null)}
+                    disabled={isSavingEdit}
+                    className="px-3.5 py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 transition-colors"
+                  >
+                    Abbrechen
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveQuickEdit}
+                    disabled={isSavingEdit}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 transition-colors shadow-md"
+                  >
+                    {isSavingEdit ? "Speichern..." : "Speichern"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Compact Random Wishlist Pick Modal */}
       {randomPickWork && (() => {
@@ -1640,10 +1659,10 @@ export default function LibraryPage() {
             onClick={() => !isStartingRandom && setRandomPickWork(null)}
           >
             <div
-              className="w-full max-w-sm rounded-2xl border border-gray-800 bg-[#14171f] p-4 shadow-2xl flex flex-col gap-4"
+              className="w-full max-w-sm rounded-2xl border border-gray-800 bg-[#151821] shadow-2xl overflow-hidden flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800/80">
                 <span className="inline-flex items-center gap-1.5 text-xs font-bold text-purple-300">
                   <Dices size={14} />
                   Zufallsauswahl{selectedGenres.length > 0 ? ` · ${selectedGenres.join(", ")}` : ""}
@@ -1651,14 +1670,14 @@ export default function LibraryPage() {
                 <button
                   type="button"
                   onClick={() => setRandomPickWork(null)}
-                  className="p-1 text-gray-400 hover:text-white transition-colors"
+                  className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
                   aria-label="Schließen"
                 >
                   <X size={16} />
                 </button>
               </div>
 
-              <div className="flex gap-3.5 items-start">
+              <div className="p-4 flex gap-3.5 items-start">
                 <Link
                   href={`/work/${randomPickWork.work_id}`}
                   className="w-20 h-28 rounded-xl overflow-hidden bg-gray-800 shrink-0 block"
@@ -1680,8 +1699,8 @@ export default function LibraryPage() {
                   </Link>
                   <div className="flex items-center gap-2 text-xs text-gray-400">
                     {score && (
-                      <span className="inline-flex items-center gap-1 text-yellow-400 font-semibold">
-                        <Star size={11} className="fill-yellow-400" />
+                      <span className="inline-flex items-center gap-1 text-amber-300 font-semibold tabular-nums">
+                        <Star size={11} className="fill-amber-400 text-amber-400" />
                         {score}
                       </span>
                     )}
@@ -1696,7 +1715,7 @@ export default function LibraryPage() {
                       {genres.map((g) => (
                         <span
                           key={g}
-                          className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#1a1d24] border border-gray-800 text-gray-300"
+                          className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#10131b] border border-gray-800 text-gray-300"
                         >
                           {g}
                         </span>
@@ -1706,13 +1725,13 @@ export default function LibraryPage() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between gap-2 pt-1">
+              <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-gray-800/80 bg-[#11141c]">
                 {randomEligibleWishlistWorks.length > 1 ? (
                   <button
                     type="button"
                     disabled={isStartingRandom}
                     onClick={() => handlePickRandomWishlist(randomPickWork.work_id)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-[#222631] hover:bg-gray-700 text-gray-200 transition-colors"
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-gray-200 transition-colors"
                   >
                     <Dices size={13} />
                     Nochmal
@@ -1723,7 +1742,7 @@ export default function LibraryPage() {
                 <div className="flex items-center gap-2">
                   <Link
                     href={`/work/${randomPickWork.work_id}`}
-                    className="px-3 py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white bg-[#1a1d24] border border-gray-800 transition-colors"
+                    className="px-3 py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 transition-colors"
                   >
                     Details
                   </Link>
@@ -1731,7 +1750,7 @@ export default function LibraryPage() {
                     type="button"
                     disabled={isStartingRandom}
                     onClick={handleStartRandomPick}
-                    className="px-3.5 py-2 rounded-xl text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 transition-colors"
+                    className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 transition-colors shadow-md"
                   >
                     {isStartingRandom ? "..." : "Starten"}
                   </button>

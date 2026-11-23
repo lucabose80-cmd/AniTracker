@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { fetchAniList, GET_WORK_DETAILS } from "@/lib/anilist";
 import { calculateOverallScore } from "@/lib/scoring";
 import { UserWork, EmotionalImpact, WatchMode } from "@/types/database";
-import { Star, ChevronLeft, Save, Library as LibraryIcon, Check, Calendar as CalendarIcon, PlayCircle, CheckCircle, PauseCircle, Bookmark, Settings } from "lucide-react";
+import { Star, ChevronLeft, Save, Library as LibraryIcon, Check, Calendar as CalendarIcon, PlayCircle, CheckCircle, PauseCircle, Bookmark, Settings, Trash2 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 import { CalendarOverride, getCalendarOverrides, formatPauseStatusLabel } from "@/lib/db/calendar";
@@ -572,7 +572,7 @@ export default function WorkDetailPage() {
         </button>
       </div>
 
-      <div className="relative -mt-16 px-4">
+      <div className="relative -mt-16 px-4 max-w-3xl mx-auto w-full">
         <div className="flex gap-4">
           <div className="relative h-40 w-28 shrink-0">
             <Image 
@@ -580,7 +580,7 @@ export default function WorkDetailPage() {
               alt="Cover" 
               fill
               priority
-              className="rounded-lg shadow-xl border border-gray-800 object-cover" 
+              className="rounded-xl shadow-xl border border-gray-800 object-cover" 
             />
           </div>
           <div className="flex flex-col justify-end pt-16">
@@ -595,9 +595,9 @@ export default function WorkDetailPage() {
         </div>
 
         {/* Genres & Tags */}
-        <div className="mt-6 flex flex-wrap gap-2">
+        <div className="mt-6 flex flex-wrap gap-1.5">
           {work.genres?.map((g: string) => (
-            <span key={g} className="rounded bg-blue-600/20 px-2 py-1 text-xs font-semibold text-blue-400">
+            <span key={g} className="rounded-full bg-blue-600/15 border border-blue-500/25 px-2.5 py-0.5 text-xs font-semibold text-blue-300">
               {g}
             </span>
           ))}
@@ -613,7 +613,7 @@ export default function WorkDetailPage() {
 
         {/* GLOBAL PAUSE / HIATUS BANNER (Visible to all users, any user can unpause for everyone) */}
         {isWorkPaused && (
-          <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 flex flex-wrap items-center justify-between gap-3">
+          <div className="mt-4 rounded-2xl border border-amber-500/35 bg-amber-500/10 p-3.5 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-col">
               <span className="text-xs font-extrabold uppercase tracking-wider text-amber-300">
                 Global auf Pause / Hiatus ({formatPauseStatusLabel(pausedUntilIso)})
@@ -626,7 +626,7 @@ export default function WorkDetailPage() {
               type="button"
               onClick={handleUnpause}
               disabled={isSaving}
-              className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow transition shrink-0"
+              className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow transition shrink-0"
             >
               Pause für alle aufheben
             </button>
@@ -636,7 +636,7 @@ export default function WorkDetailPage() {
         <p className={`mt-2 text-sm text-gray-300 ${work.startDate?.year ? '' : 'mt-4'} line-clamp-4`} dangerouslySetInnerHTML={{ __html: work.description || "" }} />
 
         {/* EPISODE TRACKING */}
-        <div className="mt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div className="mt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#151821] border border-gray-800/90 rounded-2xl p-4">
           <div className="flex flex-col">
             <span className="font-bold text-gray-300">
               {work.type === "MANGA" ? "Kapitel gelesen" : "Folgen geschaut"}
@@ -781,8 +781,8 @@ export default function WorkDetailPage() {
           )}
 
           {userWorkStatus === "DROPPED" && (
-            <div className="rounded-xl border border-gray-800 bg-[#141a29] p-3 flex flex-col gap-2">
-              <label className="text-xs font-bold text-gray-400">
+            <div className="rounded-2xl border border-gray-800/90 bg-[#151821] p-3.5 flex flex-col gap-2">
+              <label className="text-xs font-bold text-gray-300">
                 Abbruch-Grund
               </label>
               <div className="flex gap-2">
@@ -791,13 +791,13 @@ export default function WorkDetailPage() {
                   value={droppedReason}
                   onChange={(e) => setDroppedReason(e.target.value)}
                   placeholder="Warum abgebrochen? (optional)"
-                  className="flex-1 rounded-lg border border-gray-700 bg-[#0f1115] px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                  className="flex-1 rounded-xl border border-gray-700 bg-[#10131b] px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
                 />
                 <button
                   type="button"
                   onClick={handleSaveDroppedReason}
                   disabled={isSaving}
-                  className="rounded-lg bg-blue-600 hover:bg-blue-500 px-3.5 py-2 text-xs font-bold text-white transition disabled:opacity-50 shrink-0"
+                  className="rounded-xl bg-blue-600 hover:bg-blue-500 px-3.5 py-2 text-xs font-bold text-white transition disabled:opacity-50 shrink-0"
                 >
                   Speichern
                 </button>
@@ -806,117 +806,120 @@ export default function WorkDetailPage() {
           )}
 
           {inLibrary && (
-            <div className="flex gap-2">
-              <button 
-                onClick={handleRemove}
-                disabled={isSaving}
-                className="w-full flex items-center justify-center gap-2 rounded-xl bg-red-900/30 border border-red-900 hover:bg-red-900/60 transition text-red-500 py-3 text-sm font-bold active:scale-95 disabled:opacity-50"
-              >
-                X Aus Bibliothek entfernen
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={handleRemove}
+              disabled={isSaving}
+              className="w-full flex items-center justify-center gap-2 rounded-xl bg-rose-500/10 border border-rose-500/25 hover:bg-rose-500/20 transition text-rose-400 hover:text-rose-300 py-2.5 text-xs font-semibold active:scale-[0.99] disabled:opacity-50"
+            >
+              <Trash2 size={14} />
+              Aus Bibliothek entfernen
+            </button>
           )}
           
           <button 
+            type="button"
             onClick={() => setShowEvaluation(!showEvaluation)}
-            className="w-full rounded-xl bg-[#1a1d24] border border-gray-800 py-3.5 font-bold text-white transition hover:bg-gray-800 active:scale-95 flex items-center justify-center gap-2"
+            className="w-full rounded-xl bg-[#151821] border border-gray-800/90 py-3.5 font-bold text-sm text-white transition hover:border-gray-700 hover:bg-[#1a1d28] active:scale-[0.99] flex items-center justify-center gap-2"
           >
-            <Star size={20} className={showEvaluation ? "text-yellow-500" : "text-gray-400"} /> 
+            <Star size={17} className={showEvaluation ? "text-amber-400 fill-amber-400" : "text-gray-400"} /> 
             {showEvaluation ? "Bewertungsmatrix schließen" : "Bewertungsmatrix öffnen"}
           </button>
         </div>
 
         {/* --- DEEP EVALUATION UI --- */}
         {showEvaluation && (
-          <div className="mt-6 rounded-2xl border border-gray-800 bg-[#1a1d24] p-5 shadow-lg animate-in fade-in slide-in-from-top-4">
+          <div className="mt-6 rounded-2xl border border-gray-800 bg-[#151821] p-5 shadow-xl animate-in fade-in slide-in-from-top-4">
           
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-bold text-white">
+          <div className="flex justify-between items-center mb-5 pb-4 border-b border-gray-800/80">
+            <h2 className="text-lg font-bold text-white">
               Bewertungsmatrix
             </h2>
             <div className="flex flex-col items-end">
-              <span className="text-2xl font-bold text-blue-500">{currentScore.toFixed(2)}<span className="text-sm text-gray-500">/10</span></span>
+              <span className="text-2xl font-bold text-blue-400 tabular-nums">{currentScore.toFixed(2)}<span className="text-xs text-gray-500 ml-0.5">/10</span></span>
               <label className="flex items-center gap-2 text-xs text-gray-400 mt-1 cursor-pointer">
-                <input type="checkbox" checked={malRated} onChange={(e) => setMalRated(e.target.checked)} className="rounded bg-gray-900 border-gray-700 text-blue-600 focus:ring-blue-600" />
+                <input type="checkbox" checked={malRated} onChange={(e) => setMalRated(e.target.checked)} className="rounded bg-[#10131b] border-gray-700 text-blue-600 focus:ring-blue-600" />
                 Auf MyAnimeList bewertet
               </label>
             </div>
           </div>
 
           {episodeRatingStats.count > 0 && episodeRatingStats.average !== null && (
-            <div className="mb-6 rounded-xl border border-blue-500/30 bg-blue-950/30 px-4 py-3">
-              <div className="flex items-center gap-2 text-sm font-bold text-blue-300">
-                <Star size={15} className="text-yellow-400 fill-yellow-400 shrink-0" />
+            <div className="mb-5 rounded-xl border border-blue-500/25 bg-blue-500/10 px-3.5 py-2.5">
+              <div className="flex items-center gap-2 text-xs font-bold text-blue-200">
+                <Star size={14} className="text-amber-400 fill-amber-400 shrink-0" />
                 <span>
                   Dein {work.type === "MANGA" ? "Kapitel" : "Folgen"}-Durchschnitt: Ø {episodeRatingStats.average.toFixed(1)} / 10
                 </span>
               </div>
-              <p className="text-xs text-gray-400 mt-1">
-                (basierend auf {episodeRatingStats.count} bewerteten {work.type === "MANGA" ? "Kapiteln" : "Folgen"} aus deinen Reviews)
+              <p className="text-[11px] text-gray-400 mt-0.5">
+                Basierend auf {episodeRatingStats.count} bewerteten {work.type === "MANGA" ? "Kapiteln" : "Folgen"} aus deinen Reviews
               </p>
             </div>
           )}
 
-          <div className="space-y-6">
-            <div className="bg-[#141a29] p-4 rounded-xl border border-gray-800">
-              <div className="flex justify-between text-sm mb-1">
-                <span className="text-gray-300 font-bold flex items-center gap-2">
-                  <Star size={14} className="text-yellow-500" />
+          <div className="space-y-5">
+            <div className="bg-[#10131b] p-3.5 rounded-xl border border-gray-800/90">
+              <div className="flex justify-between text-xs mb-1.5">
+                <span className="text-gray-200 font-bold flex items-center gap-1.5">
+                  <Star size={13} className="text-amber-400 fill-amber-400" />
                   Manuelle Gesamtwertung
                 </span>
-                <span className="font-bold text-white">{evaluation.manualScore || 'Matrix'}</span>
+                <span className="font-bold text-white tabular-nums">{evaluation.manualScore || 'Matrix'}</span>
               </div>
               <input 
                 type="range" min="0" max="10" step="0.5" 
                 value={evaluation.manualScore || 0}
                 onChange={(e) => handleSlider("manualScore", e.target.value)}
-                className="w-full accent-yellow-500"
+                className="w-full accent-amber-400"
               />
               <p className="text-[10px] text-gray-500 mt-1">
-                Wenn hier ein Wert über 0 gesetzt wird, überschreibt dieser die berechnete Bewertungsmatrix (z.B. für schnelle Imports).
+                Wenn hier ein Wert über 0 gesetzt wird, überschreibt dieser die berechnete Bewertungsmatrix (z. B. für schnelle Imports).
               </p>
             </div>
 
             {/* Standard Metrics */}
-            {[
-              { label: "Story & Handlung (x2.0)", field: "plotAndStory" },
-              { label: "Hauptcharaktere (x2.0)", field: "castAndCharacters" },
-              { label: "Nebencharaktere (x1.0)", field: "sideCharacters" },
-              { label: "Zeichenstil & Animation (x1.5)", field: "artstyleAndAnimation" },
-              { label: "Ende (x1.5)", field: "ending" },
-              { label: "Binge-Faktor (x1.0)", field: "bingeFactor" },
-              { label: "Comedy (x1.0)", field: "comedy" },
-            ].map((metric) => (
-              <div key={metric.field}>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="text-gray-300 font-medium">{metric.label}</span>
-                  <span className="font-bold text-white">{evaluation[metric.field as keyof UserWork["evaluation"]] || '-'}</span>
+            <div className="bg-[#10131b] p-3.5 rounded-xl border border-gray-800/90 space-y-4">
+              {[
+                { label: "Story & Handlung (x2.0)", field: "plotAndStory" },
+                { label: "Hauptcharaktere (x2.0)", field: "castAndCharacters" },
+                { label: "Nebencharaktere (x1.0)", field: "sideCharacters" },
+                { label: "Zeichenstil & Animation (x1.5)", field: "artstyleAndAnimation" },
+                { label: "Ende (x1.5)", field: "ending" },
+                { label: "Binge-Faktor (x1.0)", field: "bingeFactor" },
+                { label: "Comedy (x1.0)", field: "comedy" },
+              ].map((metric) => (
+                <div key={metric.field}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-gray-300 font-medium">{metric.label}</span>
+                    <span className="font-bold text-white tabular-nums">{evaluation[metric.field as keyof UserWork["evaluation"]] || '-'}</span>
+                  </div>
+                  <input 
+                    type="range" min="0" max="10" step="0.5" 
+                    value={evaluation[metric.field as keyof UserWork["evaluation"]] as number}
+                    onChange={(e) => handleSlider(metric.field as keyof UserWork["evaluation"], e.target.value)}
+                    className="w-full accent-blue-500"
+                  />
                 </div>
-                <input 
-                  type="range" min="0" max="10" step="0.5" 
-                  value={evaluation[metric.field as keyof UserWork["evaluation"]] as number}
-                  onChange={(e) => handleSlider(metric.field as keyof UserWork["evaluation"], e.target.value)}
-                  className="w-full accent-blue-500"
-                />
-              </div>
-            ))}
+              ))}
+            </div>
 
             {/* Conditional Metrics */}
-            <div className="pt-4 border-t border-gray-800">
-              <label className="flex items-center gap-2 mb-4 text-sm text-gray-300">
-                <input type="checkbox" checked={hasRomance} onChange={(e) => setHasRomance(e.target.checked)} className="rounded bg-gray-900 border-gray-700 text-blue-600 focus:ring-blue-600" />
+            <div className="bg-[#10131b] p-3.5 rounded-xl border border-gray-800/90">
+              <label className="flex items-center gap-2 text-xs font-semibold text-gray-200 cursor-pointer">
+                <input type="checkbox" checked={hasRomance} onChange={(e) => setHasRomance(e.target.checked)} className="rounded bg-[#181c27] border-gray-700 text-blue-600 focus:ring-blue-600" />
                 Ist Romance enthalten?
               </label>
               
               {hasRomance && (
-                <div className="mb-4">
-                  <div className="flex justify-between text-sm mb-1">
-                    <span className="text-gray-300 font-medium">Romance & Chemie</span>
-                    <span className="font-bold text-white">{evaluation.romanceAndChemistry || '-'}</span>
+                <div className="mt-3 pt-3 border-t border-gray-800/80">
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-gray-300 font-medium">Romance &amp; Chemie</span>
+                    <span className="font-bold text-white tabular-nums">{evaluation.romanceAndChemistry || '-'}</span>
                   </div>
                   <input type="range" min="0" max="10" step="0.5" value={evaluation.romanceAndChemistry} onChange={(e) => handleSlider("romanceAndChemistry", e.target.value)} className="w-full accent-blue-500 mb-2" />
-                  <label className="flex items-center gap-2 text-xs text-gray-400">
-                    <input type="checkbox" checked={isRomanceMainFocus} onChange={(e) => setIsRomanceMainFocus(e.target.checked)} className="rounded bg-gray-900 border-gray-700" />
+                  <label className="flex items-center gap-2 text-[11px] text-gray-400 cursor-pointer">
+                    <input type="checkbox" checked={isRomanceMainFocus} onChange={(e) => setIsRomanceMainFocus(e.target.checked)} className="rounded bg-[#181c27] border-gray-700" />
                     Romance ist der Main-Plot (Gewichtung x2.0 statt x1.0)
                   </label>
                 </div>
@@ -925,33 +928,49 @@ export default function WorkDetailPage() {
 
             {/* Anime Specific */}
             {work.type === "ANIME" && (
-              <div className="pt-4 border-t border-gray-800 space-y-4">
+              <div className="bg-[#10131b] p-3.5 rounded-xl border border-gray-800/90 space-y-4">
                 <div>
-                  <div className="flex justify-between text-sm mb-1">
+                  <div className="flex justify-between text-xs mb-1">
                     <span className="text-gray-300 font-medium">Intro / Outro (x0.5)</span>
-                    <span className="font-bold text-white">{evaluation.introOutro || '-'}</span>
+                    <span className="font-bold text-white tabular-nums">{evaluation.introOutro || '-'}</span>
                   </div>
                   <input type="range" min="0" max="10" step="0.5" value={evaluation.introOutro} onChange={(e) => handleSlider("introOutro", e.target.value)} className="w-full accent-blue-500" />
                 </div>
 
                 <div className="flex flex-col gap-2">
-                  <span className="text-sm text-gray-300 font-medium">Watch Mode</span>
-                  <select 
-                    value={watchMode} 
-                    onChange={(e) => setWatchMode(e.target.value as WatchMode)}
-                    className="bg-[#0f1115] border border-gray-700 rounded-lg p-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="SUB">SUB (Keine Sync-Wertung)</option>
-                    <option value="DUB">DUB (Voice Acting x0.5)</option>
-                    <option value="BEIDES">BEIDES (Voice Acting x0.5)</option>
-                  </select>
+                  <span className="text-xs text-gray-300 font-semibold">Watch Mode</span>
+                  <div className="grid grid-cols-3 gap-1 bg-[#0b0e14] p-1 rounded-xl border border-gray-800/80">
+                    {(
+                      [
+                        { value: "SUB", label: "SUB", sub: "Ohne Sync" },
+                        { value: "DUB", label: "DUB", sub: "Sync x0.5" },
+                        { value: "BEIDES", label: "Beides", sub: "Sync x0.5" },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setWatchMode(opt.value)}
+                        className={`flex flex-col items-center py-1.5 px-2 rounded-lg transition-colors ${
+                          watchMode === opt.value
+                            ? "bg-blue-600 text-white shadow-sm"
+                            : "text-gray-400 hover:text-gray-200"
+                        }`}
+                      >
+                        <span className="text-xs font-bold">{opt.label}</span>
+                        <span className={`text-[10px] ${watchMode === opt.value ? "text-blue-100" : "text-gray-500"}`}>
+                          {opt.sub}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {(watchMode === "DUB" || watchMode === "BEIDES") && (
                   <div>
-                    <div className="flex justify-between text-sm mb-1">
+                    <div className="flex justify-between text-xs mb-1">
                       <span className="text-gray-300 font-medium">Voice Acting (x0.5)</span>
-                      <span className="font-bold text-white">{evaluation.voiceActing || '-'}</span>
+                      <span className="font-bold text-white tabular-nums">{evaluation.voiceActing || '-'}</span>
                     </div>
                     <input type="range" min="0" max="10" step="0.5" value={evaluation.voiceActing} onChange={(e) => handleSlider("voiceActing", e.target.value)} className="w-full accent-blue-500" />
                   </div>
@@ -960,12 +979,12 @@ export default function WorkDetailPage() {
             )}
 
             {/* Rewatch Potential (separate from overall score) */}
-            <div className="pt-4 border-t border-gray-800">
-              <div className="flex justify-between text-sm mb-1">
+            <div className="bg-[#10131b] p-3.5 rounded-xl border border-gray-800/90">
+              <div className="flex justify-between text-xs mb-1">
                 <span className="text-gray-300 font-medium">
-                  Rewatch-Potenzial (zählt nicht in Gesamtwertung)
+                  Rewatch-Potenzial (separat)
                 </span>
-                <span className="font-bold text-white">
+                <span className="font-bold text-white tabular-nums">
                   {evaluation.rewatchPotential || '-'}
                 </span>
               </div>
@@ -981,17 +1000,18 @@ export default function WorkDetailPage() {
             </div>
 
             {/* Emotional Impact */}
-            <div className="pt-4 border-t border-gray-800">
-              <span className="block text-sm text-gray-300 font-medium mb-2">Emotional Bonus</span>
-              <div className="grid grid-cols-2 gap-2">
+            <div className="bg-[#10131b] p-3.5 rounded-xl border border-gray-800/90">
+              <span className="block text-xs text-gray-300 font-semibold mb-2">Emotional Bonus</span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                 {(["None", "Leicht", "Mitgenommen", "Tränen nah", "Tränen ausgelöst", "Geweint"] as EmotionalImpact[]).map((impact) => (
                   <button
                     key={impact}
+                    type="button"
                     onClick={() => setEvaluation(prev => ({ ...prev, emotionalImpact: impact }))}
-                    className={`rounded-lg border p-2 text-xs font-semibold transition ${
+                    className={`rounded-xl border px-2.5 py-2 text-xs font-semibold transition ${
                       evaluation.emotionalImpact === impact 
-                      ? "border-blue-500 bg-blue-600/20 text-blue-400" 
-                      : "border-gray-700 bg-[#0f1115] text-gray-400 hover:border-gray-600"
+                      ? "border-blue-500/70 bg-blue-600/20 text-blue-200" 
+                      : "border-gray-800 bg-[#181c27] text-gray-400 hover:border-gray-700 hover:text-gray-200"
                     }`}
                   >
                     {impact}
@@ -1001,15 +1021,16 @@ export default function WorkDetailPage() {
             </div>
 
             <button 
+              type="button"
               onClick={handleSave}
               disabled={isSaving}
-              className="w-full mt-6 flex justify-center items-center gap-2 rounded-lg bg-blue-600 py-3 font-bold text-white shadow-lg transition hover:bg-blue-700 active:scale-95 disabled:opacity-50"
+              className="w-full flex justify-center items-center gap-2 rounded-xl bg-blue-600 py-3 text-sm font-bold text-white shadow-lg transition hover:bg-blue-500 active:scale-[0.99] disabled:opacity-50"
             >
-              <Save size={20} />
-              {isSaving ? "Speichert..." : "Bewertung Speichern"}
+              <Save size={17} />
+              {isSaving ? "Speichert..." : "Bewertung speichern"}
             </button>
             {saveMessage && (
-              <p className={`text-center text-sm font-semibold mt-2 ${saveMessage.includes("Fehler") || saveMessage.includes("einloggen") ? "text-red-400" : "text-green-400"}`}>
+              <p className={`text-center text-xs font-semibold ${saveMessage.includes("Fehler") || saveMessage.includes("einloggen") ? "text-rose-400" : "text-emerald-400"}`}>
                 {saveMessage}
               </p>
             )}

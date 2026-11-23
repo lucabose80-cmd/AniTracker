@@ -1,6 +1,6 @@
 "use client";
 
-import { User as UserIcon, Settings, LogOut, LogIn, Bell, Star, ChevronDown, ChevronUp } from "lucide-react";
+import { User as UserIcon, X, LogOut, LogIn, Bell, Star, ChevronDown, ChevronUp } from "lucide-react";
 import { auth } from "@/lib/firebase";
 import { signOut, onAuthStateChanged, User } from "firebase/auth";
 import { useRouter } from "next/navigation";
@@ -241,11 +241,6 @@ export default function ProfilePage() {
           <UserIcon className="text-blue-500" /> 
           Profil
         </h2>
-        <div className="flex items-center gap-4">
-          <button className="text-gray-400 hover:text-white transition">
-            <Settings size={20} />
-          </button>
-        </div>
       </div>
 
       <div className="flex flex-col items-center gap-4 rounded-2xl border border-gray-800 bg-[#1a1d24] p-6 shadow-lg relative">
@@ -660,7 +655,7 @@ export default function ProfilePage() {
                 return (
                   <div
                     key={w.work_id}
-                    className="flex items-center gap-3 rounded-xl border border-gray-800 bg-[#141a29] p-2.5 hover:border-gray-700 transition-colors"
+                    className="flex items-center gap-3 rounded-xl border border-gray-800/90 bg-[#10131b] p-2.5 hover:border-gray-700 transition-colors"
                   >
                     <Link
                       href={`/work/${w.work_id}`}
@@ -709,23 +704,46 @@ export default function ProfilePage() {
 
       {/* Profil Edit Modal */}
       {isEditingProfile && (
-        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-          <form onSubmit={handleSaveProfile} className="bg-[#1a1d24] border border-gray-800 rounded-2xl p-6 w-full max-w-sm shadow-xl">
-            <h3 className="text-lg font-bold mb-4">Profil bearbeiten</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-gray-400 mb-1">Benutzername</label>
-                <input 
-                  type="text" 
-                  value={editUsername} 
-                  onChange={e => setEditUsername(e.target.value)}
-                  className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
+          onClick={() => !isSaving && setIsEditingProfile(false)}
+        >
+          <form
+            onSubmit={handleSaveProfile}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl border border-gray-800 bg-[#151821] shadow-2xl overflow-hidden flex flex-col"
+          >
+            <div className="flex items-center justify-between px-4 py-3.5 border-b border-gray-800/80">
+              <h3 className="text-sm font-bold text-white">Profil bearbeiten</h3>
+              <button
+                type="button"
+                onClick={() => !isSaving && setIsEditingProfile(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+                aria-label="Schließen"
+              >
+                <X size={17} />
+              </button>
+            </div>
+
+            <div className="p-4 flex flex-col gap-3">
+              <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3.5">
+                <label className="block text-xs font-bold text-gray-300 mb-1.5">
+                  Benutzername
+                </label>
+                <input
+                  type="text"
+                  value={editUsername}
+                  onChange={(e) => setEditUsername(e.target.value)}
+                  className="w-full bg-[#181c27] border border-gray-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                   required
                 />
               </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-400 mb-1">Profilbild</label>
-                
+
+              <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3.5">
+                <label className="block text-xs font-bold text-gray-300 mb-2.5">
+                  Profilbild
+                </label>
+
                 <div className="flex flex-col items-center gap-3">
                   <div className="h-20 w-20 rounded-full bg-gray-800 flex items-center justify-center overflow-hidden border border-gray-700">
                     {editAvatarUrl ? (
@@ -734,49 +752,53 @@ export default function ProfilePage() {
                       <span className="text-gray-500 text-xs">Kein Bild</span>
                     )}
                   </div>
-                  
-                  <input 
-                    type="file" 
-                    accept="image/*" 
-                    className="hidden" 
+
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
                     ref={fileInputRef}
                     onChange={handleImageUpload}
                   />
-                  
+
                   <div className="flex gap-2 w-full">
-                    <button 
+                    <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="flex-1 bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold py-2 rounded-lg transition"
+                      className="flex-1 bg-[#1e2330] hover:bg-gray-700 text-white text-xs font-semibold py-2 rounded-xl transition"
                     >
                       Bild vom Handy wählen
                     </button>
                     {editAvatarUrl && (
-                      <button 
+                      <button
                         type="button"
                         onClick={() => setEditAvatarUrl("")}
-                        className="bg-red-900/50 hover:bg-red-900 text-red-400 text-xs font-bold px-3 py-2 rounded-lg transition"
+                        className="bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 text-xs font-semibold px-3 py-2 rounded-xl transition"
                       >
                         Entfernen
                       </button>
                     )}
                   </div>
-                  <p className="text-[10px] text-gray-500 w-full text-center mt-1">Bild wird automatisch optimiert gespeichert.</p>
+                  <p className="text-[10px] text-gray-500 w-full text-center">
+                    Bild wird automatisch optimiert gespeichert.
+                  </p>
                 </div>
               </div>
             </div>
-            <div className="flex justify-end gap-3 mt-6">
-              <button 
-                type="button" 
+
+            <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-gray-800/80 bg-[#11141c]">
+              <button
+                type="button"
                 onClick={() => setIsEditingProfile(false)}
-                className="px-4 py-2 text-sm font-bold text-gray-400 hover:text-white"
+                disabled={isSaving}
+                className="px-3.5 py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 transition"
               >
                 Abbrechen
               </button>
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 disabled={isSaving}
-                className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-lg text-sm transition"
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold transition shadow-md"
               >
                 {isSaving ? "Speichert..." : "Speichern"}
               </button>

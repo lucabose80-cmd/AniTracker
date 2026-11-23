@@ -183,11 +183,11 @@ export function WorkSocialFeed({ workId, work }: { workId: string; work: any }) 
       {showQuickForm && (
         <form
           onSubmit={handleQuickSubmit}
-          className="rounded-xl border border-blue-500/30 bg-[#141a29] p-4 space-y-3 shadow-lg"
+          className="rounded-2xl border border-gray-800 bg-[#151821] p-4 space-y-3.5 shadow-xl"
         >
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] font-bold text-gray-400 mb-1">
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-800/90 bg-[#10131b] px-3.5 py-2.5">
+              <label className="text-xs font-bold text-gray-200">
                 {unitLabel}-Nummer
               </label>
               <input
@@ -195,31 +195,50 @@ export function WorkSocialFeed({ workId, work }: { workId: string; work: any }) 
                 min={1}
                 value={epInput}
                 onChange={(e) => setEpInput(e.target.value)}
-                className="w-full rounded-lg border border-gray-700 bg-[#0f1115] px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
+                className="w-24 rounded-xl border border-gray-700 bg-[#181c27] px-3 py-1.5 text-sm font-bold text-center text-white focus:border-blue-500 focus:outline-none"
                 required
               />
             </div>
-            <div>
-              <label className="block text-[11px] font-bold text-gray-400 mb-1">
-                Bewertung (optional, 1–10)
-              </label>
-              <select
-                value={ratingInput}
-                onChange={(e) => setRatingInput(e.target.value)}
-                className="w-full rounded-lg border border-gray-700 bg-[#0f1115] px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
-              >
-                <option value="">Keine Bewertung</option>
-                {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((n) => (
-                  <option key={n} value={n}>
-                    ★ {n} / 10
-                  </option>
-                ))}
-              </select>
+
+            <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3">
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-bold text-gray-200">
+                  Bewertung (optional)
+                </label>
+                {ratingInput !== "" && (
+                  <button
+                    type="button"
+                    onClick={() => setRatingInput("")}
+                    className="text-[11px] font-semibold text-gray-400 hover:text-white transition"
+                  >
+                    Entfernen
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-5 sm:grid-cols-10 gap-1">
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
+                  const active = ratingInput === String(n);
+                  return (
+                    <button
+                      key={n}
+                      type="button"
+                      onClick={() => setRatingInput(active ? "" : String(n))}
+                      className={`py-1.5 rounded-lg text-xs font-bold border transition tabular-nums ${
+                        active
+                          ? "bg-amber-500/20 border-amber-500/60 text-amber-300"
+                          : "bg-[#181c27] border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
           <div>
-            <label className="block text-[11px] font-bold text-gray-400 mb-1">
+            <label className="block text-xs font-bold text-gray-300 mb-1.5">
               Dein Eindruck
             </label>
             <textarea
@@ -231,7 +250,7 @@ export function WorkSocialFeed({ workId, work }: { workId: string; work: any }) 
                   ? "Schreib kurz, was du darüber denkst..."
                   : `Wie fandest du ${unitLabel} ${epInput || "1"}?`
               }
-              className="w-full rounded-lg border border-gray-700 bg-[#0f1115] px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none resize-y"
+              className="w-full rounded-xl border border-gray-700 bg-[#10131b] px-3 py-2 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none resize-y"
               required
             />
             {ratingInput !== "" && !textInput.trim() && (
@@ -241,13 +260,13 @@ export function WorkSocialFeed({ workId, work }: { workId: string; work: any }) 
             )}
           </div>
 
-          {formError && <p className="text-xs font-semibold text-red-400">{formError}</p>}
+          {formError && <p className="text-xs font-semibold text-rose-400">{formError}</p>}
 
           <div className="flex justify-end gap-2">
             <button
               type="button"
               onClick={() => setShowQuickForm(false)}
-              className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs font-semibold text-gray-300 hover:bg-gray-800 transition"
+              className="rounded-xl border border-gray-800 bg-white/5 px-3.5 py-2 text-xs font-semibold text-gray-300 hover:bg-white/10 transition"
             >
               Abbrechen
             </button>
