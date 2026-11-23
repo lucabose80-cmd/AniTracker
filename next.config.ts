@@ -7,6 +7,8 @@ const withSerwist = withSerwistInit({
   disable: process.env.NODE_ENV === "development",
 });
 
+const buildSha = process.env.VERCEL_GIT_COMMIT_SHA || `local-${Date.now()}`;
+
 const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
@@ -17,10 +19,9 @@ const nextConfig: NextConfig = {
   },
   serverExternalPackages: ["firebase-admin"],
   env: {
-    // Bake the git SHA at build-time so it's available in serverless API routes at runtime
-    BUILD_SHA: process.env.VERCEL_GIT_COMMIT_SHA || `local-${Date.now()}`,
+    BUILD_SHA: buildSha,
     BUILD_MESSAGE: process.env.VERCEL_GIT_COMMIT_MESSAGE || "Lokaler Build",
-    NEXT_PUBLIC_BUILD_SHA: process.env.VERCEL_GIT_COMMIT_SHA || `local-${Date.now()}`,
+    NEXT_PUBLIC_BUILD_SHA: buildSha,
   },
 };
 

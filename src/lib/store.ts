@@ -1,13 +1,34 @@
-import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
-import { get, set, del } from 'idb-keyval';
+import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
+import { get, set, del } from "idb-keyval";
 
-export type ContentType = 'ANIME' | 'MANGA';
+export type ContentType = "ANIME" | "MANGA";
+export type AccentTheme = "emerald" | "blue";
+
+export const ACCENT_STORAGE_KEY = "anipulse_accent_theme";
+
+export function applyAccentThemeToDocument(theme: AccentTheme) {
+  if (typeof document === "undefined") return;
+  if (theme === "blue") {
+    document.documentElement.dataset.accent = "blue";
+  } else {
+    delete document.documentElement.dataset.accent;
+  }
+  try {
+    window.localStorage.setItem(ACCENT_STORAGE_KEY, theme);
+  } catch {
+    // ignore storage errors
+  }
+}
 
 interface AppState {
   contentType: ContentType;
   setContentType: (type: ContentType) => void;
   toggleContentType: () => void;
+
+  accentTheme: AccentTheme;
+  setAccentTheme: (theme: AccentTheme) => void;
+
   isOnline: boolean;
   setIsOnline: (online: boolean) => void;
 
@@ -20,11 +41,6 @@ interface AppState {
   reloadTrigger: number;
   triggerReload: () => void;
 
-  homeTab: "UPNEXT" | "COMMUNITY" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS";
-  setHomeTab: (tab: "UPNEXT" | "COMMUNITY" | "TRENDING" | "UPCOMING" | "RECOMMENDATIONS") => void;
-  trendingGenre: string;
-  setTrendingGenre: (genre: string) => void;
-
   unreadNotifications: number;
   setUnreadNotifications: (count: number) => void;
 }
@@ -35,7 +51,7 @@ const idbStorage = {
       const value = await get(name);
       return value !== undefined ? value : null;
     } catch (e) {
-      if (typeof window !== 'undefined') console.warn('IDB fail', e);
+      if (typeof window !== "undefined") console.warn("IDB fail", e);
       return null;
     }
   },
@@ -43,59 +59,71 @@ const idbStorage = {
     try {
       await set(name, value);
     } catch (e) {
-      if (typeof window !== 'undefined') console.warn('IDB fail', e);
+      if (typeof window !== "undefined") console.warn("IDB fail", e);
     }
   },
   removeItem: async (name: string): Promise<void> => {
     try {
       await del(name);
     } catch (e) {
-      if (typeof window !== 'undefined') console.warn('IDB fail', e);
+      if (typeof window !== "undefined") console.warn("IDB fail", e);
     }
   },
 };
 
 export const useAppStore = create<AppState>()(
   persist(
-    (set) => ({
-      contentType: 'ANIME',
-      setContentType: (type) => set({ contentType: type }),
+    (setState) => ({
+      contentType: "ANIME",
+      setContentType: (type) => setState({ contentType: type }),
       toggleContentType: () =>
-        set((state) => ({
-          contentType: state.contentType === 'ANIME' ? 'MANGA' : 'ANIME',
+        setState((state) => ({
+          contentType: state.contentType === "ANIME" ? "MANGA" : "ANIME",
         })),
+
+      accentTheme: "emerald",
+      setAccentTheme: (theme) => {
+        applyAccentThemeToDocument(theme);
+        setState({ accentTheme: theme });
+      },
+
       isOnline: true,
-      setIsOnline: (online) => set({ isOnline: online }),
+      setIsOnline: (online) => setState({ isOnline: online }),
 
       searchHistory: [],
-      addSearchHistory: (term) => set((state) => {
-        const newHistory = [term, ...state.searchHistory.filter((t) => t !== term)].slice(0, 5);
-        return { searchHistory: newHistory };
-      }),
-      clearSearchHistory: () => set({ searchHistory: [] }),
+      addSearchHistory: (term) =>
+        setState((state) => {
+          const newHistory = [
+            term,
+            ...state.searchHistory.filter((t) => t !== term),
+          ].slice(0, 5);
+          return { searchHistory: newHistory };
+        }),
+      clearSearchHistory: () => setState({ searchHistory: [] }),
 
       rateLimited: false,
-      setRateLimited: (limited) => set({ rateLimited: limited }),
+      setRateLimited: (limited) => setState({ rateLimited: limited }),
       reloadTrigger: 0,
-      triggerReload: () => set((state) => ({ reloadTrigger: state.reloadTrigger + 1 })),
+      triggerReload: () =>
+        setState((state) => ({ reloadTrigger: state.reloadTrigger + 1 })),
 
-      homeTab: "UPNEXT",
-      setHomeTab: (tab) => set({ homeTab: tab }),
-      trendingGenre: "All",
-      setTrendingGenre: (genre) => set({ trendingGenre: genre }),
-      
       unreadNotifications: 0,
-      setUnreadNotifications: (count) => set({ unreadNotifications: count }),
+      setUnreadNotifications: (count) =>
+        setState({ unreadNotifications: count }),
     }),
     {
-      name: 'anitracker-store',
+      name: "anitracker-store",
       storage: createJSONStorage(() => idbStorage),
       partialize: (state) => ({
         contentType: state.contentType,
+        accentTheme: state.accentTheme,
         searchHistory: state.searchHistory,
-        homeTab: state.homeTab,
-        trendingGenre: state.trendingGenre,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state?.accentTheme) {
+          applyAccentThemeToDocument(state.accentTheme);
+        }
+      },
     }
   )
 );

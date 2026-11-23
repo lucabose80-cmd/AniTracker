@@ -7,12 +7,12 @@ import {
   Bell,
   X,
   Sparkles,
-  BookmarkPlus,
   CheckCheck,
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState, useMemo, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
 import { auth } from "@/lib/firebase";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { getUserProfile, getAllUserProfiles } from "@/lib/db/users";
@@ -24,21 +24,67 @@ import {
   deleteAllNotifications,
   dismissCommunityActivity,
   clearBellItems,
-  deleteActivity,
   getGlobalFeed,
 } from "@/lib/db/feed";
-import { ActivityFeed, InAppNotification, UserProfile } from "@/types/database";
+import {
+  ActivityFeed,
+  InAppNotification,
+  UserProfile,
+} from "@/types/database";
+import { AniListMedia, getAniListTitle } from "@/types/anilist";
 import { fetchAniListBatch } from "@/lib/anilist";
 import { formatDistanceToNow } from "date-fns";
 import { de } from "date-fns/locale";
 import { PWAInstallPrompt } from "@/components/ui/PWAInstallPrompt";
 
 const isReleaseNotification = (n: InAppNotification) =>
-  n.type === "SYSTEM" ||
-  n.type === "APP_UPDATE" ||
-  n.type === "NEW_EPISODE_THREAD";
+  n.type === "SYSTEM" || n.type === "APP_UPDATE";
+
+function getNotificationBadge(type: string): {
+  label: string;
+  className: string;
+} {
+  switch (type) {
+    case "SYSTEM":
+      return {
+        label: "Release",
+        className:
+          "bg-accent-soft text-accent-light border-accent-border",
+      };
+    case "APP_UPDATE":
+      return {
+        label: "App-Update",
+        className: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+      };
+    case "REVIEW_POST":
+    case "REVIEW_UPDATE":
+      return {
+        label: "Review",
+        className:
+          "bg-accent-soft text-accent-light border-accent-border",
+      };
+    case "RATING_UPDATE":
+      return {
+        label: "Bewertung",
+        className: "bg-amber-500/20 text-amber-300 border-amber-500/30",
+      };
+    case "COMMENT_ON_REVIEW":
+    case "REPLY_TO_COMMENT":
+      return {
+        label: "Kommentar",
+        className: "bg-purple-500/20 text-purple-300 border-purple-500/30",
+      };
+    default:
+      return {
+        label: "Info",
+        className:
+          "bg-accent-soft text-accent-light border-accent-border",
+      };
+  }
+}
 
 export function Header() {
+  const router = useRouter();
   const {
     contentType,
     toggleContentType,
@@ -51,7 +97,9 @@ export function Header() {
 
   // Bell panel state
   const [showBellPanel, setShowBellPanel] = useState(false);
-  const [bellTab, setBellTab] = useState<"ALL" | "RELEASES" | "COMMUNITY">("ALL");
+  const [bellTab, setBellTab] = useState<"ALL" | "RELEASES" | "COMMUNITY">(
+    "ALL"
+  );
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [communityUpdates, setCommunityUpdates] = useState<ActivityFeed[]>([]);
   const [dismissedActivityIds, setDismissedActivityIds] = useState<Set<string>>(
@@ -62,15 +110,20 @@ export function Header() {
   const [deletedNotificationIds, setDeletedNotificationIds] = useState<
     Set<string>
   >(new Set());
-  const [actorProfiles, setActorProfiles] = useState<Record<string, UserProfile>>({});
-  const [workDetailsMap, setWorkDetailsMap] = useState<Record<string, any>>({});
+  const [actorProfiles, setActorProfiles] = useState<
+    Record<string, UserProfile>
+  >({});
+  const [workDetailsMap, setWorkDetailsMap] = useState<
+    Record<string, AniListMedia>
+  >({});
   const [seenActivityTimestamp, setSeenActivityTimestamp] = useState<number>(0);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Keep refs in sync so async loads never overwrite just-deleted items
+  // Refs to prevent stale closures and async race overwrites
   const dismissedActivityIdsRef = useRef<Set<string>>(new Set());
   const dismissedBeforeRef = useRef<number>(0);
   const deletedNotifIdsRef = useRef<Set<string>>(new Set());
+  const workDetailsRef = useRef<Record<string, AniListMedia>>({});
 
   const getLocalKeys = (uid: string) => ({
     activities: `anipulse_dismissed_activities_${uid}`,
@@ -78,7 +131,40 @@ export function Header() {
     notifs: `anipulse_deleted_notifs_${uid}`,
   });
 
-  const hydrateLocalDismissals = (uid: string) => {
+  const persistDismissedIds = useCallback((uid: string, nextSet: Set<string>) => {
+    dismissedActivityIdsRef.current = nextSet;
+    setDismissedActivityIds(nextSet);
+    try {
+      const serialized = JSON.stringify(Array.from(nextSet).slice(-500));
+      window.localStorage.setItem(getLocalKeys(uid).activities, serialized);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const persistDismissedBefore = useCallback((uid: string, tsMs: number) => {
+    const nextTs = Math.max(dismissedBeforeRef.current, tsMs);
+    dismissedBeforeRef.current = nextTs;
+    setDismissedActivitiesBefore(nextTs);
+    try {
+      window.localStorage.setItem(getLocalKeys(uid).before, String(nextTs));
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const persistDeletedNotifIds = useCallback((uid: string, nextSet: Set<string>) => {
+    deletedNotifIdsRef.current = nextSet;
+    setDeletedNotificationIds(nextSet);
+    try {
+      const serialized = JSON.stringify(Array.from(nextSet).slice(-500));
+      window.localStorage.setItem(getLocalKeys(uid).notifs, serialized);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const hydrateLocalDismissals = useCallback((uid: string) => {
     const keys = getLocalKeys(uid);
     const nextActivities = new Set<string>(dismissedActivityIdsRef.current);
     const nextNotifs = new Set<string>(deletedNotifIdsRef.current);
@@ -131,53 +217,18 @@ export function Header() {
     setDismissedActivityIds(nextActivities);
     setDeletedNotificationIds(nextNotifs);
     setDismissedActivitiesBefore(nextBefore);
-  };
 
-  useEffect(() => {
     try {
       const savedTs = Number(
         window.localStorage.getItem("anipulse_seen_updates_ts") || "0"
       );
-      if (!Number.isNaN(savedTs)) {
+      if (!Number.isNaN(savedTs) && savedTs > 0) {
         setSeenActivityTimestamp(savedTs);
       }
     } catch {
       // ignore localStorage issues
     }
   }, []);
-
-  const persistDismissedIds = (uid: string, nextSet: Set<string>) => {
-    dismissedActivityIdsRef.current = nextSet;
-    setDismissedActivityIds(nextSet);
-    try {
-      const serialized = JSON.stringify(Array.from(nextSet).slice(-500));
-      window.localStorage.setItem(getLocalKeys(uid).activities, serialized);
-    } catch {
-      // ignore
-    }
-  };
-
-  const persistDismissedBefore = (uid: string, tsMs: number) => {
-    const nextTs = Math.max(dismissedBeforeRef.current, tsMs);
-    dismissedBeforeRef.current = nextTs;
-    setDismissedActivitiesBefore(nextTs);
-    try {
-      window.localStorage.setItem(getLocalKeys(uid).before, String(nextTs));
-    } catch {
-      // ignore
-    }
-  };
-
-  const persistDeletedNotifIds = (uid: string, nextSet: Set<string>) => {
-    deletedNotifIdsRef.current = nextSet;
-    setDeletedNotificationIds(nextSet);
-    try {
-      const serialized = JSON.stringify(Array.from(nextSet).slice(-500));
-      window.localStorage.setItem(getLocalKeys(uid).notifs, serialized);
-    } catch {
-      // ignore
-    }
-  };
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -191,95 +242,102 @@ export function Header() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showBellPanel]);
 
-  const loadBellData = async (uid: string, preloadedProfile?: UserProfile | null) => {
-    try {
-      const [notifs, feedItems, allUsers, freshProfile] = await Promise.all([
-        getInAppNotifications(uid).catch(() => []),
-        getGlobalFeed(40).catch(() => []),
-        getAllUserProfiles().catch(() => []),
-        preloadedProfile !== undefined
-          ? Promise.resolve(preloadedProfile)
-          : getUserProfile(uid).catch(() => null),
-      ]);
+  const loadBellData = useCallback(
+    async (uid: string, preloadedProfile?: UserProfile | null) => {
+      try {
+        const [notifs, feedItems, allUsers, freshProfile] = await Promise.all([
+          getInAppNotifications(uid).catch(() => []),
+          getGlobalFeed(40).catch(() => []),
+          getAllUserProfiles().catch(() => []),
+          preloadedProfile !== undefined
+            ? Promise.resolve(preloadedProfile)
+            : getUserProfile(uid).catch(() => null),
+        ]);
 
-      // Merge Firestore-persisted dismissed activities with local state
-      if (freshProfile) {
-        setProfile(freshProfile);
-        if (Array.isArray(freshProfile.dismissed_activity_ids)) {
-          const mergedActivities = new Set(dismissedActivityIdsRef.current);
-          freshProfile.dismissed_activity_ids.forEach((id) => {
-            if (typeof id === "string") mergedActivities.add(id);
-          });
-          persistDismissedIds(uid, mergedActivities);
-        }
-        if (freshProfile.dismissed_activities_before) {
-          const parsedBefore = Date.parse(freshProfile.dismissed_activities_before);
-          if (!Number.isNaN(parsedBefore) && parsedBefore > 0) {
-            persistDismissedBefore(uid, parsedBefore);
+        // Merge Firestore-persisted dismissed activities with local state
+        if (freshProfile) {
+          setProfile(freshProfile);
+          if (Array.isArray(freshProfile.dismissed_activity_ids)) {
+            const mergedActivities = new Set(dismissedActivityIdsRef.current);
+            freshProfile.dismissed_activity_ids.forEach((id) => {
+              if (typeof id === "string") mergedActivities.add(id);
+            });
+            persistDismissedIds(uid, mergedActivities);
+          }
+          if (freshProfile.dismissed_activities_before) {
+            const parsedBefore = Date.parse(
+              freshProfile.dismissed_activities_before
+            );
+            if (!Number.isNaN(parsedBefore) && parsedBefore > 0) {
+              persistDismissedBefore(uid, parsedBefore);
+            }
           }
         }
-      }
 
-      const cleanNotifs = notifs.filter(
-        (n) =>
-          !n.deleted &&
-          !deletedNotifIdsRef.current.has(n.notification_id) &&
-          n.type !== "NEW_EPISODE_THREAD" &&
-          n.type !== "COMMENT_ON_THREAD"
-      );
-      setNotifications(cleanNotifs);
-      const unreadNotifCount = cleanNotifs.filter((n) => !n.read).length;
-      setUnreadNotifications(unreadNotifCount);
+        const cleanNotifs = notifs.filter(
+          (n) =>
+            !n.deleted &&
+            !deletedNotifIdsRef.current.has(n.notification_id) &&
+            n.type !== "NEW_EPISODE_THREAD" &&
+            n.type !== "COMMENT_ON_THREAD"
+        );
+        setNotifications(cleanNotifs);
+        const unreadNotifCount = cleanNotifs.filter((n) => !n.read).length;
+        setUnreadNotifications(unreadNotifCount);
 
-      // Filter non-review community activities (Watchlist/Library additions, Rankings, Recommendations, Manual posts)
-      const updates = feedItems.filter(
-        (a) =>
-          a.action_type !== "REVIEW_LIST" &&
-          a.action_type !== "RATING" &&
-          a.action_type !== "EPISODE_THREAD"
-      );
-      setCommunityUpdates(updates);
+        // Non-review community updates (Watchlist/Library additions, manual posts)
+        const updates = feedItems.filter(
+          (a) =>
+            a.action_type !== "REVIEW_LIST" &&
+            a.action_type !== "RATING" &&
+            a.action_type !== "EPISODE_THREAD" &&
+            a.action_type !== "WEEKLY_RANKING"
+        );
+        setCommunityUpdates(updates);
 
-      // Map user profiles
-      if (allUsers.length > 0) {
-        const profilesMap: Record<string, UserProfile> = {};
-        allUsers.forEach((p) => {
-          if (p.uid) profilesMap[p.uid] = p;
-        });
-        setActorProfiles((prev) => ({ ...prev, ...profilesMap }));
-      }
-
-      // Load missing AniList work titles/covers
-      const workIds = new Set<number>();
-      cleanNotifs.forEach((n) => {
-        if (n.work_id) {
-          const parsed = parseInt(n.work_id, 10);
-          if (!Number.isNaN(parsed)) workIds.add(parsed);
+        if (allUsers.length > 0) {
+          const profilesMap: Record<string, UserProfile> = {};
+          allUsers.forEach((p) => {
+            if (p.uid) profilesMap[p.uid] = p;
+          });
+          setActorProfiles((prev) => ({ ...prev, ...profilesMap }));
         }
-      });
-      updates.forEach((a) => {
-        if (a.work_id) {
-          const parsed = parseInt(a.work_id, 10);
-          if (!Number.isNaN(parsed)) workIds.add(parsed);
-        }
-      });
 
-      const missingIds = Array.from(workIds).filter(
-        (id) => !workDetailsMap[id.toString()]
-      );
-      if (missingIds.length > 0) {
-        const mediaList = await fetchAniListBatch(missingIds);
-        const newMap: Record<string, any> = {};
-        mediaList.forEach((m: any) => {
-          newMap[m.id.toString()] = m;
+        // Load missing AniList work titles/covers
+        const workIds = new Set<number>();
+        cleanNotifs.forEach((n) => {
+          if (n.work_id) {
+            const parsed = parseInt(n.work_id, 10);
+            if (!Number.isNaN(parsed)) workIds.add(parsed);
+          }
         });
-        setWorkDetailsMap((prev) => ({ ...prev, ...newMap }));
-      }
-    } catch (err) {
-      console.error("Failed to load bell data:", err);
-    }
-  };
+        updates.forEach((a) => {
+          if (a.work_id) {
+            const parsed = parseInt(a.work_id, 10);
+            if (!Number.isNaN(parsed)) workIds.add(parsed);
+          }
+        });
 
+        const missingIds = Array.from(workIds).filter(
+          (id) => !workDetailsRef.current[id.toString()]
+        );
+        if (missingIds.length > 0) {
+          const mediaList = await fetchAniListBatch(missingIds);
+          const newMap: Record<string, AniListMedia> = {};
+          mediaList.forEach((m) => {
+            newMap[m.id.toString()] = m;
+          });
+          workDetailsRef.current = { ...workDetailsRef.current, ...newMap };
+          setWorkDetailsMap((prev) => ({ ...prev, ...newMap }));
+        }
+      } catch (err) {
+        console.error("Failed to load bell data:", err);
+      }
+    },
+    [persistDismissedBefore, persistDismissedIds, setUnreadNotifications]
+  );
+
+  // Register auth listener ONCE
   useEffect(() => {
     if (!auth) return;
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -302,11 +360,21 @@ export function Header() {
       }
     });
     return () => unsubscribe();
-  }, [reloadTrigger]);
+  }, [hydrateLocalDismissals, loadBellData]);
 
-  // Refresh when bell panel opens
+  // Light refresh when reloadTrigger increments
   useEffect(() => {
-    if (showBellPanel && user) {
+    if (reloadTrigger <= 0 || !user) return;
+    const timer = window.setTimeout(() => {
+      loadBellData(user.uid);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [reloadTrigger, user, loadBellData]);
+
+  const handleToggleBellPanel = () => {
+    const nextOpen = !showBellPanel;
+    setShowBellPanel(nextOpen);
+    if (nextOpen && user) {
       loadBellData(user.uid);
       const now = Date.now();
       setSeenActivityTimestamp(now);
@@ -316,7 +384,7 @@ export function Header() {
         // ignore
       }
     }
-  }, [showBellPanel, user]);
+  };
 
   const visibleNotifications = useMemo(
     () =>
@@ -355,7 +423,9 @@ export function Header() {
     }).length;
   }, [visibleCommunityUpdates, seenActivityTimestamp, user]);
 
-  const totalBadgeCount = unreadNotifCount + unseenCommunityCount;
+  // Combine realtime Firestore unread badge from ServiceWorkerManager with local bell counts
+  const totalBadgeCount =
+    Math.max(unreadNotifCount, unreadNotifications) + unseenCommunityCount;
 
   const handleMarkAllRead = async () => {
     if (!user) return;
@@ -390,7 +460,7 @@ export function Header() {
     await deleteNotification(notif.notification_id);
   };
 
-  const handleDeleteSingleCommunityActivity = async (
+  const handleDismissSingleCommunityActivity = async (
     e: React.MouseEvent,
     act: ActivityFeed
   ) => {
@@ -400,20 +470,8 @@ export function Header() {
     const next = new Set(dismissedActivityIdsRef.current);
     next.add(act.activity_id);
     persistDismissedIds(user.uid, next);
-
-    // Persist dismissal permanently in Firestore for this user
-    const dismissPromise = dismissCommunityActivity(act.activity_id);
-
-    // If it's the current user's own activity, also attempt to delete it from Firestore
-    if (act.user_id === user.uid) {
-      try {
-        await deleteActivity(act.activity_id, user.uid);
-      } catch {
-        // already dismissed permanently for this user
-      }
-    }
-
-    await dismissPromise;
+    // Only hide from this user's bell panel — never delete the shared community post
+    await dismissCommunityActivity(act.activity_id);
   };
 
   const handleClearAllItems = async () => {
@@ -449,7 +507,11 @@ export function Header() {
       persistDismissedBefore(user.uid, dismissBeforeMs);
     }
 
-    const ok = await clearBellItems(bellTab, activityIdsToDismiss, dismissBeforeIso);
+    const ok = await clearBellItems(
+      bellTab,
+      activityIdsToDismiss,
+      dismissBeforeIso
+    );
     if (!ok && (bellTab === "ALL" || bellTab === "RELEASES")) {
       await deleteAllNotifications(user.uid, bellTab);
     }
@@ -474,8 +536,12 @@ export function Header() {
       window.location.reload();
       return;
     }
+    if (notif.activity_id) {
+      router.push(`/?activity_id=${encodeURIComponent(notif.activity_id)}`);
+      return;
+    }
     if (notif.work_id) {
-      window.location.href = `/work/${notif.work_id}`;
+      router.push(`/work/${notif.work_id}`);
     }
   };
 
@@ -509,18 +575,16 @@ export function Header() {
   }, [bellTab, visibleNotifications, visibleCommunityUpdates]);
 
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-gray-800 bg-[#0f1115]/85 backdrop-blur-md">
+    <header className="sticky top-0 z-50 w-full border-b border-gray-800 bg-app/85 backdrop-blur-md">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         <Link href="/" className="flex items-center gap-2.5 group">
           <img
             src="/anipulse-192x192.png"
             alt="AniPulse"
-            className="w-8 h-8 rounded-xl object-cover border border-blue-500/30 shadow-sm group-hover:scale-105 transition-transform"
+            className="w-8 h-8 rounded-xl object-cover border border-accent-border shadow-sm group-hover:scale-105 transition-transform"
           />
           <h1 className="text-xl font-extrabold tracking-tight text-white">
-            <span className="bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
-              Ani
-            </span>
+            <span className="bg-accent-gradient-text">Ani</span>
             Pulse
           </h1>
         </Link>
@@ -528,13 +592,15 @@ export function Header() {
         <div className="flex items-center gap-2.5 sm:gap-3.5">
           <PWAInstallPrompt />
           <button
+            type="button"
             onClick={toggleContentType}
-            className="flex items-center gap-1 rounded-full bg-[#1a1d24] p-1 shadow-inner border border-gray-800 transition-all duration-300"
+            className="flex items-center gap-1 rounded-full bg-surface-elevated p-1 shadow-inner border border-gray-800 transition-all duration-300"
+            aria-label="Zwischen Anime und Manga wechseln"
           >
             <div
               className={`flex h-7 w-16 sm:w-20 items-center justify-center rounded-full text-xs font-semibold transition-all duration-300 ${
                 contentType === "ANIME"
-                  ? "bg-blue-600 text-white shadow-md"
+                  ? "bg-accent text-white shadow-md"
                   : "text-gray-400"
               }`}
             >
@@ -543,7 +609,7 @@ export function Header() {
             <div
               className={`flex h-7 w-16 sm:w-20 items-center justify-center rounded-full text-xs font-semibold transition-all duration-300 ${
                 contentType === "MANGA"
-                  ? "bg-blue-600 text-white shadow-md"
+                  ? "bg-accent text-white shadow-md"
                   : "text-gray-400"
               }`}
             >
@@ -553,38 +619,38 @@ export function Header() {
 
           <Link
             href="/search"
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1a1d24] text-gray-400 border border-gray-800 hover:text-white transition"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-elevated text-gray-400 border border-gray-800 hover:text-white transition"
             title="Suche"
           >
             <Search size={16} />
           </Link>
 
-          {/* BELL ICON FOR RELEASES, WATCHLIST->ACTIVE & COMMUNITY UPDATES */}
+          {/* BELL ICON FOR RELEASES, REVIEWS & COMMUNITY UPDATES */}
           {user && (
             <div className="relative" ref={panelRef}>
               <button
                 type="button"
-                onClick={() => setShowBellPanel((prev) => !prev)}
+                onClick={handleToggleBellPanel}
                 className={`relative flex h-8 w-8 items-center justify-center rounded-full border transition ${
                   showBellPanel
-                    ? "bg-blue-600/20 border-blue-500/50 text-blue-300"
-                    : "bg-[#1a1d24] border-gray-800 text-gray-300 hover:text-white"
+                    ? "bg-accent-soft border-accent-border-strong text-accent-light"
+                    : "bg-surface-elevated border-gray-800 text-gray-300 hover:text-white"
                 }`}
                 title="Neuigkeiten & Community-Updates"
               >
                 <Bell size={16} />
                 {totalBadgeCount > 0 && (
-                  <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-blue-600 px-1 text-[10px] font-extrabold text-white shadow">
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-extrabold text-white shadow">
                     {totalBadgeCount > 9 ? "9+" : totalBadgeCount}
                   </span>
                 )}
               </button>
 
               {showBellPanel && (
-                <div className="fixed sm:absolute right-3 sm:right-0 top-16 sm:top-full sm:mt-2 w-[calc(100vw-1.5rem)] sm:w-96 max-h-[75vh] bg-[#151923] border border-gray-700/80 rounded-2xl shadow-2xl z-50 flex flex-col overflow-hidden">
-                  <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-gray-800 bg-[#10131c]">
+                <div className="fixed sm:absolute right-3 sm:right-0 top-16 sm:top-full sm:mt-2 w-[calc(100vw-1.5rem)] sm:w-96 max-h-[75vh] bg-surface border border-gray-700/80 rounded-2xl shadow-2xl z-50 flex flex-col overflow-hidden">
+                  <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-gray-800 bg-surface-inset">
                     <div className="flex items-center gap-2">
-                      <Bell size={14} className="text-blue-400" />
+                      <Bell size={14} className="text-accent-text" />
                       <span className="text-xs font-bold text-white">
                         Updates &amp; Aktivitäten
                       </span>
@@ -594,7 +660,7 @@ export function Header() {
                         <button
                           type="button"
                           onClick={handleMarkAllRead}
-                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-400 hover:text-blue-300"
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-accent-text hover:text-accent-light"
                           title="Alle als gelesen markieren"
                         >
                           <CheckCheck size={13} />
@@ -606,10 +672,10 @@ export function Header() {
                           type="button"
                           onClick={handleClearAllItems}
                           className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-400 hover:text-rose-300"
-                          title="Alle Nachrichten in dieser Ansicht löschen"
+                          title="Alle Nachrichten in dieser Ansicht ausblenden"
                         >
                           <Trash2 size={13} />
-                          Alle löschen
+                          Leeren
                         </button>
                       )}
                       <button
@@ -623,13 +689,13 @@ export function Header() {
                   </div>
 
                   {/* Filter Tabs */}
-                  <div className="flex border-b border-gray-800 bg-[#10131c]/70 text-[11px] font-bold">
+                  <div className="flex border-b border-gray-800 bg-surface-inset/70 text-[11px] font-bold">
                     <button
                       type="button"
                       onClick={() => setBellTab("ALL")}
                       className={`flex-1 py-2 text-center border-b-2 transition ${
                         bellTab === "ALL"
-                          ? "border-blue-500 text-white bg-blue-500/10"
+                          ? "border-accent text-white bg-accent-soft"
                           : "border-transparent text-gray-400 hover:text-gray-200"
                       }`}
                     >
@@ -640,7 +706,7 @@ export function Header() {
                       onClick={() => setBellTab("RELEASES")}
                       className={`flex-1 py-2 text-center border-b-2 transition ${
                         bellTab === "RELEASES"
-                          ? "border-emerald-500 text-emerald-300 bg-emerald-500/10"
+                          ? "border-accent text-accent-light bg-accent-soft"
                           : "border-transparent text-gray-400 hover:text-gray-200"
                       }`}
                     >
@@ -673,10 +739,8 @@ export function Header() {
                             ? workDetailsMap[n.work_id]
                             : undefined;
                           const workTitle =
-                            n.work_title ||
-                            media?.title?.english ||
-                            media?.title?.romaji;
-                          const isRelease = n.type === "SYSTEM";
+                            n.work_title || (media ? getAniListTitle(media) : "");
+                          const badge = getNotificationBadge(n.type);
 
                           return (
                             <div
@@ -688,7 +752,7 @@ export function Header() {
                                 if (e.key === "Enter") handleClickNotification(n);
                               }}
                               className={`w-full flex items-start gap-2.5 p-3 text-left hover:bg-white/[0.04] transition cursor-pointer group ${
-                                !n.read ? "bg-blue-500/10" : ""
+                                !n.read ? "bg-accent-soft" : ""
                               }`}
                             >
                               {n.actor_id && n.actor_id !== "SYSTEM" ? (
@@ -702,7 +766,7 @@ export function Header() {
                                     e.stopPropagation();
                                     setShowBellPanel(false);
                                   }}
-                                  className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 hover:border-blue-400 shrink-0 overflow-hidden flex items-center justify-center mt-0.5 transition-colors"
+                                  className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 hover:border-accent-border-strong shrink-0 overflow-hidden flex items-center justify-center mt-0.5 transition-colors"
                                   title={`Profil von ${n.actor_name} ansehen`}
                                 >
                                   {n.actor_avatar ? (
@@ -712,8 +776,10 @@ export function Header() {
                                       className="w-full h-full object-cover"
                                     />
                                   ) : (
-                                    <span className="text-xs font-bold text-blue-300">
-                                      {(n.actor_name || "U").slice(0, 1).toUpperCase()}
+                                    <span className="text-xs font-bold text-accent-light">
+                                      {(n.actor_name || "U")
+                                        .slice(0, 1)
+                                        .toUpperCase()}
                                     </span>
                                   )}
                                 </Link>
@@ -734,7 +800,7 @@ export function Header() {
                                   ) : (
                                     <Sparkles
                                       size={14}
-                                      className="text-emerald-400"
+                                      className="text-accent-text"
                                     />
                                   )}
                                 </div>
@@ -742,15 +808,11 @@ export function Header() {
 
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-1.5 flex-wrap">
-                                  {isRelease ? (
-                                    <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                                      Release / Aktiv
-                                    </span>
-                                  ) : (
-                                    <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                                      Info
-                                    </span>
-                                  )}
+                                  <span
+                                    className={`text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${badge.className}`}
+                                  >
+                                    {badge.label}
+                                  </span>
                                   {n.actor_id && n.actor_id !== "SYSTEM" && (
                                     <Link
                                       href={
@@ -762,7 +824,7 @@ export function Header() {
                                         e.stopPropagation();
                                         setShowBellPanel(false);
                                       }}
-                                      className="text-xs font-bold text-blue-300 hover:underline truncate"
+                                      className="text-xs font-bold text-accent-light hover:underline truncate"
                                     >
                                       {n.actor_name}
                                     </Link>
@@ -786,7 +848,7 @@ export function Header() {
 
                               <div className="flex items-center gap-1.5 shrink-0 mt-0.5">
                                 {!n.read && (
-                                  <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                                  <span className="w-2 h-2 rounded-full bg-accent shrink-0" />
                                 )}
                                 <button
                                   type="button"
@@ -811,8 +873,7 @@ export function Header() {
                         const media = a.work_id
                           ? workDetailsMap[a.work_id]
                           : undefined;
-                        const workTitle =
-                          media?.title?.english || media?.title?.romaji;
+                        const workTitle = media ? getAniListTitle(media) : "";
                         const profileHref =
                           a.user_id === user?.uid
                             ? "/profile"
@@ -825,26 +886,19 @@ export function Header() {
                           badgeText = "Bibliothek";
                           badgeColor =
                             "bg-cyan-500/20 text-cyan-300 border-cyan-500/30";
-                        } else if (a.action_type === "WEEKLY_RANKING") {
-                          badgeText = "Ranking";
-                          badgeColor =
-                            "bg-amber-500/20 text-amber-300 border-amber-500/30";
-                        } else if (a.action_type === "EPISODE_THREAD") {
-                          badgeText = "Diskussion";
-                          badgeColor =
-                            "bg-blue-500/20 text-blue-300 border-blue-500/30";
                         }
+
+                        const targetHref = a.work_id ? `/work/${a.work_id}` : "/";
 
                         return (
                           <div
                             key={`act_${a.activity_id}`}
                             className="flex items-start gap-2.5 p-3 hover:bg-white/[0.04] transition group"
                           >
-                            {/* Clickable User Avatar -> User Profile */}
                             <Link
                               href={profileHref}
                               onClick={() => setShowBellPanel(false)}
-                              className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 hover:border-blue-400 shrink-0 overflow-hidden flex items-center justify-center mt-0.5 transition-colors"
+                              className="w-8 h-8 rounded-full bg-gray-800 border border-white/10 hover:border-accent-border-strong shrink-0 overflow-hidden flex items-center justify-center mt-0.5 transition-colors"
                               title={`Profil von ${actorName} ansehen`}
                             >
                               {actor?.avatar_url ? (
@@ -854,7 +908,7 @@ export function Header() {
                                   className="w-full h-full object-cover"
                                 />
                               ) : (
-                                <span className="text-xs font-bold text-cyan-300">
+                                <span className="text-xs font-bold text-accent-light">
                                   {actorName.slice(0, 1).toUpperCase()}
                                 </span>
                               )}
@@ -867,27 +921,26 @@ export function Header() {
                                 >
                                   {badgeText}
                                 </span>
-                                {/* Clickable User Name -> User Profile */}
                                 <Link
                                   href={profileHref}
                                   onClick={() => setShowBellPanel(false)}
-                                  className="text-xs font-bold text-white hover:text-blue-300 hover:underline truncate transition-colors"
+                                  className="text-xs font-bold text-white hover:text-accent-light hover:underline truncate transition-colors"
                                   title={`Profil von ${actorName} ansehen`}
                                 >
                                   {actorName}
                                 </Link>
                                 {workTitle && (
                                   <Link
-                                    href={a.work_id ? `/work/${a.work_id}` : "/feed"}
+                                    href={targetHref}
                                     onClick={() => setShowBellPanel(false)}
-                                    className="text-[11px] text-blue-300 hover:underline font-semibold truncate"
+                                    className="text-[11px] text-accent-light hover:underline font-semibold truncate"
                                   >
                                     • {workTitle}
                                   </Link>
                                 )}
                               </div>
                               <Link
-                                href={a.work_id ? `/work/${a.work_id}` : "/feed"}
+                                href={targetHref}
                                 onClick={() => setShowBellPanel(false)}
                                 className="block"
                               >
@@ -906,10 +959,10 @@ export function Header() {
                             <button
                               type="button"
                               onClick={(e) =>
-                                handleDeleteSingleCommunityActivity(e, a)
+                                handleDismissSingleCommunityActivity(e, a)
                               }
                               className="p-1.5 rounded-lg text-gray-500 hover:text-rose-400 hover:bg-rose-500/10 transition shrink-0 mt-0.5"
-                              title="Nachricht entfernen"
+                              title="Aus der Glocke entfernen"
                             >
                               <Trash2 size={13} />
                             </button>
@@ -926,7 +979,7 @@ export function Header() {
           {user ? (
             <Link
               href="/profile"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-600 text-white font-bold shadow-md hover:bg-blue-700 transition overflow-hidden"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-white font-bold shadow-md hover:bg-accent-hover transition overflow-hidden"
             >
               {profile?.avatar_url ? (
                 <img
@@ -941,7 +994,7 @@ export function Header() {
           ) : (
             <Link
               href="/login"
-              className="flex items-center gap-1 text-sm font-semibold text-blue-500 hover:text-blue-400 transition"
+              className="flex items-center gap-1 text-sm font-semibold text-accent-text hover:text-accent-light transition"
             >
               <LogIn size={18} />
               <span className="hidden sm:inline">Login</span>
@@ -952,5 +1005,3 @@ export function Header() {
     </header>
   );
 }
-
-

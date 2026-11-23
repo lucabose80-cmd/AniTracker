@@ -5,7 +5,6 @@ import { useAppStore } from "@/lib/store";
 import Image from "next/image";
 import Link from "next/link";
 import {
-  Library as LibraryIcon,
   Search,
   Edit2,
   X,
@@ -26,6 +25,7 @@ import {
 import { auth } from "@/lib/firebase";
 import { ANILIST_GENRES, fetchAniListBatch } from "@/lib/anilist";
 import { UserWork, UserWorkStatus } from "@/types/database";
+import { AniListMedia, getAniListTitle } from "@/types/anilist";
 import {
   getAllUserWorks,
   saveUserWork,
@@ -35,9 +35,15 @@ import {
 import {
   CalendarOverride,
   computeWorkReleaseInfo,
+  formatPauseStatusLabel,
   getCalendarOverrides,
 } from "@/lib/db/calendar";
-import { getPausedWorkIds } from "@/lib/db/pauses";
+import {
+  getPausedWorksMap,
+  unpauseWork,
+  WorkPauseRecord,
+} from "@/lib/db/pauses";
+import { toast } from "@/lib/ui-feedback";
 
 type SortOption = "RECENT" | "TITLE" | "BEHIND";
 type TabStatus = "PLANNING" | "CURRENT" | "COMPLETED" | "PAUSED" | "DROPPED";
@@ -58,22 +64,24 @@ const SORT_OPTIONS: { key: SortOption; label: string }[] = [
 
 function computeBehindCount(
   work: UserWork,
-  details: any,
+  details: AniListMedia | undefined,
   globalOverride?: CalendarOverride,
-  isPaused?: boolean
+  pauseInfo?: WorkPauseRecord | null,
+  nowMs?: number
 ): number {
   const releaseInfo = computeWorkReleaseInfo({
     media: details,
     override: globalOverride,
-    pauseInfo: isPaused ? { paused: true, paused_until: "9999-12-31T23:59:59.999Z" } : null,
+    pauseInfo: pauseInfo || null,
     userWork: work,
+    nowMs,
   });
   return releaseInfo.behindCount;
 }
 
 function getTotalCount(
   work: UserWork,
-  details: any,
+  details: AniListMedia | undefined,
   globalOverride?: CalendarOverride
 ): number | null {
   if (globalOverride?.manualMaxEpisode != null) {
@@ -90,8 +98,9 @@ function getTotalCount(
 
 function isWishlistWorkEligibleForDice(
   work: UserWork,
-  details: any,
-  globalOverride?: CalendarOverride
+  details: AniListMedia | undefined,
+  globalOverride?: CalendarOverride,
+  nowMs?: number
 ): boolean {
   if (!details) return false;
   if (details.status === "NOT_YET_RELEASED" || details.status === "CANCELLED") {
@@ -127,42 +136,40 @@ function isWishlistWorkEligibleForDice(
       media: details,
       override: globalOverride,
       userWork: work,
+      nowMs,
     });
     return releaseInfo.availableEpisodes > 0;
   }
 
-  if (details.status === "FINISHED" || details.status === "RELEASING") {
+  if (details.status === "RELEASING") {
+    return total === null || total > 0;
+  }
+
+  if (details.status === "FINISHED") {
     return total !== null && total > 0;
   }
 
   return false;
 }
 
-function getNextReleaseTimestampMs(
-  details: any,
-  globalOverride?: CalendarOverride
-): number | null {
-  const releaseInfo = computeWorkReleaseInfo({
-    media: details,
-    override: globalOverride,
-  });
-  return releaseInfo.airingAt ? releaseInfo.airingAt * 1000 : null;
-}
-
 function formatNextReleaseLabel(
   work: UserWork,
-  details: any,
+  details: AniListMedia | undefined,
   globalOverride?: CalendarOverride,
-  isPaused?: boolean
+  pauseInfo?: WorkPauseRecord | null,
+  nowMs: number = Date.now()
 ): string | null {
-  if (isPaused || work.status === "PAUSED") return "Pausiert";
+  if (pauseInfo) return formatPauseStatusLabel(pauseInfo.paused_until);
+  if (work.status === "PAUSED") return "Pausiert";
   if (work.status === "DROPPED") return "Abgebrochen";
   if (work.status === "COMPLETED") return "Abgeschlossen";
 
   const releaseInfo = computeWorkReleaseInfo({
     media: details,
     override: globalOverride,
+    pauseInfo: pauseInfo || null,
     userWork: work,
+    nowMs,
   });
 
   if (!releaseInfo.hasSchedule || !releaseInfo.airingAt) {
@@ -173,31 +180,34 @@ function formatNextReleaseLabel(
 
   const nextMs = releaseInfo.airingAt * 1000;
   const nextDate = new Date(nextMs);
-  const now = new Date();
-  const timeStr = releaseInfo.isFlexible && releaseInfo.flexibleRangeLabel
-    ? releaseInfo.flexibleRangeLabel
-    : nextDate.toLocaleTimeString("de-DE", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+  const now = new Date(nowMs);
+  const timeStr =
+    releaseInfo.isFlexible && releaseInfo.flexibleRangeLabel
+      ? releaseInfo.flexibleRangeLabel
+      : nextDate.toLocaleTimeString("de-DE", {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
 
   const isSameDay = (a: Date, b: Date) =>
     a.getFullYear() === b.getFullYear() &&
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate();
 
+  const dubSuffix = releaseInfo.isStaggeredDubEnding ? " (Dub-Nachlauf)" : "";
+
   if (isSameDay(nextDate, now)) {
     return releaseInfo.isFlexible && releaseInfo.flexibleRangeLabel
-      ? `Heute (${releaseInfo.flexibleRangeLabel})`
-      : `Heute ${timeStr}`;
+      ? `Heute (${releaseInfo.flexibleRangeLabel})${dubSuffix}`
+      : `Heute ${timeStr}${dubSuffix}`;
   }
 
   const tomorrow = new Date(now);
   tomorrow.setDate(tomorrow.getDate() + 1);
   if (isSameDay(nextDate, tomorrow)) {
     return releaseInfo.isFlexible && releaseInfo.flexibleRangeLabel
-      ? `Morgen (${releaseInfo.flexibleRangeLabel})`
-      : `Morgen ${timeStr}`;
+      ? `Morgen (${releaseInfo.flexibleRangeLabel})${dubSuffix}`
+      : `Morgen ${timeStr}${dubSuffix}`;
   }
 
   const datePart = nextDate.toLocaleDateString("de-DE", {
@@ -205,19 +215,73 @@ function formatNextReleaseLabel(
     day: "numeric",
     month: "short",
   });
-  const unitLabel = details?.type === "MANGA" ? "Nächstes Kapitel" : "Nächste Folge";
-  return `${unitLabel}: ${datePart} · ${timeStr}`;
+  const unitLabel =
+    details?.type === "MANGA" ? "Nächstes Kapitel" : "Nächste Folge";
+  return `${unitLabel}: ${datePart} · ${timeStr}${dubSuffix}`;
+}
+
+function buildNewSequelUserWork(
+  uid: string,
+  sequelId: string,
+  targetStatus: UserWorkStatus,
+  addedStatus: "RELEASING" | "NOT_YET_RELEASED"
+): UserWork {
+  return {
+    user_id: uid,
+    work_id: sequelId,
+    status: targetStatus,
+    added_status: addedStatus,
+    current_episode: 0,
+    updated_at: Date.now(),
+    priority_tier: 2,
+    sync_offset_days: 0,
+    selected_platform: "",
+    adaptationScores: { story: 0, pacing: 0 },
+    classification: {
+      watchMode: "SUB",
+      romanceLevel: 0,
+      confessionTiming: "",
+      intimacyLevel: 0,
+      relationshipDynamics: "",
+      wholesomeLewdScale: 0,
+      comedySeriousScale: 0,
+      actionDialogScale: 0,
+      pacingScale: 0,
+    },
+    evaluation: {
+      plotAndStory: 0,
+      castAndCharacters: 0,
+      sideCharacters: 0,
+      ending: 0,
+      artstyleAndAnimation: 0,
+      introOutro: 0,
+      voiceActing: 0,
+      romanceAndChemistry: 0,
+      bingeFactor: 0,
+      emotionalImpact: "None",
+      comments: "",
+      overallScore: 0,
+    },
+  };
 }
 
 export default function LibraryPage() {
-  const { contentType } = useAppStore();
-  const reloadTrigger = useAppStore((state) => state.reloadTrigger);
+  const contentType = useAppStore((s) => s.contentType);
+  const reloadTrigger = useAppStore((s) => s.reloadTrigger);
 
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [allWorks, setAllWorks] = useState<UserWork[]>([]);
-  const [aniListDetails, setAniListDetails] = useState<Record<string, any>>({});
-  const [globalOverrides, setGlobalOverrides] = useState<Record<string, CalendarOverride>>({});
-  const [pausedWorkIds, setPausedWorkIds] = useState<Set<string>>(new Set());
+  const [aniListDetails, setAniListDetails] = useState<
+    Record<string, AniListMedia>
+  >({});
+  const [globalOverrides, setGlobalOverrides] = useState<
+    Record<string, CalendarOverride>
+  >({});
+  const [pausedWorksMap, setPausedWorksMap] = useState<
+    Record<string, WorkPauseRecord>
+  >({});
   const [isLoading, setIsLoading] = useState(true);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("RECENT");
@@ -230,7 +294,9 @@ export default function LibraryPage() {
 
   // Subtle Sequel Hint & Random Wishlist Pick State
   const [showSequels, setShowSequels] = useState(false);
-  const [dismissedSequelIds, setDismissedSequelIds] = useState<Set<string>>(new Set());
+  const [dismissedSequelIds, setDismissedSequelIds] = useState<Set<string>>(
+    new Set()
+  );
   const [addingSequelId, setAddingSequelId] = useState<string | null>(null);
   const [randomPickWork, setRandomPickWork] = useState<UserWork | null>(null);
   const [isStartingRandom, setIsStartingRandom] = useState(false);
@@ -243,25 +309,41 @@ export default function LibraryPage() {
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   useEffect(() => {
-    try {
-      const savedCols = window.localStorage.getItem("weebcheck_lib_cols");
-      if (savedCols === "2") setViewColumns(2);
-      const savedDismissedSequels = window.localStorage.getItem("anipulse_dismissed_sequels");
-      if (savedDismissedSequels) {
-        const parsed = JSON.parse(savedDismissedSequels);
-        if (Array.isArray(parsed)) {
-          setDismissedSequelIds(new Set(parsed.filter((x) => typeof x === "string")));
+    let active = true;
+    Promise.resolve().then(() => {
+      if (!active) return;
+      try {
+        const savedCols =
+          window.localStorage.getItem("anipulse_lib_cols") ??
+          window.localStorage.getItem("weebcheck_lib_cols");
+        if (savedCols === "2") setViewColumns(2);
+        const savedDismissedSequels = window.localStorage.getItem(
+          "anipulse_dismissed_sequels"
+        );
+        if (savedDismissedSequels) {
+          const parsed = JSON.parse(savedDismissedSequels);
+          if (Array.isArray(parsed)) {
+            setDismissedSequelIds(
+              new Set(parsed.filter((x) => typeof x === "string"))
+            );
+          }
         }
+      } catch {
+        // ignore localStorage errors
       }
-    } catch {
-      // ignore localStorage errors
-    }
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
     if (!showFilterMenu) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (filterMenuRef.current && !filterMenuRef.current.contains(e.target as Node)) {
+      if (
+        filterMenuRef.current &&
+        !filterMenuRef.current.contains(e.target as Node)
+      ) {
         setShowFilterMenu(false);
       }
     };
@@ -278,7 +360,7 @@ export default function LibraryPage() {
   const handleToggleColumns = (cols: 1 | 2) => {
     setViewColumns(cols);
     try {
-      window.localStorage.setItem("weebcheck_lib_cols", String(cols));
+      window.localStorage.setItem("anipulse_lib_cols", String(cols));
     } catch {
       // ignore
     }
@@ -287,15 +369,22 @@ export default function LibraryPage() {
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       if (user) {
+        setIsLoggedIn(true);
         setIsLoading(true);
         try {
-          const works = await getAllUserWorks(user.uid);
+          const [works, pauses] = await Promise.all([
+            getAllUserWorks(user.uid),
+            getPausedWorksMap().catch(
+              (): Record<string, WorkPauseRecord> => ({})
+            ),
+          ]);
           setAllWorks(works);
-          getPausedWorkIds().then(setPausedWorkIds).catch(console.error);
+          setPausedWorksMap(pauses);
+          setNowMs(Date.now());
 
           const allIdsToFetch = works
             .map((w: UserWork) => parseInt(w.work_id, 10))
-            .filter((id) => !Number.isNaN(id));
+            .filter((id) => !Number.isNaN(id) && id > 0);
 
           if (allIdsToFetch.length > 0) {
             try {
@@ -304,8 +393,8 @@ export default function LibraryPage() {
                 getCalendarOverrides(),
               ]);
 
-              const map: Record<string, any> = {};
-              mediaList.forEach((m: any) => {
+              const map: Record<string, AniListMedia> = {};
+              mediaList.forEach((m) => {
                 map[m.id.toString()] = m;
               });
               setAniListDetails(map);
@@ -315,6 +404,8 @@ export default function LibraryPage() {
               const overrides = await getCalendarOverrides().catch(() => ({}));
               setGlobalOverrides(overrides);
             }
+          } else {
+            setAniListDetails({});
           }
         } catch (error) {
           console.error("Fehler beim Laden der Bibliothek:", error);
@@ -322,7 +413,11 @@ export default function LibraryPage() {
           setIsLoading(false);
         }
       } else {
+        setIsLoggedIn(false);
         setAllWorks([]);
+        setAniListDetails({});
+        setGlobalOverrides({});
+        setPausedWorksMap({});
         setIsLoading(false);
       }
     });
@@ -332,10 +427,12 @@ export default function LibraryPage() {
 
   // Works matching active contentType (ANIME / MANGA)
   const contentTypeWorks = useMemo(() => {
-    return allWorks.filter((w) => aniListDetails[w.work_id]?.type === contentType);
+    return allWorks.filter(
+      (w) => aniListDetails[w.work_id]?.type === contentType
+    );
   }, [allWorks, aniListDetails, contentType]);
 
-  // Detect sequels (RELEASING or NOT_YET_RELEASED) for user's COMPLETED works that aren't in library yet
+  // Detect sequels (RELEASING or NOT_YET_RELEASED) for user's COMPLETED works
   const availableSequels = useMemo(() => {
     const libraryIdSet = new Set(allWorks.map((w) => String(w.work_id)));
     const seenSequelIds = new Set<string>();
@@ -352,23 +449,33 @@ export default function LibraryPage() {
       const details = aniListDetails[w.work_id];
       const edges = details?.relations?.edges;
       if (!Array.isArray(edges)) return;
-      const fromTitle = details?.title?.english || details?.title?.romaji || "";
+      const fromTitle = getAniListTitle(details, "");
 
-      edges.forEach((edge: any) => {
+      edges.forEach((edge) => {
         if (edge?.relationType !== "SEQUEL") return;
         const node = edge?.node;
         if (!node?.id) return;
         if (node.type !== contentType) return;
-        if (node.status !== "RELEASING" && node.status !== "NOT_YET_RELEASED") return;
+        if (
+          node.status !== "RELEASING" &&
+          node.status !== "NOT_YET_RELEASED"
+        ) {
+          return;
+        }
         const seqId = String(node.id);
-        if (libraryIdSet.has(seqId) || dismissedSequelIds.has(seqId) || seenSequelIds.has(seqId)) {
+        if (
+          libraryIdSet.has(seqId) ||
+          dismissedSequelIds.has(seqId) ||
+          seenSequelIds.has(seqId)
+        ) {
           return;
         }
         seenSequelIds.add(seqId);
         results.push({
           id: seqId,
-          title: node.title?.english || node.title?.romaji || `Werk #${seqId}`,
-          cover: node.coverImage?.medium || node.coverImage?.large,
+          title: getAniListTitle(node, `Werk #${seqId}`),
+          cover:
+            node.coverImage?.medium || node.coverImage?.large || undefined,
           status: node.status,
           fromTitle,
         });
@@ -376,9 +483,19 @@ export default function LibraryPage() {
     });
 
     return results.sort((a, b) =>
-      a.status === b.status ? a.title.localeCompare(b.title, "de") : a.status === "RELEASING" ? -1 : 1
+      a.status === b.status
+        ? a.title.localeCompare(b.title, "de")
+        : a.status === "RELEASING"
+        ? -1
+        : 1
     );
-  }, [allWorks, contentTypeWorks, aniListDetails, contentType, dismissedSequelIds]);
+  }, [
+    allWorks,
+    contentTypeWorks,
+    aniListDetails,
+    contentType,
+    dismissedSequelIds,
+  ]);
 
   const handleDismissSequel = (sequelId: string) => {
     setDismissedSequelIds((prev) => {
@@ -411,44 +528,13 @@ export default function LibraryPage() {
         added_status: sequel.status,
         current_episode: 0,
       });
-      const newEntry: UserWork = {
-        user_id: uid,
-        work_id: sequel.id,
-        status: targetStatus,
-        added_status: sequel.status,
-        current_episode: 0,
-        priority_tier: 2,
-        sync_offset_days: 0,
-        selected_platform: "",
-        adaptationScores: { story: 0, pacing: 0 },
-        classification: {
-          watchMode: "SUB",
-          romanceLevel: 0,
-          confessionTiming: "",
-          intimacyLevel: 0,
-          relationshipDynamics: "",
-          wholesomeLewdScale: 0,
-          comedySeriousScale: 0,
-          actionDialogScale: 0,
-          pacingScale: 0,
-        },
-        evaluation: {
-          plotAndStory: 0,
-          castAndCharacters: 0,
-          sideCharacters: 0,
-          ending: 0,
-          artstyleAndAnimation: 0,
-          introOutro: 0,
-          voiceActing: 0,
-          romanceAndChemistry: 0,
-          bingeFactor: 0,
-          emotionalImpact: "None",
-          comments: "",
-          overallScore: 0,
-        },
-      };
+      const newEntry = buildNewSequelUserWork(
+        uid,
+        sequel.id,
+        targetStatus,
+        sequel.status
+      );
       setAllWorks((prev) => [...prev, newEntry]);
-      // Load AniList details for the newly added sequel so it appears immediately in the right tab
       const parsedId = parseInt(sequel.id, 10);
       if (!Number.isNaN(parsedId)) {
         const fetched = await fetchAniListBatch([parsedId]).catch(() => []);
@@ -459,9 +545,14 @@ export default function LibraryPage() {
           }));
         }
       }
+      toast.success(
+        targetStatus === "CURRENT"
+          ? "Fortsetzung zu Aktiv hinzugefügt."
+          : "Fortsetzung zur Planung hinzugefügt."
+      );
     } catch (err) {
       console.error("Failed to add sequel:", err);
-      alert("Fehler beim Hinzufügen der Fortsetzung.");
+      toast.error("Fehler beim Hinzufügen der Fortsetzung.");
     } finally {
       setAddingSequelId(null);
     }
@@ -471,7 +562,7 @@ export default function LibraryPage() {
   const availableGenres = useMemo(() => {
     const present = new Set<string>();
     contentTypeWorks.forEach((w) => {
-      const genres: unknown = aniListDetails[w.work_id]?.genres;
+      const genres = aniListDetails[w.work_id]?.genres;
       if (Array.isArray(genres)) {
         genres.forEach((g) => {
           if (typeof g === "string" && g.trim()) present.add(g);
@@ -496,7 +587,7 @@ export default function LibraryPage() {
   const genreFilteredWorks = useMemo(() => {
     if (selectedGenres.length === 0) return contentTypeWorks;
     return contentTypeWorks.filter((w) => {
-      const workGenres: unknown = aniListDetails[w.work_id]?.genres;
+      const workGenres = aniListDetails[w.work_id]?.genres;
       if (!Array.isArray(workGenres)) return false;
       return selectedGenres.every((g) => workGenres.includes(g));
     });
@@ -525,7 +616,11 @@ export default function LibraryPage() {
 
     return genreFilteredWorks
       .filter((w) => w.status === activeTab)
-      .filter((w) => !onlyMalOpen || ((w.evaluation?.overallScore || 0) > 0 && !w.mal_rated))
+      .filter(
+        (w) =>
+          !onlyMalOpen ||
+          ((w.evaluation?.overallScore || 0) > 0 && !w.mal_rated)
+      )
       .filter((w) => {
         if (!queryLower) return true;
         const details = aniListDetails[w.work_id];
@@ -543,9 +638,10 @@ export default function LibraryPage() {
         const detB = aniListDetails[b.work_id];
 
         if (sortBy === "TITLE") {
-          const titleA = detA?.title?.english || detA?.title?.romaji || "";
-          const titleB = detB?.title?.english || detB?.title?.romaji || "";
-          return titleA.localeCompare(titleB, "de");
+          return getAniListTitle(detA).localeCompare(
+            getAniListTitle(detB),
+            "de"
+          );
         }
 
         if (sortBy === "BEHIND") {
@@ -553,18 +649,22 @@ export default function LibraryPage() {
             a,
             detA,
             globalOverrides[a.work_id],
-            pausedWorkIds.has(a.work_id)
+            pausedWorksMap[a.work_id],
+            nowMs
           );
           const behindB = computeBehindCount(
             b,
             detB,
             globalOverrides[b.work_id],
-            pausedWorkIds.has(b.work_id)
+            pausedWorksMap[b.work_id],
+            nowMs
           );
           if (behindB !== behindA) return behindB - behindA;
         }
 
-        // RECENT fallback
+        // RECENT: Sort by updated_at desc, then AniList ID desc as tie-breaker
+        const updDiff = (b.updated_at || 0) - (a.updated_at || 0);
+        if (updDiff !== 0) return updDiff;
         return parseInt(b.work_id, 10) - parseInt(a.work_id, 10);
       });
   }, [
@@ -575,7 +675,8 @@ export default function LibraryPage() {
     sortBy,
     aniListDetails,
     globalOverrides,
-    pausedWorkIds,
+    pausedWorksMap,
+    nowMs,
   ]);
 
   const handleQuickIncrement = async (work: UserWork) => {
@@ -585,14 +686,13 @@ export default function LibraryPage() {
     const current = work.current_episode || 0;
     const details = aniListDetails[work.work_id];
     const globalOverride = globalOverrides[work.work_id];
-    const isPaused = pausedWorkIds.has(work.work_id);
+    const pauseInfo = pausedWorksMap[work.work_id] || null;
     const releaseInfo = computeWorkReleaseInfo({
       media: details,
       override: globalOverride,
-      pauseInfo: isPaused
-        ? { paused: true, paused_until: "9999-12-31T23:59:59.999Z" }
-        : null,
+      pauseInfo,
       userWork: work,
+      nowMs,
     });
     const maxAllowed = releaseInfo.maxAllowedProgress;
     if (maxAllowed !== null && current >= maxAllowed) return;
@@ -600,11 +700,17 @@ export default function LibraryPage() {
       maxAllowed !== null ? Math.min(current + 1, maxAllowed) : current + 1;
     if (nextEp <= current) return;
 
-    // Optimistic UI update
+    const prevUpdatedAt = work.updated_at;
+    const nextUpdatedAt = Date.now();
     setAllWorks((prev) =>
       prev.map((w) =>
         w.work_id === work.work_id
-          ? { ...w, current_episode: nextEp, auto_added: false }
+          ? {
+              ...w,
+              current_episode: nextEp,
+              updated_at: nextUpdatedAt,
+              auto_added: false,
+            }
           : w
       )
     );
@@ -613,10 +719,12 @@ export default function LibraryPage() {
       await updateEpisodeProgress(uid, work.work_id, nextEp);
     } catch (error) {
       console.error("Fehler beim Aktualisieren des Fortschritts:", error);
-      // Revert on failure
+      toast.error("Fortschritt konnte nicht gespeichert werden.");
       setAllWorks((prev) =>
         prev.map((w) =>
-          w.work_id === work.work_id ? { ...w, current_episode: current } : w
+          w.work_id === work.work_id
+            ? { ...w, current_episode: current, updated_at: prevUpdatedAt }
+            : w
         )
       );
     }
@@ -637,9 +745,29 @@ export default function LibraryPage() {
     const prevEpisode = editingWork.current_episode || 0;
     const prevStatus = editingWork.status;
     const prevDroppedReason = editingWork.dropped_reason || "";
-    const sanitizedEpisode = Math.max(0, editEpisode);
+    const prevUpdatedAt = editingWork.updated_at;
+
+    const details = aniListDetails[editingWork.work_id];
+    const globalOverride = globalOverrides[editingWork.work_id];
+    const pauseInfo = pausedWorksMap[editingWork.work_id] || null;
+    const releaseInfo = computeWorkReleaseInfo({
+      media: details,
+      override: globalOverride,
+      pauseInfo,
+      userWork: editingWork,
+      nowMs,
+    });
+
+    const maxAllowed = releaseInfo.maxAllowedProgress;
+    const rawEpisode = Math.max(0, editEpisode);
+    const sanitizedEpisode =
+      maxAllowed !== null && editStatus !== "COMPLETED"
+        ? Math.min(rawEpisode, maxAllowed)
+        : rawEpisode;
+
     const nextDroppedReason =
       editStatus === "DROPPED" ? editDroppedReason.trim() : prevDroppedReason;
+    const nextUpdatedAt = Date.now();
 
     setIsSavingEdit(true);
 
@@ -652,6 +780,7 @@ export default function LibraryPage() {
               current_episode: sanitizedEpisode,
               status: editStatus,
               dropped_reason: nextDroppedReason,
+              updated_at: nextUpdatedAt,
               auto_added: false,
             }
           : w
@@ -659,23 +788,20 @@ export default function LibraryPage() {
     );
 
     try {
-      const promises: Promise<void>[] = [];
-      if (sanitizedEpisode !== prevEpisode) {
-        promises.push(updateEpisodeProgress(uid, editingWork.work_id, sanitizedEpisode));
-      }
-      if (editStatus !== prevStatus) {
-        promises.push(updateUserWorkStatus(uid, editingWork.work_id, editStatus));
-      }
-      if (editStatus === "DROPPED" && nextDroppedReason !== prevDroppedReason) {
-        promises.push(
-          saveUserWork(uid, editingWork.work_id, { dropped_reason: nextDroppedReason })
-        );
-      }
-      await Promise.all(promises);
+      // Single atomic saveUserWork call instead of 3 parallel writes
+      await saveUserWork(uid, editingWork.work_id, {
+        current_episode: sanitizedEpisode,
+        status: editStatus,
+        auto_added: false,
+        ...(editStatus === "DROPPED"
+          ? { dropped_reason: nextDroppedReason }
+          : {}),
+      });
       setEditingWork(null);
+      toast.success("Änderungen gespeichert.");
     } catch (error) {
       console.error("Fehler beim Speichern:", error);
-      // Revert on error
+      toast.error("Fehler beim Speichern.");
       setAllWorks((prev) =>
         prev.map((w) =>
           w.work_id === editingWork.work_id
@@ -684,6 +810,7 @@ export default function LibraryPage() {
                 current_episode: prevEpisode,
                 status: prevStatus,
                 dropped_reason: prevDroppedReason,
+                updated_at: prevUpdatedAt,
               }
             : w
         )
@@ -693,8 +820,24 @@ export default function LibraryPage() {
     }
   };
 
+  const handleQuickUnpauseItem = async (workId: string) => {
+    try {
+      await unpauseWork(workId);
+      setPausedWorksMap((prev) => {
+        const next = { ...prev };
+        delete next[workId];
+        return next;
+      });
+      toast.success("Pause aufgehoben.");
+    } catch (err) {
+      console.error("Failed to unpause work:", err);
+      toast.error("Fehler beim Aufheben der Pause.");
+    }
+  };
+
   const unitPrefix = contentType === "MANGA" ? "KAP" : "EP";
-  const progressBarColor = contentType === "MANGA" ? "bg-pink-500" : "bg-blue-500";
+  const progressBarColor =
+    contentType === "MANGA" ? "bg-purple-500" : "bg-accent";
   const activeSortLabel =
     sortBy === "TITLE"
       ? "A-Z"
@@ -710,16 +853,19 @@ export default function LibraryPage() {
       isWishlistWorkEligibleForDice(
         w,
         aniListDetails[w.work_id],
-        globalOverrides[w.work_id]
+        globalOverrides[w.work_id],
+        nowMs
       )
     );
-  }, [activeTab, visibleWorks, aniListDetails, globalOverrides]);
+  }, [activeTab, visibleWorks, aniListDetails, globalOverrides, nowMs]);
 
   const handlePickRandomWishlist = (excludeWorkId?: string) => {
     if (randomEligibleWishlistWorks.length === 0) return;
     const pool =
       randomEligibleWishlistWorks.length > 1 && excludeWorkId
-        ? randomEligibleWishlistWorks.filter((w) => w.work_id !== excludeWorkId)
+        ? randomEligibleWishlistWorks.filter(
+            (w) => w.work_id !== excludeWorkId
+          )
         : randomEligibleWishlistWorks;
     const chosen = pool[Math.floor(Math.random() * pool.length)];
     if (chosen) setRandomPickWork(chosen);
@@ -731,24 +877,28 @@ export default function LibraryPage() {
     if (!uid) return;
     setIsStartingRandom(true);
     try {
+      const nextUpdatedAt = Date.now();
       await updateUserWorkStatus(uid, randomPickWork.work_id, "CURRENT");
       setAllWorks((prev) =>
         prev.map((w) =>
-          w.work_id === randomPickWork.work_id ? { ...w, status: "CURRENT" } : w
+          w.work_id === randomPickWork.work_id
+            ? { ...w, status: "CURRENT", updated_at: nextUpdatedAt }
+            : w
         )
       );
       setRandomPickWork(null);
       setActiveTab("CURRENT");
+      toast.success("Werk auf Aktiv verschoben.");
     } catch (err) {
       console.error("Failed to start random wishlist work:", err);
-      alert("Fehler beim Verschieben auf Aktiv.");
+      toast.error("Fehler beim Verschieben auf Aktiv.");
     } finally {
       setIsStartingRandom(false);
     }
   };
 
   return (
-    <div className="flex flex-col gap-3.5 px-4 pt-4 pb-24 max-w-4xl mx-auto">
+    <div className="flex flex-col gap-3.5 px-4 pt-4 pb-4 max-w-4xl mx-auto">
       {/* Compact Top Row: Search + Sort/Filter Button + (Optional Dice on Planung) + 1/2 Column Switcher */}
       <div className="relative flex items-center gap-2" ref={filterMenuRef}>
         <div className="relative flex-1 min-w-0">
@@ -760,8 +910,10 @@ export default function LibraryPage() {
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={`${contentType === "MANGA" ? "Manga" : "Anime"} in Bibliothek suchen...`}
-            className="w-full rounded-xl border border-gray-800 bg-[#1a1d24] py-2 pl-9 pr-8 text-sm text-white placeholder:text-gray-500 focus:border-blue-500 focus:outline-none transition-colors"
+            placeholder={`${
+              contentType === "MANGA" ? "Manga" : "Anime"
+            } in Bibliothek suchen...`}
+            className="w-full rounded-xl border border-gray-800 bg-surface-elevated py-2 pl-9 pr-8 text-sm text-white placeholder:text-gray-500 focus:border-accent-border-strong focus:outline-none transition-colors"
           />
           {searchQuery && (
             <button
@@ -780,7 +932,7 @@ export default function LibraryPage() {
           <button
             type="button"
             onClick={() => handlePickRandomWishlist()}
-            className="flex items-center justify-center p-2 rounded-xl border border-gray-800 bg-[#1a1d24] text-gray-300 hover:text-purple-300 hover:border-purple-500/40 transition-colors shrink-0"
+            className="flex items-center justify-center p-2 rounded-xl border border-gray-800 bg-surface-elevated text-gray-300 hover:text-purple-300 hover:border-purple-500/40 transition-colors shrink-0"
             title="Zufälliges bereits erschienenes Werk aus der Wunschliste wählen"
             aria-label="Zufall aus Wunschliste"
           >
@@ -793,16 +945,19 @@ export default function LibraryPage() {
           type="button"
           onClick={() => setShowFilterMenu((v) => !v)}
           className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold shrink-0 transition-colors ${
-            showFilterMenu || sortBy !== "RECENT" || onlyMalOpen || selectedGenres.length > 0
-              ? "bg-blue-600/20 border-blue-500/50 text-blue-300"
-              : "bg-[#1a1d24] border-gray-800 text-gray-300 hover:text-white"
+            showFilterMenu ||
+            sortBy !== "RECENT" ||
+            onlyMalOpen ||
+            selectedGenres.length > 0
+              ? "bg-accent-soft border-accent-border-strong text-accent-light"
+              : "bg-surface-elevated border-gray-800 text-gray-300 hover:text-white"
           }`}
           title="Sortierung & Filter"
         >
           <ArrowUpDown size={14} />
           <span>{activeSortLabel}</span>
           {selectedGenres.length > 0 && (
-            <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-blue-500 text-white text-[10px] font-bold">
+            <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-accent text-white text-[10px] font-bold">
               {selectedGenres.length}
             </span>
           )}
@@ -812,7 +967,7 @@ export default function LibraryPage() {
         </button>
 
         {/* 1-Column / 2-Column Layout Toggle */}
-        <div className="flex items-center bg-[#1a1d24] border border-gray-800 rounded-xl p-0.5 shrink-0">
+        <div className="flex items-center bg-surface-elevated border border-gray-800 rounded-xl p-0.5 shrink-0">
           <button
             type="button"
             onClick={() => handleToggleColumns(1)}
@@ -820,7 +975,7 @@ export default function LibraryPage() {
             title="1 Spalte (Listenansicht)"
             className={`p-1.5 rounded-lg transition-colors ${
               viewColumns === 1
-                ? "bg-blue-600 text-white"
+                ? "bg-accent text-white"
                 : "text-gray-400 hover:text-white"
             }`}
           >
@@ -833,7 +988,7 @@ export default function LibraryPage() {
             title="2 Spalten (Kompaktansicht)"
             className={`p-1.5 rounded-lg transition-colors ${
               viewColumns === 2
-                ? "bg-blue-600 text-white"
+                ? "bg-accent text-white"
                 : "text-gray-400 hover:text-white"
             }`}
           >
@@ -843,7 +998,7 @@ export default function LibraryPage() {
 
         {/* Collapsible Sort & Filter Popover */}
         {showFilterMenu && (
-          <div className="absolute right-0 top-full mt-2 z-30 w-72 rounded-2xl border border-gray-700 bg-[#161922] p-3 shadow-2xl flex flex-col gap-3">
+          <div className="absolute right-0 top-full mt-2 z-30 w-72 rounded-2xl border border-gray-700 bg-surface p-3 shadow-2xl flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
                 <SlidersHorizontal size={12} />
@@ -875,8 +1030,8 @@ export default function LibraryPage() {
                     }}
                     className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
                       active
-                        ? "bg-blue-600 text-white"
-                        : "bg-[#1a1d24] text-gray-300 hover:text-white"
+                        ? "bg-accent text-white"
+                        : "bg-surface-elevated text-gray-300 hover:text-white"
                     }`}
                   >
                     <span>{label}</span>
@@ -893,7 +1048,7 @@ export default function LibraryPage() {
                 className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${
                   onlyMalOpen
                     ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
-                    : "bg-[#1a1d24] border-gray-800 text-gray-300 hover:text-white"
+                    : "bg-surface-elevated border-gray-800 text-gray-300 hover:text-white"
                 }`}
               >
                 <span>Nur AniList/MAL offen</span>
@@ -927,8 +1082,8 @@ export default function LibraryPage() {
                       onClick={() => toggleGenre(genre)}
                       className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition-colors ${
                         active
-                          ? "bg-blue-600/25 border-blue-500/60 text-blue-200"
-                          : "bg-[#1a1d24] border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
+                          ? "bg-accent-soft-hover border-accent-border-strong text-accent-soft-text"
+                          : "bg-surface-elevated border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
                       }`}
                     >
                       {genre}
@@ -941,7 +1096,7 @@ export default function LibraryPage() {
         )}
       </div>
 
-      {/* Slim active genre chips (only shown when a genre filter is active) */}
+      {/* Slim active genre chips */}
       {selectedGenres.length > 0 && (
         <div className="flex items-center flex-wrap gap-1.5 -mt-1">
           {selectedGenres.map((genre) => (
@@ -949,7 +1104,7 @@ export default function LibraryPage() {
               key={genre}
               type="button"
               onClick={() => toggleGenre(genre)}
-              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-blue-600/15 border border-blue-500/35 text-blue-300 hover:bg-blue-600/25 transition-colors"
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-accent-soft border border-accent-border text-accent-light hover:bg-accent-soft-hover transition-colors"
               title={`${genre}-Filter entfernen`}
             >
               <span>{genre}</span>
@@ -980,8 +1135,8 @@ export default function LibraryPage() {
               onClick={() => setActiveTab(tab.key)}
               className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap border transition-all ${
                 isActive
-                  ? "bg-blue-600 border-blue-500 text-white shadow-sm"
-                  : "bg-[#1a1d24] border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
+                  ? "bg-accent border-accent-border-strong text-white shadow-sm"
+                  : "bg-surface-elevated border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
               }`}
             >
               {tab.label} ({count})
@@ -990,16 +1145,16 @@ export default function LibraryPage() {
         })}
       </div>
 
-      {/* Subtle 1-line Collapsible Sequel Available Hint (only shown when completed works have unadded sequels) */}
+      {/* Subtle 1-line Collapsible Sequel Available Hint */}
       {!isLoading && availableSequels.length > 0 && (
-        <div className="rounded-xl border border-blue-500/25 bg-[#151925]/90 overflow-hidden">
+        <div className="rounded-xl border border-accent-border bg-surface/90 overflow-hidden">
           <button
             type="button"
             onClick={() => setShowSequels((v) => !v)}
             className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-xs hover:bg-white/[0.03] transition-colors"
           >
-            <span className="inline-flex items-center gap-1.5 font-semibold text-blue-300 truncate">
-              <Sparkles size={13} className="text-blue-400 shrink-0" />
+            <span className="inline-flex items-center gap-1.5 font-semibold text-accent-light truncate">
+              <Sparkles size={13} className="text-accent-text shrink-0" />
               <span>
                 {availableSequels.length === 1
                   ? "1 Fortsetzung verfügbar"
@@ -1008,7 +1163,11 @@ export default function LibraryPage() {
             </span>
             <span className="inline-flex items-center gap-1 text-[11px] text-gray-400 shrink-0">
               {showSequels ? "Ausblenden" : "Anzeigen"}
-              {showSequels ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              {showSequels ? (
+                <ChevronUp size={13} />
+              ) : (
+                <ChevronDown size={13} />
+              )}
             </span>
           </button>
 
@@ -1020,7 +1179,7 @@ export default function LibraryPage() {
                 return (
                   <div
                     key={seq.id}
-                    className="flex items-center gap-2.5 px-3 py-2 bg-[#121620]/70"
+                    className="flex items-center gap-2.5 px-3 py-2 bg-surface-inset/70"
                   >
                     <Link
                       href={`/work/${seq.id}`}
@@ -1038,13 +1197,13 @@ export default function LibraryPage() {
                     <div className="flex-1 min-w-0">
                       <Link
                         href={`/work/${seq.id}`}
-                        className="text-xs font-semibold text-white hover:text-blue-300 transition-colors truncate block"
+                        className="text-xs font-semibold text-white hover:text-accent-light transition-colors truncate block"
                       >
                         {seq.title}
                       </Link>
                       <div className="flex items-center gap-1.5 mt-0.5 text-[10px]">
                         <span
-                          className={`px-1.5 py-0.2 rounded font-semibold ${
+                          className={`px-1.5 py-0.5 leading-none rounded font-semibold ${
                             isReleasing
                               ? "bg-emerald-500/15 text-emerald-300"
                               : "bg-purple-500/15 text-purple-300"
@@ -1065,7 +1224,7 @@ export default function LibraryPage() {
                         type="button"
                         disabled={isBusy}
                         onClick={() => handleQuickAddSequel(seq)}
-                        className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 transition-colors disabled:opacity-50 whitespace-nowrap"
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-accent-soft hover:bg-accent text-accent-light hover:text-white border border-accent-border transition-colors disabled:opacity-50 whitespace-nowrap"
                       >
                         {isBusy ? "..." : isReleasing ? "+ Aktiv" : "+ Planung"}
                       </button>
@@ -1101,7 +1260,7 @@ export default function LibraryPage() {
             .map((_, i) => (
               <div
                 key={i}
-                className="flex items-center gap-3 p-3 rounded-2xl border border-gray-800 bg-[#1a1d24] animate-pulse"
+                className="flex items-center gap-3 p-3 rounded-2xl border border-gray-800 bg-surface-elevated animate-pulse"
               >
                 <div className="w-12 h-16 rounded-lg bg-gray-800 shrink-0" />
                 <div className="flex-1 space-y-2">
@@ -1112,8 +1271,18 @@ export default function LibraryPage() {
               </div>
             ))}
         </div>
+      ) : !isLoggedIn ? (
+        <div className="rounded-2xl border border-gray-800 bg-surface-elevated p-8 text-center text-sm text-gray-400 flex flex-col items-center gap-3">
+          <p>Melde dich an, um deine persönliche Bibliothek zu verwalten.</p>
+          <Link
+            href="/login"
+            className="px-4 py-2 rounded-xl bg-accent hover:bg-accent-hover text-white text-xs font-bold transition"
+          >
+            Jetzt anmelden
+          </Link>
+        </div>
       ) : visibleWorks.length === 0 ? (
-        <div className="rounded-2xl border border-gray-800 bg-[#1a1d24] p-10 text-center text-sm text-gray-400 flex flex-col items-center gap-2.5">
+        <div className="rounded-2xl border border-gray-800 bg-surface-elevated p-10 text-center text-sm text-gray-400 flex flex-col items-center gap-2.5">
           <p>
             {searchQuery || selectedGenres.length > 0 || onlyMalOpen
               ? "Keine passenden Einträge für deine Filter in dieser Kategorie gefunden."
@@ -1126,7 +1295,7 @@ export default function LibraryPage() {
                 setSelectedGenres([]);
                 setOnlyMalOpen(false);
               }}
-              className="text-xs font-semibold text-blue-400 hover:text-blue-300 underline"
+              className="text-xs font-semibold text-accent-text hover:text-accent-light underline"
             >
               Filter zurücksetzen
             </button>
@@ -1137,12 +1306,10 @@ export default function LibraryPage() {
           {visibleWorks.map((work) => {
             const details = aniListDetails[work.work_id];
             const globalOverride = globalOverrides[work.work_id];
-            const isPaused = pausedWorkIds.has(work.work_id);
+            const pauseInfo = pausedWorksMap[work.work_id] || null;
+            const isPaused = Boolean(pauseInfo);
 
-            const title =
-              details?.title?.english ||
-              details?.title?.romaji ||
-              `Werk #${work.work_id}`;
+            const title = getAniListTitle(details, `Werk #${work.work_id}`);
             const coverSrc =
               details?.coverImage?.large || details?.coverImage?.extraLarge;
 
@@ -1157,10 +1324,9 @@ export default function LibraryPage() {
             const releaseInfo = computeWorkReleaseInfo({
               media: details,
               override: globalOverride,
-              pauseInfo: isPaused
-                ? { paused: true, paused_until: "9999-12-31T23:59:59.999Z" }
-                : null,
+              pauseInfo,
               userWork: work,
+              nowMs,
             });
             const behindCount = releaseInfo.behindCount;
 
@@ -1179,7 +1345,7 @@ export default function LibraryPage() {
             return (
               <div
                 key={work.work_id}
-                className="flex flex-col justify-between gap-2.5 p-2.5 rounded-2xl border border-gray-800/90 bg-[#1a1d24] hover:border-gray-700 transition-colors"
+                className="flex flex-col justify-between gap-2.5 p-2.5 rounded-2xl border border-gray-800/90 bg-surface-elevated hover:border-gray-700 transition-colors"
               >
                 <div className="flex items-start gap-2.5">
                   <Link
@@ -1196,7 +1362,7 @@ export default function LibraryPage() {
                       />
                     ) : null}
                     {behindCount > 0 && (
-                      <span className="absolute top-0.5 right-0.5 rounded bg-blue-600 px-1 py-0.2 text-[9px] font-bold text-white shadow">
+                      <span className="absolute top-0.5 right-0.5 rounded bg-accent px-1 py-0.5 leading-none text-[9px] font-bold text-white shadow">
                         +{behindCount}
                       </span>
                     )}
@@ -1205,7 +1371,7 @@ export default function LibraryPage() {
                   <div className="flex-1 min-w-0 flex flex-col gap-1">
                     <Link
                       href={`/work/${work.work_id}`}
-                      className="font-semibold text-xs text-white hover:text-blue-400 transition-colors line-clamp-2 leading-snug"
+                      className="font-semibold text-xs text-white hover:text-accent-light transition-colors line-clamp-2 leading-snug"
                     >
                       {title}
                     </Link>
@@ -1218,29 +1384,26 @@ export default function LibraryPage() {
                           className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-amber-300 tabular-nums"
                           title={`Deine Bewertung: ${userScore.toFixed(1)} / 10`}
                         >
-                          <Star size={10} className="fill-amber-400 text-amber-400" />
+                          <Star
+                            size={10}
+                            className="fill-amber-400 text-amber-400"
+                          />
                           {userScore.toFixed(1)}
                         </span>
                       )}
                     </div>
-                    {isPaused && (
+                    {isPaused && pauseInfo && (
                       <div className="flex items-center gap-1 flex-wrap mt-0.5">
-                        <span className="inline-flex items-center rounded bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.2 text-[9px] font-bold text-amber-300">
-                          Auf Pause
+                        <span className="inline-flex items-center rounded bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.5 leading-none text-[9px] font-bold text-amber-300">
+                          {formatPauseStatusLabel(pauseInfo.paused_until)}
                         </span>
                         <button
                           type="button"
-                          onClick={async (e) => {
+                          onClick={(e) => {
                             e.preventDefault();
-                            const { unpauseWork } = await import("@/lib/db/pauses");
-                            await unpauseWork(work.work_id);
-                            setPausedWorkIds((prev) => {
-                              const next = new Set(prev);
-                              next.delete(work.work_id);
-                              return next;
-                            });
+                            handleQuickUnpauseItem(work.work_id);
                           }}
-                          className="text-[9px] font-bold text-emerald-400 hover:underline"
+                          className="text-[9px] font-bold text-accent-text hover:underline"
                         >
                           Aufheben
                         </button>
@@ -1252,7 +1415,7 @@ export default function LibraryPage() {
                 <div className="h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-300 ${
-                      isCompleted ? "bg-green-500" : progressBarColor
+                      isCompleted ? "bg-emerald-500" : progressBarColor
                     }`}
                     style={{ width: `${progressPct}%` }}
                   />
@@ -1260,12 +1423,12 @@ export default function LibraryPage() {
 
                 <div className="flex items-center justify-between gap-1.5">
                   {isCompleted ? (
-                    <span className="inline-flex items-center gap-1 rounded-lg bg-green-500/15 border border-green-500/30 px-2 py-1 text-[11px] font-semibold text-green-400">
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 px-2 py-1 text-[11px] font-semibold text-emerald-400">
                       <Check size={12} />
                       Fertig
                     </span>
                   ) : isCaughtUp ? (
-                    <span className="inline-flex items-center gap-1 rounded-lg bg-emerald-500/10 border border-emerald-500/25 px-2 py-1 text-[11px] font-semibold text-emerald-300">
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-accent-soft border border-accent-border px-2 py-1 text-[11px] font-semibold text-accent-light">
                       <Check size={12} />
                       Aktuell
                     </span>
@@ -1273,7 +1436,7 @@ export default function LibraryPage() {
                     <button
                       type="button"
                       onClick={() => handleQuickIncrement(work)}
-                      className="flex-1 rounded-lg bg-[#222631] hover:bg-blue-600 text-[11px] font-semibold text-white py-1 px-2 transition-colors whitespace-nowrap text-center"
+                      className="flex-1 rounded-lg bg-surface-control hover:bg-accent text-[11px] font-semibold text-white py-1 px-2 transition-colors whitespace-nowrap text-center"
                     >
                       + {unitPrefix} {current + 1}
                     </button>
@@ -1282,7 +1445,7 @@ export default function LibraryPage() {
                   <button
                     type="button"
                     onClick={() => openEditModal(work)}
-                    className="p-1.5 rounded-lg bg-[#222631] hover:bg-gray-700 text-gray-300 hover:text-white transition-colors shrink-0"
+                    className="p-1.5 rounded-lg bg-surface-control hover:bg-gray-700 text-gray-300 hover:text-white transition-colors shrink-0"
                     aria-label="Schnell bearbeiten"
                     title="Schnell bearbeiten"
                   >
@@ -1298,12 +1461,10 @@ export default function LibraryPage() {
           {visibleWorks.map((work) => {
             const details = aniListDetails[work.work_id];
             const globalOverride = globalOverrides[work.work_id];
-            const isPaused = pausedWorkIds.has(work.work_id);
+            const pauseInfo = pausedWorksMap[work.work_id] || null;
+            const isPaused = Boolean(pauseInfo);
 
-            const title =
-              details?.title?.english ||
-              details?.title?.romaji ||
-              `Werk #${work.work_id}`;
+            const title = getAniListTitle(details, `Werk #${work.work_id}`);
             const coverSrc =
               details?.coverImage?.large || details?.coverImage?.extraLarge;
 
@@ -1318,17 +1479,17 @@ export default function LibraryPage() {
             const releaseInfo = computeWorkReleaseInfo({
               media: details,
               override: globalOverride,
-              pauseInfo: isPaused
-                ? { paused: true, paused_until: "9999-12-31T23:59:59.999Z" }
-                : null,
+              pauseInfo,
               userWork: work,
+              nowMs,
             });
             const behindCount = releaseInfo.behindCount;
             const nextReleaseText = formatNextReleaseLabel(
               work,
               details,
               globalOverride,
-              isPaused
+              pauseInfo,
+              nowMs
             );
 
             const isCompleted =
@@ -1346,7 +1507,7 @@ export default function LibraryPage() {
             return (
               <div
                 key={work.work_id}
-                className="flex items-center gap-3.5 p-3 rounded-2xl border border-gray-800/90 bg-[#1a1d24] hover:border-gray-700 transition-colors"
+                className="flex items-center gap-3.5 p-3 rounded-2xl border border-gray-800/90 bg-surface-elevated hover:border-gray-700 transition-colors"
               >
                 {/* Left: Cover */}
                 <Link
@@ -1368,7 +1529,7 @@ export default function LibraryPage() {
                 <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                   <Link
                     href={`/work/${work.work_id}`}
-                    className="font-semibold text-sm sm:text-base text-white hover:text-blue-400 transition-colors line-clamp-1"
+                    className="font-semibold text-sm sm:text-base text-white hover:text-accent-light transition-colors line-clamp-1"
                   >
                     {title}
                   </Link>
@@ -1377,7 +1538,7 @@ export default function LibraryPage() {
                     <div className="flex-1 h-1.5 rounded-full bg-gray-800 overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-all duration-300 ${
-                          isCompleted ? "bg-green-500" : progressBarColor
+                          isCompleted ? "bg-emerald-500" : progressBarColor
                         }`}
                         style={{ width: `${progressPct}%` }}
                       />
@@ -1388,23 +1549,15 @@ export default function LibraryPage() {
                   </div>
 
                   <div className="flex items-center flex-wrap gap-2">
-                    {isPaused ? (
+                    {isPaused && pauseInfo ? (
                       <div className="flex items-center gap-1.5">
                         <span className="inline-flex items-center rounded-full bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 text-[10px] font-bold text-amber-300">
-                          Auf Pause / Hiatus
+                          {formatPauseStatusLabel(pauseInfo.paused_until)}
                         </span>
                         <button
                           type="button"
-                          onClick={async () => {
-                            const { unpauseWork } = await import("@/lib/db/pauses");
-                            await unpauseWork(work.work_id);
-                            setPausedWorkIds((prev) => {
-                              const next = new Set(prev);
-                              next.delete(work.work_id);
-                              return next;
-                            });
-                          }}
-                          className="text-[11px] font-bold text-emerald-400 hover:text-emerald-300 hover:underline"
+                          onClick={() => handleQuickUnpauseItem(work.work_id)}
+                          className="text-[11px] font-bold text-accent-text hover:text-accent-light hover:underline"
                         >
                           Pause für alle aufheben
                         </button>
@@ -1421,12 +1574,15 @@ export default function LibraryPage() {
                         className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 text-[11px] font-semibold text-amber-300 tabular-nums"
                         title={`Deine Bewertung: ${userScore.toFixed(1)} / 10`}
                       >
-                        <Star size={11} className="fill-amber-400 text-amber-400" />
+                        <Star
+                          size={11}
+                          className="fill-amber-400 text-amber-400"
+                        />
                         {userScore.toFixed(1)}
                       </span>
                     )}
                     {behindCount > 0 && (
-                      <span className="inline-flex items-center rounded-full bg-blue-500/15 border border-blue-500/30 px-2 py-0.5 text-[10px] font-semibold text-blue-400">
+                      <span className="inline-flex items-center rounded-full bg-accent-soft border border-accent-border px-2 py-0.5 text-[10px] font-semibold text-accent-light">
                         {behindCount} offen
                       </span>
                     )}
@@ -1442,12 +1598,12 @@ export default function LibraryPage() {
                 {/* Right: Quick +1 Button & Quick-Edit Pencil */}
                 <div className="flex items-center gap-2 shrink-0">
                   {isCompleted ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-green-500/15 border border-green-500/30 px-3 py-1.5 text-xs font-semibold text-green-400">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-3 py-1.5 text-xs font-semibold text-emerald-400">
                       <Check size={13} />
                       Fertig
                     </span>
                   ) : isCaughtUp ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/25 px-3 py-1.5 text-xs font-semibold text-emerald-300">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft border border-accent-border px-3 py-1.5 text-xs font-semibold text-accent-light">
                       <Check size={13} />
                       Aktuell
                     </span>
@@ -1455,7 +1611,7 @@ export default function LibraryPage() {
                     <button
                       type="button"
                       onClick={() => handleQuickIncrement(work)}
-                      className="rounded-full bg-[#222631] hover:bg-blue-600 text-xs font-semibold text-white px-3 py-1.5 transition-colors whitespace-nowrap"
+                      className="rounded-full bg-surface-control hover:bg-accent text-xs font-semibold text-white px-3 py-1.5 transition-colors whitespace-nowrap"
                     >
                       + {unitPrefix} {current + 1}
                     </button>
@@ -1464,7 +1620,7 @@ export default function LibraryPage() {
                   <button
                     type="button"
                     onClick={() => openEditModal(work)}
-                    className="p-2 rounded-full bg-[#222631] hover:bg-gray-700 text-gray-300 hover:text-white transition-colors"
+                    className="p-2 rounded-full bg-surface-control hover:bg-gray-700 text-gray-300 hover:text-white transition-colors"
                     aria-label="Schnell bearbeiten"
                     title="Schnell bearbeiten"
                   >
@@ -1478,288 +1634,325 @@ export default function LibraryPage() {
       )}
 
       {/* Quick-Edit Modal */}
-      {editingWork && (() => {
-        const editDetails = aniListDetails[editingWork.work_id];
-        const editTitle =
-          editDetails?.title?.english ||
-          editDetails?.title?.romaji ||
-          `Werk #${editingWork.work_id}`;
-        const editCover =
-          editDetails?.coverImage?.large || editDetails?.coverImage?.extraLarge;
+      {editingWork &&
+        (() => {
+          const editDetails = aniListDetails[editingWork.work_id];
+          const editTitle = getAniListTitle(
+            editDetails,
+            `Werk #${editingWork.work_id}`
+          );
+          const editCover =
+            editDetails?.coverImage?.large ||
+            editDetails?.coverImage?.extraLarge;
+          const editTotal = getTotalCount(
+            editingWork,
+            editDetails,
+            globalOverrides[editingWork.work_id]
+          );
 
-        return (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
-            onClick={() => !isSavingEdit && setEditingWork(null)}
-          >
+          return (
             <div
-              className="w-full max-w-md rounded-2xl border border-gray-800 bg-[#151821] shadow-2xl overflow-hidden flex flex-col"
-              onClick={(e) => e.stopPropagation()}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
+              onClick={() => !isSavingEdit && setEditingWork(null)}
             >
-              {/* Header */}
-              <div className="flex items-center gap-3 px-4 py-3.5 border-b border-gray-800/80">
-                {editCover && (
-                  <img
-                    src={editCover}
-                    alt=""
-                    className="w-8 h-11 rounded-lg object-cover bg-gray-800 shrink-0"
-                  />
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                    Schnell bearbeiten
-                  </p>
-                  <h2 className="text-sm font-bold text-white truncate">
-                    {editTitle}
-                  </h2>
+              <div
+                className="w-full max-w-md rounded-2xl border border-gray-800 bg-surface shadow-2xl overflow-hidden flex flex-col"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div className="flex items-center gap-3 px-4 py-3.5 border-b border-gray-800/80">
+                  {editCover && (
+                    <img
+                      src={editCover}
+                      alt=""
+                      className="w-8 h-11 rounded-lg object-cover bg-gray-800 shrink-0"
+                    />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                      Schnell bearbeiten
+                    </p>
+                    <h2 className="text-sm font-bold text-white truncate">
+                      {editTitle}
+                    </h2>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => !isSavingEdit && setEditingWork(null)}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+                    aria-label="Schließen"
+                  >
+                    <X size={17} />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => !isSavingEdit && setEditingWork(null)}
-                  className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
-                  aria-label="Schließen"
-                >
-                  <X size={17} />
-                </button>
-              </div>
 
-              {/* Body */}
-              <div className="p-4 flex flex-col gap-3">
-                {/* Episode / Chapter Adjuster */}
-                <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3.5 flex flex-col gap-2.5">
-                  <label className="text-xs font-bold text-white">
-                    {contentType === "MANGA"
-                      ? "Dein Stand (gelesene Kapitel)"
-                      : "Dein Stand (gesehene Folgen)"}
-                  </label>
+                {/* Body */}
+                <div className="p-4 flex flex-col gap-3">
+                  {/* Episode / Chapter Adjuster */}
+                  <div className="rounded-xl border border-gray-800/90 bg-surface-inset p-3.5 flex flex-col gap-2.5">
+                    <label className="text-xs font-bold text-white">
+                      {contentType === "MANGA"
+                        ? "Dein Stand (gelesene Kapitel)"
+                        : "Dein Stand (gesehene Folgen)"}
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditEpisode((prev) => Math.max(0, prev - 1))
+                        }
+                        className="p-2.5 rounded-xl bg-surface-control border border-gray-700 hover:bg-gray-700 text-white transition-colors"
+                        aria-label="Verringern"
+                      >
+                        <Minus size={15} />
+                      </button>
+                      <input
+                        type="number"
+                        min={0}
+                        value={editEpisode}
+                        onChange={(e) =>
+                          setEditEpisode(
+                            Math.max(0, parseInt(e.target.value, 10) || 0)
+                          )
+                        }
+                        className="flex-1 rounded-xl border border-gray-700 bg-surface-control px-3 py-2 text-center text-base font-bold text-white focus:border-accent-border-strong focus:outline-none tabular-nums"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditEpisode((prev) => prev + 1)}
+                        className="p-2.5 rounded-xl bg-surface-control border border-gray-700 hover:bg-gray-700 text-white transition-colors"
+                        aria-label="Erhöhen"
+                      >
+                        <Plus size={15} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Status Selector */}
+                  <div className="rounded-xl border border-gray-800/90 bg-surface-inset p-3.5 flex flex-col gap-2.5">
+                    <label className="text-xs font-bold text-white">
+                      Status
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                      {STATUS_TABS.map((tab) => (
+                        <button
+                          key={tab.key}
+                          type="button"
+                          onClick={() => {
+                            setEditStatus(tab.key);
+                            if (
+                              tab.key === "COMPLETED" &&
+                              editTotal !== null &&
+                              editTotal > 0 &&
+                              editEpisode < editTotal
+                            ) {
+                              setEditEpisode(editTotal);
+                            }
+                          }}
+                          className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${
+                            editStatus === tab.key
+                              ? "bg-accent border-accent-border-strong text-white shadow-sm"
+                              : "bg-surface-control border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {editStatus === "DROPPED" && (
+                    <div className="rounded-xl border border-gray-800/90 bg-surface-inset p-3.5 flex flex-col gap-2">
+                      <label className="text-xs font-bold text-white">
+                        Grund für Abbruch (optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={editDroppedReason}
+                        onChange={(e) => setEditDroppedReason(e.target.value)}
+                        placeholder="Grund für Abbruch (optional)"
+                        className="w-full rounded-xl border border-gray-700 bg-surface-control px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-rose-500 focus:outline-none"
+                      />
+                    </div>
+                  )}
+
+                  {editStatus === "PAUSED" && (
+                    <button
+                      type="button"
+                      onClick={() => setEditStatus("CURRENT")}
+                      className="w-full rounded-xl border border-accent-border bg-accent-soft hover:bg-accent-soft-hover px-3 py-2 text-xs font-semibold text-accent-light transition-colors"
+                    >
+                      Entpausieren (Aktiv setzen)
+                    </button>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-gray-800/80 bg-surface-inset">
+                  <Link
+                    href={`/work/${editingWork.work_id}`}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-accent-text hover:text-accent-light transition-colors"
+                  >
+                    <ExternalLink size={14} />
+                    Zur Detailseite
+                  </Link>
+
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setEditEpisode((prev) => Math.max(0, prev - 1))}
-                      className="p-2.5 rounded-xl bg-[#181c27] border border-gray-700 hover:bg-gray-700 text-white transition-colors"
-                      aria-label="Verringern"
+                      onClick={() => setEditingWork(null)}
+                      disabled={isSavingEdit}
+                      className="px-3.5 py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 transition-colors"
                     >
-                      <Minus size={15} />
+                      Abbrechen
                     </button>
-                    <input
-                      type="number"
-                      min={0}
-                      value={editEpisode}
-                      onChange={(e) =>
-                        setEditEpisode(Math.max(0, parseInt(e.target.value, 10) || 0))
-                      }
-                      className="flex-1 rounded-xl border border-gray-700 bg-[#181c27] px-3 py-2 text-center text-base font-bold text-white focus:border-blue-500 focus:outline-none tabular-nums"
-                    />
                     <button
                       type="button"
-                      onClick={() => setEditEpisode((prev) => prev + 1)}
-                      className="p-2.5 rounded-xl bg-[#181c27] border border-gray-700 hover:bg-gray-700 text-white transition-colors"
-                      aria-label="Erhöhen"
+                      onClick={handleSaveQuickEdit}
+                      disabled={isSavingEdit}
+                      className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-accent hover:bg-accent-hover disabled:opacity-50 transition-colors shadow-md"
                     >
-                      <Plus size={15} />
+                      {isSavingEdit ? "Speichern..." : "Speichern"}
                     </button>
                   </div>
                 </div>
-
-                {/* Status Selector */}
-                <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3.5 flex flex-col gap-2.5">
-                  <label className="text-xs font-bold text-white">Status</label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                    {STATUS_TABS.map((tab) => (
-                      <button
-                        key={tab.key}
-                        type="button"
-                        onClick={() => setEditStatus(tab.key)}
-                        className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-colors ${
-                          editStatus === tab.key
-                            ? "bg-blue-600 border-blue-500 text-white shadow-sm"
-                            : "bg-[#181c27] border-gray-800 text-gray-400 hover:text-white hover:border-gray-700"
-                        }`}
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {editStatus === "DROPPED" && (
-                  <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3.5 flex flex-col gap-2">
-                    <label className="text-xs font-bold text-white">
-                      Grund für Abbruch (optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={editDroppedReason}
-                      onChange={(e) => setEditDroppedReason(e.target.value)}
-                      placeholder="Grund für Abbruch (optional)"
-                      className="w-full rounded-xl border border-gray-700 bg-[#181c27] px-3 py-2 text-sm text-white placeholder:text-gray-500 focus:border-rose-500 focus:outline-none"
-                    />
-                  </div>
-                )}
-
-                {editStatus === "PAUSED" && (
-                  <button
-                    type="button"
-                    onClick={() => setEditStatus("CURRENT")}
-                    className="w-full rounded-xl border border-blue-500/40 bg-blue-500/15 hover:bg-blue-500/25 px-3 py-2 text-xs font-semibold text-blue-300 transition-colors"
-                  >
-                    Entpausieren (Aktiv setzen)
-                  </button>
-                )}
-              </div>
-
-              {/* Footer */}
-              <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-gray-800/80 bg-[#11141c]">
-                <Link
-                  href={`/work/${editingWork.work_id}`}
-                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors"
-                >
-                  <ExternalLink size={14} />
-                  Zur Detailseite
-                </Link>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditingWork(null)}
-                    disabled={isSavingEdit}
-                    className="px-3.5 py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 transition-colors"
-                  >
-                    Abbrechen
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSaveQuickEdit}
-                    disabled={isSavingEdit}
-                    className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 transition-colors shadow-md"
-                  >
-                    {isSavingEdit ? "Speichern..." : "Speichern"}
-                  </button>
-                </div>
               </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
 
       {/* Compact Random Wishlist Pick Modal */}
-      {randomPickWork && (() => {
-        const det = aniListDetails[randomPickWork.work_id];
-        const title =
-          det?.title?.english || det?.title?.romaji || `Werk #${randomPickWork.work_id}`;
-        const cover = det?.coverImage?.extraLarge || det?.coverImage?.large;
-        const genres: string[] = Array.isArray(det?.genres) ? det.genres.slice(0, 3) : [];
-        const totalEps =
-          det?.type === "MANGA" ? det?.chapters : det?.episodes;
-        const score = det?.averageScore ? (det.averageScore / 10).toFixed(1) : null;
+      {randomPickWork &&
+        (() => {
+          const det = aniListDetails[randomPickWork.work_id];
+          const title = getAniListTitle(det, `Werk #${randomPickWork.work_id}`);
+          const cover =
+            det?.coverImage?.extraLarge || det?.coverImage?.large || "";
+          const genres: string[] = Array.isArray(det?.genres)
+            ? det.genres.slice(0, 3)
+            : [];
+          const totalEps =
+            det?.type === "MANGA" ? det?.chapters : det?.episodes;
+          const score = det?.averageScore
+            ? (det.averageScore / 10).toFixed(1)
+            : null;
 
-        return (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
-            onClick={() => !isStartingRandom && setRandomPickWork(null)}
-          >
+          return (
             <div
-              className="w-full max-w-sm rounded-2xl border border-gray-800 bg-[#151821] shadow-2xl overflow-hidden flex flex-col"
-              onClick={(e) => e.stopPropagation()}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4"
+              onClick={() => !isStartingRandom && setRandomPickWork(null)}
             >
-              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800/80">
-                <span className="inline-flex items-center gap-1.5 text-xs font-bold text-purple-300">
-                  <Dices size={14} />
-                  Zufallsauswahl{selectedGenres.length > 0 ? ` · ${selectedGenres.join(", ")}` : ""}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setRandomPickWork(null)}
-                  className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
-                  aria-label="Schließen"
-                >
-                  <X size={16} />
-                </button>
-              </div>
+              <div
+                className="w-full max-w-sm rounded-2xl border border-gray-800 bg-surface shadow-2xl overflow-hidden flex flex-col"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800/80">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-purple-300">
+                    <Dices size={14} />
+                    Zufallsauswahl
+                    {selectedGenres.length > 0
+                      ? ` · ${selectedGenres.join(", ")}`
+                      : ""}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setRandomPickWork(null)}
+                    className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+                    aria-label="Schließen"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
 
-              <div className="p-4 flex gap-3.5 items-start">
-                <Link
-                  href={`/work/${randomPickWork.work_id}`}
-                  className="w-20 h-28 rounded-xl overflow-hidden bg-gray-800 shrink-0 block"
-                >
-                  {cover && (
-                    <img
-                      src={cover}
-                      alt={title}
-                      className="w-full h-full object-cover"
-                    />
-                  )}
-                </Link>
-                <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                <div className="p-4 flex gap-3.5 items-start">
                   <Link
                     href={`/work/${randomPickWork.work_id}`}
-                    className="text-sm font-bold text-white hover:text-blue-400 transition-colors line-clamp-2 leading-snug"
+                    className="w-20 h-28 rounded-xl overflow-hidden bg-gray-800 shrink-0 block"
                   >
-                    {title}
-                  </Link>
-                  <div className="flex items-center gap-2 text-xs text-gray-400">
-                    {score && (
-                      <span className="inline-flex items-center gap-1 text-amber-300 font-semibold tabular-nums">
-                        <Star size={11} className="fill-amber-400 text-amber-400" />
-                        {score}
-                      </span>
+                    {cover && (
+                      <img
+                        src={cover}
+                        alt={title}
+                        className="w-full h-full object-cover"
+                      />
                     )}
-                    {totalEps && (
-                      <span>
-                        {totalEps} {det?.type === "MANGA" ? "Kap." : "Folgen"}
-                      </span>
+                  </Link>
+                  <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+                    <Link
+                      href={`/work/${randomPickWork.work_id}`}
+                      className="text-sm font-bold text-white hover:text-accent-light transition-colors line-clamp-2 leading-snug"
+                    >
+                      {title}
+                    </Link>
+                    <div className="flex items-center gap-2 text-xs text-gray-400">
+                      {score && (
+                        <span className="inline-flex items-center gap-1 text-amber-300 font-semibold tabular-nums">
+                          <Star
+                            size={11}
+                            className="fill-amber-400 text-amber-400"
+                          />
+                          {score}
+                        </span>
+                      )}
+                      {totalEps && (
+                        <span>
+                          {totalEps}{" "}
+                          {det?.type === "MANGA" ? "Kap." : "Folgen"}
+                        </span>
+                      )}
+                    </div>
+                    {genres.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-0.5">
+                        {genres.map((g) => (
+                          <span
+                            key={g}
+                            className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-surface-inset border border-gray-800 text-gray-300"
+                          >
+                            {g}
+                          </span>
+                        ))}
+                      </div>
                     )}
                   </div>
-                  {genres.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-0.5">
-                      {genres.map((g) => (
-                        <span
-                          key={g}
-                          className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#10131b] border border-gray-800 text-gray-300"
-                        >
-                          {g}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                 </div>
-              </div>
 
-              <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-gray-800/80 bg-[#11141c]">
-                {randomEligibleWishlistWorks.length > 1 ? (
-                  <button
-                    type="button"
-                    disabled={isStartingRandom}
-                    onClick={() => handlePickRandomWishlist(randomPickWork.work_id)}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-gray-200 transition-colors"
-                  >
-                    <Dices size={13} />
-                    Nochmal
-                  </button>
-                ) : (
-                  <span />
-                )}
-                <div className="flex items-center gap-2">
-                  <Link
-                    href={`/work/${randomPickWork.work_id}`}
-                    className="px-3 py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 transition-colors"
-                  >
-                    Details
-                  </Link>
-                  <button
-                    type="button"
-                    disabled={isStartingRandom}
-                    onClick={handleStartRandomPick}
-                    className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 transition-colors shadow-md"
-                  >
-                    {isStartingRandom ? "..." : "Starten"}
-                  </button>
+                <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-gray-800/80 bg-surface-inset">
+                  {randomEligibleWishlistWorks.length > 1 ? (
+                    <button
+                      type="button"
+                      disabled={isStartingRandom}
+                      onClick={() =>
+                        handlePickRandomWishlist(randomPickWork.work_id)
+                      }
+                      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-gray-200 transition-colors"
+                    >
+                      <Dices size={13} />
+                      Nochmal
+                    </button>
+                  ) : (
+                    <span />
+                  )}
+                  <div className="flex items-center gap-2">
+                    <Link
+                      href={`/work/${randomPickWork.work_id}`}
+                      className="px-3 py-2 rounded-xl text-xs font-semibold text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 transition-colors"
+                    >
+                      Details
+                    </Link>
+                    <button
+                      type="button"
+                      disabled={isStartingRandom}
+                      onClick={handleStartRandomPick}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-accent hover:bg-accent-hover disabled:opacity-50 transition-colors shadow-md"
+                    >
+                      {isStartingRandom ? "..." : "Starten"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
     </div>
   );
 }

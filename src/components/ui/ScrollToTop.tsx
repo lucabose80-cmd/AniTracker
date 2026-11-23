@@ -8,21 +8,17 @@ export function ScrollToTop() {
 
   useEffect(() => {
     const handleScroll = () => {
-      if (window.scrollY > 300) {
-        setIsVisible(true);
-      } else {
-        setIsVisible(false);
-      }
+      setIsVisible(window.scrollY > 300);
     };
 
-    window.addEventListener("scroll", handleScroll);
+    window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
   const scrollToTop = () => {
     window.scrollTo({
       top: 0,
-      behavior: "smooth"
+      behavior: "smooth",
     });
   };
 
@@ -30,11 +26,12 @@ export function ScrollToTop() {
 
   return (
     <button
+      type="button"
       onClick={scrollToTop}
-      className="fixed bottom-24 right-4 z-50 p-3 rounded-full bg-blue-600 text-white shadow-lg hover:bg-blue-700 transition-colors"
+      className="fixed bottom-24 right-4 z-50 p-3 rounded-full bg-accent text-white shadow-lg hover:bg-accent-hover transition-colors"
       aria-label="Nach oben scrollen"
     >
-      <ArrowUp size={24} />
+      <ArrowUp size={22} />
     </button>
   );
 }

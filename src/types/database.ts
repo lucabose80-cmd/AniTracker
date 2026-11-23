@@ -19,32 +19,8 @@ export interface UserProfile {
     social: boolean;
   };
   fcm_tokens?: string[];
-  weekly_ranking_anime?: {
-    current: string[];
-    previous: string[];
-    last_updated: string;
-    last_active?: number;
-  };
-  weekly_ranking_manga?: {
-    current: string[];
-    previous: string[];
-    last_updated: string;
-    last_active?: number;
-  };
-  last_maintenance_timestamp?: number;
   dismissed_activity_ids?: string[];
   dismissed_activities_before?: string;
-}
-
-export interface Work {
-  work_id: string; // From AniList/Jikan
-  title: string;
-  type: WorkType;
-  total_episodes: number;
-  platforms_array: string[];
-  official_tags: string[];
-  official_genres: string[];
-  related_works: string[]; // array of work_ids
 }
 
 export interface UserWork {
@@ -61,12 +37,13 @@ export interface UserWork {
   auto_added?: boolean;
   top9_rank?: number;
   added_status?: string;
-  
+  updated_at?: number;
+
   adaptationScores: {
     story: number;
     pacing: number;
   };
-  
+
   mal_rated?: boolean;
   dropped_reason?: string;
 
@@ -81,7 +58,7 @@ export interface UserWork {
     actionDialogScale: number;
     pacingScale: number;
   };
-  
+
   evaluation: {
     plotAndStory: number;
     castAndCharacters: number;
@@ -94,26 +71,13 @@ export interface UserWork {
     comedy?: number;
     bingeFactor: number;
     rewatchPotential?: number;
+    hasRomance?: boolean;
+    isRomanceMainFocus?: boolean;
     emotionalImpact: EmotionalImpact;
     comments: string;
     overallScore: number;
     manualScore?: number;
   };
-}
-
-export interface Comment {
-  comment_id: string;
-  work_id: string;
-  episode_num?: number;
-  author_uid: string;
-  author_name: string;
-  author_avatar?: string;
-  text: string;
-  timestamp: string;
-  is_spoiler: boolean;
-  parent_comment_id: string | null;
-  upvotes: string[];
-  downvotes: string[];
 }
 
 export interface ReviewListItem {
@@ -133,7 +97,15 @@ export interface ReviewListItem {
 export interface ActivityFeed {
   activity_id: string;
   user_id: string;
-  action_type: "MANUAL_POST" | "RATING" | "COMMENT" | "TOP9_UPDATE" | "RECOMMENDATION" | "EPISODE_THREAD" | "WEEKLY_RANKING" | "REVIEW_LIST";
+  action_type:
+    | "MANUAL_POST"
+    | "RATING"
+    | "COMMENT"
+    | "TOP9_UPDATE"
+    | "RECOMMENDATION"
+    | "EPISODE_THREAD"
+    | "WEEKLY_RANKING"
+    | "REVIEW_LIST";
   work_id?: string;
   episode_num?: number;
   text?: string;
@@ -151,6 +123,8 @@ export interface EpisodeFeedback {
   user_id: string;
   work_id: string;
   episode_num: number;
+  episode_end?: number;
+  episodes?: number[];
   media_type: "ANIME" | "MANGA";
   text: string;
   rating?: number; // 1-10
@@ -175,7 +149,17 @@ export interface InAppNotification {
   actor_id: string;      // the user who did the action
   actor_name: string;
   actor_avatar: string;
-  type: "REPLY_TO_COMMENT" | "COMMENT_ON_THREAD" | "NEW_EPISODE_THREAD" | "APP_UPDATE" | "SYSTEM" | "COMMENT_LIKE";
+  type:
+    | "REPLY_TO_COMMENT"
+    | "COMMENT_ON_REVIEW"
+    | "REVIEW_POST"
+    | "REVIEW_UPDATE"
+    | "RATING_UPDATE"
+    | "COMMENT_ON_THREAD"
+    | "NEW_EPISODE_THREAD"
+    | "APP_UPDATE"
+    | "SYSTEM"
+    | "COMMENT_LIKE";
   activity_id?: string;
   work_id?: string;
   work_title?: string;

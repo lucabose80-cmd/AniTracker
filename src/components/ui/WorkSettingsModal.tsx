@@ -16,6 +16,7 @@ import {
   clearManualMaxEpisode,
   computeWorkReleaseInfo,
   formatPauseStatusLabel,
+  parseLocalDate,
   resetScheduleOverride,
   setCalendarOverride,
 } from "@/lib/db/calendar";
@@ -29,6 +30,8 @@ import {
   unpauseWork,
 } from "@/lib/db/pauses";
 import { saveUserWork } from "@/lib/db/works";
+import { toast } from "@/lib/ui-feedback";
+import { AniListDate, AniListMedia } from "@/types/anilist";
 
 export type WorkSettingsTab = "LIMITS" | "SCHEDULE" | "PAUSE";
 type ScheduleEditorMode = "WEEKLY" | "FLEXIBLE" | "EXACT" | "ANILIST";
@@ -47,6 +50,7 @@ export interface WorkSettingsSaveResult {
   manualMaxEpisode: number | "";
   manualAvailableEps: number | "";
   synchroOffset: number | "";
+  syncOffsetDays: number;
   hasCustomOverride: boolean;
   isPaused: boolean;
   pausedUntil: string;
@@ -57,7 +61,12 @@ export interface WorkSettingsModalProps {
   onClose: () => void;
   workId: string;
   work: {
-    title?: { english?: string | null; romaji?: string | null };
+    id?: number;
+    title?: {
+      english?: string | null;
+      romaji?: string | null;
+      native?: string | null;
+    };
     coverImage?: {
       large?: string | null;
       extraLarge?: string | null;
@@ -67,21 +76,165 @@ export interface WorkSettingsModalProps {
     status?: string;
     episodes?: number | null;
     chapters?: number | null;
+    endDate?: AniListDate | null;
     nextAiringEpisode?: { episode?: number; airingAt?: number } | null;
   };
   override?: CalendarOverride;
   pauseInfo?: WorkPauseRecord | null;
   userWork?: {
     inLibrary?: boolean;
+    current_episode?: number;
+    status?: string;
     synchro_offset_episodes?: number;
+    sync_offset_days?: number;
     manual_available_eps?: number | null;
   } | null;
   initialTab?: WorkSettingsTab;
   onSaved?: (result: WorkSettingsSaveResult) => void | Promise<void>;
 }
 
-export function WorkSettingsModal({
-  isOpen,
+function WeekdayPillPicker({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (day: number) => void;
+}) {
+  return (
+    <div className="grid grid-cols-7 gap-1">
+      {DAYS.map((d) => {
+        const active = value === d.value;
+        return (
+          <button
+            key={d.value}
+            type="button"
+            onClick={() => onChange(d.value)}
+            title={d.label}
+            className={`py-2 rounded-lg text-[11px] font-bold border transition ${
+              active
+                ? "bg-accent border-accent-border-strong text-white shadow-sm"
+                : "bg-surface-control border-gray-700/80 text-gray-400 hover:text-white hover:border-gray-600"
+            }`}
+          >
+            {d.short}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function computeInitialModalState(
+  workId: string,
+  work: WorkSettingsModalProps["work"],
+  override: CalendarOverride | undefined,
+  pauseInfo: WorkPauseRecord | null | undefined,
+  userWork: WorkSettingsModalProps["userWork"]
+) {
+  const isManga = work?.type === "MANGA";
+  const rawTotal = isManga ? work?.chapters : work?.episodes;
+  const aniListTotal =
+    typeof rawTotal === "number" && rawTotal > 0 ? rawTotal : null;
+
+  const manualMaxEpisode: number | "" =
+    override?.manualMaxEpisode != null && Number(override.manualMaxEpisode) > 0
+      ? Number(override.manualMaxEpisode)
+      : "";
+
+  const loadedMax = manualMaxEpisode !== "" ? manualMaxEpisode : aniListTotal;
+  const rawAvail =
+    override?.manualAvailableEps ?? userWork?.manual_available_eps ?? null;
+  let manualAvailableEps: number | "" = "";
+  if (rawAvail !== null && rawAvail !== undefined) {
+    manualAvailableEps =
+      loadedMax !== null
+        ? Math.min(Math.max(0, Number(rawAvail)), loadedMax)
+        : Math.max(0, Number(rawAvail));
+  }
+
+  const synchroOffset: number | "" =
+    typeof userWork?.synchro_offset_episodes === "number"
+      ? userWork.synchro_offset_episodes
+      : 0;
+  const syncOffsetDays: number =
+    typeof userWork?.sync_offset_days === "number"
+      ? userWork.sync_offset_days
+      : 0;
+
+  const rInfo = computeWorkReleaseInfo({
+    media: {
+      id: work?.id ?? (parseInt(workId, 10) || 0),
+      type: (work?.type as AniListMedia["type"]) || "ANIME",
+      status: work?.status,
+      episodes: work?.episodes,
+      chapters: work?.chapters,
+      endDate: work?.endDate,
+      nextAiringEpisode: work?.nextAiringEpisode
+        ? {
+            episode: work.nextAiringEpisode.episode ?? 1,
+            airingAt: work.nextAiringEpisode.airingAt ?? 0,
+          }
+        : null,
+    },
+    override,
+    pauseInfo,
+  });
+
+  let editorMode: ScheduleEditorMode = "ANILIST";
+  if (override?.rhythmType === "flexible") {
+    editorMode = "FLEXIBLE";
+  } else if (
+    typeof override?.airingAt === "number" &&
+    override.airingAt > 0 &&
+    override.weeklyDay === undefined
+  ) {
+    editorMode = "EXACT";
+  } else if (override?.weeklyDay !== undefined) {
+    editorMode = "WEEKLY";
+  }
+
+  const baseAiringSec =
+    override?.airingAt ||
+    rInfo.airingAt ||
+    work?.nextAiringEpisode?.airingAt ||
+    Math.floor(Date.now() / 1000) + 3600;
+  const baseDate = new Date(baseAiringSec * 1000);
+
+  const localIso = new Date(
+    baseDate.getTime() - baseDate.getTimezoneOffset() * 60000
+  )
+    .toISOString()
+    .slice(0, 16);
+
+  return {
+    manualMaxEpisode,
+    manualAvailableEps,
+    synchroOffset,
+    syncOffsetDays,
+    editorMode,
+    editorDay:
+      override?.weeklyDay !== undefined ? override.weeklyDay : baseDate.getDay(),
+    editorTime: override?.weeklyTime || format(baseDate, "HH:mm"),
+    editorFreqWeeks: Math.max(1, Number(override?.releaseFrequency) || 1),
+    editorStartDate: override?.startDate || "",
+    editorFlexMinDay: override?.flexibleDayRange?.minDay ?? 4,
+    editorFlexMaxDay: override?.flexibleDayRange?.maxDay ?? 0,
+    editorExactDateTime: localIso,
+    localPause: pauseInfo || null,
+  };
+}
+
+export function WorkSettingsModal(props: WorkSettingsModalProps) {
+  if (!props.isOpen) return null;
+  return (
+    <WorkSettingsModalContent
+      key={`${props.workId}_${props.initialTab || "LIMITS"}`}
+      {...props}
+    />
+  );
+}
+
+function WorkSettingsModalContent({
   onClose,
   workId,
   work,
@@ -94,33 +247,63 @@ export function WorkSettingsModal({
   const isManga = work?.type === "MANGA";
   const unitPlural = isManga ? "Kapitel" : "Folgen";
   const title =
-    work?.title?.english || work?.title?.romaji || `Werk #${workId}`;
+    work?.title?.english ||
+    work?.title?.romaji ||
+    work?.title?.native ||
+    `Werk #${workId}`;
   const cover =
     work?.coverImage?.large ||
     work?.coverImage?.extraLarge ||
     work?.coverImage?.medium ||
     "";
 
+  const [initial] = useState(() =>
+    computeInitialModalState(workId, work, override, pauseInfo, userWork)
+  );
+
   const [activeTab, setActiveTab] = useState<WorkSettingsTab>(initialTab);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Tab 1: Limits & Available Count
-  const [manualMaxEpisode, setManualMaxEpisode] = useState<number | "">("");
-  const [manualAvailableEps, setManualAvailableEps] = useState<number | "">("");
-  const [synchroOffset, setSynchroOffset] = useState<number | "">(0);
+  // Tab 1: Limits & Available Count + Personal Dub Offset
+  const [manualMaxEpisode, setManualMaxEpisode] = useState<number | "">(
+    initial.manualMaxEpisode
+  );
+  const [manualAvailableEps, setManualAvailableEps] = useState<number | "">(
+    initial.manualAvailableEps
+  );
+  const [synchroOffset, setSynchroOffset] = useState<number | "">(
+    initial.synchroOffset
+  );
+  const [syncOffsetDays, setSyncOffsetDays] = useState<number>(
+    initial.syncOffsetDays
+  );
 
   // Tab 2: Release Schedule
-  const [editorMode, setEditorMode] = useState<ScheduleEditorMode>("ANILIST");
-  const [editorDay, setEditorDay] = useState<number>(1);
-  const [editorTime, setEditorTime] = useState<string>("18:00");
-  const [editorFreqWeeks, setEditorFreqWeeks] = useState<number>(1);
-  const [editorStartDate, setEditorStartDate] = useState<string>("");
-  const [editorFlexMinDay, setEditorFlexMinDay] = useState<number>(4);
-  const [editorFlexMaxDay, setEditorFlexMaxDay] = useState<number>(0);
-  const [editorExactDateTime, setEditorExactDateTime] = useState<string>("");
+  const [editorMode, setEditorMode] = useState<ScheduleEditorMode>(
+    initial.editorMode
+  );
+  const [editorDay, setEditorDay] = useState<number>(initial.editorDay);
+  const [editorTime, setEditorTime] = useState<string>(initial.editorTime);
+  const [editorFreqWeeks, setEditorFreqWeeks] = useState<number>(
+    initial.editorFreqWeeks
+  );
+  const [editorStartDate, setEditorStartDate] = useState<string>(
+    initial.editorStartDate
+  );
+  const [editorFlexMinDay, setEditorFlexMinDay] = useState<number>(
+    initial.editorFlexMinDay
+  );
+  const [editorFlexMaxDay, setEditorFlexMaxDay] = useState<number>(
+    initial.editorFlexMaxDay
+  );
+  const [editorExactDateTime, setEditorExactDateTime] = useState<string>(
+    initial.editorExactDateTime
+  );
 
   // Tab 3: Pause
-  const [localPause, setLocalPause] = useState<WorkPauseRecord | null>(null);
+  const [localPause, setLocalPause] = useState<WorkPauseRecord | null>(
+    initial.localPause
+  );
   const [customPauseDate, setCustomPauseDate] = useState<string>("");
 
   const aniListTotal = useMemo(() => {
@@ -143,93 +326,66 @@ export function WorkSettingsModal({
     );
   }, [localPause]);
 
-  // Hydrate form state whenever modal opens
-  useEffect(() => {
-    if (!isOpen) return;
+  // Live preview of Dub staggered ending / schedule based on currently entered inputs
+  const dubPreviewInfo = useMemo(() => {
+    if (isManga || !userWork?.inLibrary) return null;
+    const numericOffset =
+      synchroOffset === "" ? 0 : Math.max(0, Number(synchroOffset));
+    if (numericOffset <= 0 && syncOffsetDays === 0) return null;
 
-    setActiveTab(initialTab);
-    setCustomPauseDate("");
-    setLocalPause(pauseInfo || null);
+    const previewMedia: AniListMedia = {
+      id: work?.id ?? (parseInt(workId, 10) || 0),
+      type: (work?.type as AniListMedia["type"]) || "ANIME",
+      status: work?.status,
+      episodes: work?.episodes,
+      chapters: work?.chapters,
+      endDate: work?.endDate,
+      nextAiringEpisode: work?.nextAiringEpisode
+        ? {
+            episode: work.nextAiringEpisode.episode ?? 1,
+            airingAt: work.nextAiringEpisode.airingAt ?? 0,
+          }
+        : null,
+    };
 
-    const maxVal =
-      override?.manualMaxEpisode != null && Number(override.manualMaxEpisode) > 0
-        ? Number(override.manualMaxEpisode)
-        : "";
-    setManualMaxEpisode(maxVal);
-
-    const loadedMax = maxVal !== "" ? maxVal : aniListTotal;
-    const rawAvail =
-      override?.manualAvailableEps ?? userWork?.manual_available_eps ?? null;
-    if (rawAvail !== null && rawAvail !== undefined) {
-      const clamped =
-        loadedMax !== null
-          ? Math.min(Math.max(0, Number(rawAvail)), loadedMax)
-          : Math.max(0, Number(rawAvail));
-      setManualAvailableEps(clamped);
-    } else {
-      setManualAvailableEps("");
-    }
-
-    setSynchroOffset(
-      typeof userWork?.synchro_offset_episodes === "number"
-        ? userWork.synchro_offset_episodes
-        : 0
-    );
-
-    const rInfo = computeWorkReleaseInfo({
-      media: work,
-      override,
-      pauseInfo,
+    return computeWorkReleaseInfo({
+      media: previewMedia,
+      override: {
+        ...(override || { work_id: workId }),
+        ...(manualMaxEpisode !== ""
+          ? { manualMaxEpisode: Number(manualMaxEpisode) }
+          : {}),
+        ...(manualAvailableEps !== ""
+          ? { manualAvailableEps: Number(manualAvailableEps) }
+          : {}),
+      },
+      pauseInfo: localPause,
+      userWork: {
+        ...userWork,
+        synchro_offset_episodes: numericOffset,
+        sync_offset_days: syncOffsetDays,
+      },
     });
-
-    let initialMode: ScheduleEditorMode = "ANILIST";
-    if (override?.rhythmType === "flexible") {
-      initialMode = "FLEXIBLE";
-    } else if (
-      typeof override?.airingAt === "number" &&
-      override.airingAt > 0 &&
-      override.weeklyDay === undefined
-    ) {
-      initialMode = "EXACT";
-    } else if (override?.weeklyDay !== undefined) {
-      initialMode = "WEEKLY";
-    }
-
-    const baseAiringSec =
-      override?.airingAt ||
-      rInfo.airingAt ||
-      work?.nextAiringEpisode?.airingAt ||
-      Math.floor(Date.now() / 1000) + 3600;
-    const baseDate = new Date(baseAiringSec * 1000);
-
-    setEditorMode(initialMode);
-    setEditorDay(
-      override?.weeklyDay !== undefined ? override.weeklyDay : baseDate.getDay()
-    );
-    setEditorTime(override?.weeklyTime || format(baseDate, "HH:mm"));
-    setEditorFreqWeeks(Math.max(1, Number(override?.releaseFrequency) || 1));
-    setEditorStartDate(override?.startDate || "");
-    setEditorFlexMinDay(override?.flexibleDayRange?.minDay ?? 4);
-    setEditorFlexMaxDay(override?.flexibleDayRange?.maxDay ?? 0);
-
-    const localIso = new Date(
-      baseDate.getTime() - baseDate.getTimezoneOffset() * 60000
-    )
-      .toISOString()
-      .slice(0, 16);
-    setEditorExactDateTime(localIso);
-  }, [isOpen, workId, initialTab, override, pauseInfo, userWork, work, aniListTotal]);
+  }, [
+    isManga,
+    userWork,
+    synchroOffset,
+    syncOffsetDays,
+    work,
+    workId,
+    override,
+    manualMaxEpisode,
+    manualAvailableEps,
+    localPause,
+  ]);
 
   useEffect(() => {
-    if (!isOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !isSaving) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [isOpen, isSaving, onClose]);
-
-  if (!isOpen) return null;
+  }, [isSaving, onClose]);
 
   const isWorkFinishedOrComplete =
     work?.status === "CANCELLED" ||
@@ -241,17 +397,36 @@ export function WorkSettingsModal({
         manualAvailableEps === "" ||
         Number(manualAvailableEps) >= effectiveMax));
 
-  const emitSaved = async (overrideResult?: Partial<WorkSettingsSaveResult>) => {
+  const emitSaved = async (
+    overrideResult?: Partial<WorkSettingsSaveResult>
+  ) => {
     if (!onSaved) return;
     await onSaved({
       manualMaxEpisode,
       manualAvailableEps,
       synchroOffset,
+      syncOffsetDays,
       hasCustomOverride: editorMode !== "ANILIST" && !isWorkFinishedOrComplete,
       isPaused: isPauseActive,
       pausedUntil: localPause?.paused_until || "",
       ...overrideResult,
     });
+  };
+
+  const handleDubSkipOneWeek = () => {
+    if (work?.status === "FINISHED") {
+      // Sub is already finished -> shift staggered Dub ending dates back by 7 days
+      setSyncOffsetDays((prev) => prev + 7);
+      toast.info(
+        "Dub-Nachlauf um +7 Tage verschoben. Klicke auf Speichern, um es zu übernehmen."
+      );
+    } else {
+      // Sub is still airing -> Dub falls 1 more episode behind
+      setSynchroOffset((prev) => (prev === "" ? 1 : Number(prev) + 1));
+      toast.info(
+        "Synchro-Versatz um +1 Folge erhöht (1 Woche Dub-Pause). Klicke auf Speichern."
+      );
+    }
   };
 
   const handleSave = async () => {
@@ -294,8 +469,7 @@ export function WorkSettingsModal({
 
       const maxParam =
         manualMaxEpisode === "" ? undefined : Number(manualMaxEpisode);
-      const availParam =
-        sanitizedAvailable === null ? (null as any) : sanitizedAvailable;
+      const availParam = sanitizedAvailable;
 
       if (shouldClearSchedule) {
         await resetScheduleOverride(workId);
@@ -312,75 +486,83 @@ export function WorkSettingsModal({
         const parsed = new Date(editorExactDateTime);
         const unixSec = Math.floor(parsed.getTime() / 1000);
         if (Number.isNaN(unixSec) || unixSec <= 0) {
-          alert("Bitte ein gültiges Datum & Uhrzeit wählen.");
+          toast.error("Bitte ein gültiges Datum & Uhrzeit wählen.");
           setIsSaving(false);
           return;
         }
         await setCalendarOverride(
           workId,
           unixSec,
-          null as any,
-          null as any,
+          null,
+          null,
           maxParam,
           editorFreqWeeks,
           availParam,
           undefined,
-          editorStartDate || (null as any),
+          editorStartDate || null,
           "strict",
-          null as any
+          null
         );
       } else if (editorMode === "FLEXIBLE") {
         await setCalendarOverride(
           workId,
-          null as any,
+          null,
           editorFlexMinDay,
           editorTime || "18:00",
           maxParam,
           editorFreqWeeks,
           availParam,
           undefined,
-          editorStartDate || (null as any),
+          editorStartDate || null,
           "flexible",
           { minDay: editorFlexMinDay, maxDay: editorFlexMaxDay }
         );
       } else {
         await setCalendarOverride(
           workId,
-          null as any,
+          null,
           editorDay,
           editorTime || "18:00",
           maxParam,
           editorFreqWeeks,
           availParam,
           undefined,
-          editorStartDate || (null as any),
+          editorStartDate || null,
           "strict",
-          null as any
+          null
         );
       }
 
-      // Sync personal synchro offset (Anime only) & clear legacy per-user manual_available_eps
+      // Sync personal synchro offsets (Anime only) & clear legacy per-user manual_available_eps
       // so global calendar_overrides.manualAvailableEps is always authoritative.
       // IMPORTANT: NEVER touch current_episode here!
+      const cleanSynchroOffset = isManga
+        ? 0
+        : synchroOffset === ""
+        ? 0
+        : Math.max(0, Number(synchroOffset));
+      const cleanSyncDays = isManga ? 0 : Math.trunc(Number(syncOffsetDays) || 0);
+
       if (userWork?.inLibrary) {
         await saveUserWork(user.uid, workId, {
-          synchro_offset_episodes: isManga
-            ? 0
-            : synchroOffset === ""
-            ? 0
-            : Math.max(0, Number(synchroOffset)),
+          synchro_offset_episodes: cleanSynchroOffset,
+          sync_offset_days: cleanSyncDays,
           manual_available_eps: null,
         });
       }
 
       await emitSaved({
-        manualAvailableEps: sanitizedAvailable === null ? "" : sanitizedAvailable,
+        manualAvailableEps:
+          sanitizedAvailable === null ? "" : sanitizedAvailable,
+        synchroOffset: cleanSynchroOffset,
+        syncOffsetDays: cleanSyncDays,
         hasCustomOverride: !shouldClearSchedule,
       });
+      toast.success("Einstellungen gespeichert.");
       onClose();
     } catch (err) {
       console.error("Failed to save work settings:", err);
-      alert("Fehler beim Speichern der Einstellungen.");
+      toast.error("Fehler beim Speichern der Einstellungen.");
     } finally {
       setIsSaving(false);
     }
@@ -403,10 +585,11 @@ export function WorkSettingsModal({
         isPaused: false,
         pausedUntil: "",
       });
+      toast.success("Release-Takt & Pause auf AniList-Standard zurückgesetzt.");
       onClose();
     } catch (err) {
       console.error("Failed to reset schedule:", err);
-      alert("Fehler beim Zurücksetzen.");
+      toast.error("Fehler beim Zurücksetzen.");
     } finally {
       setIsSaving(false);
     }
@@ -433,7 +616,12 @@ export function WorkSettingsModal({
         untilIso = INDEFINITE_PAUSE_UNTIL;
         await pauseWorkIndefinitely(workId, user.uid);
       } else if (mode === "CUSTOM" && customPauseDate) {
-        const untilDate = new Date(customPauseDate);
+        const untilDate = parseLocalDate(customPauseDate);
+        if (!untilDate) {
+          toast.error("Bitte ein gültiges Datum auswählen.");
+          setIsSaving(false);
+          return;
+        }
         untilDate.setHours(23, 59, 59, 999);
         untilIso = untilDate.toISOString();
         await pauseWorkUntil(workId, user.uid, untilIso);
@@ -447,10 +635,11 @@ export function WorkSettingsModal({
         };
         setLocalPause(nextPause);
         await emitSaved({ isPaused: true, pausedUntil: untilIso });
+        toast.success("Globale Pause aktiviert.");
       }
     } catch (err) {
       console.error("Failed to pause work:", err);
-      alert("Fehler beim Pausieren.");
+      toast.error("Fehler beim Pausieren.");
     } finally {
       setIsSaving(false);
     }
@@ -463,15 +652,17 @@ export function WorkSettingsModal({
       await unpauseWork(workId);
       setLocalPause(null);
       await emitSaved({ isPaused: false, pausedUntil: "" });
+      toast.success("Pause aufgehoben.");
     } catch (err) {
       console.error("Failed to unpause work:", err);
-      alert("Fehler beim Aufheben der Pause.");
+      toast.error("Fehler beim Aufheben der Pause.");
     } finally {
       setIsSaving(false);
     }
   };
 
-  const hasActiveSchedule = editorMode !== "ANILIST" && !isWorkFinishedOrComplete;
+  const hasActiveSchedule =
+    editorMode !== "ANILIST" && !isWorkFinishedOrComplete;
 
   return (
     <div
@@ -479,7 +670,7 @@ export function WorkSettingsModal({
       onClick={() => !isSaving && onClose()}
     >
       <div
-        className="w-full max-w-md rounded-2xl border border-gray-800 bg-[#151821] shadow-2xl flex flex-col max-h-[88vh] overflow-hidden"
+        className="w-full max-w-md rounded-2xl border border-gray-800 bg-surface shadow-2xl flex flex-col max-h-[88vh] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Compact Header */}
@@ -509,13 +700,13 @@ export function WorkSettingsModal({
 
         {/* Clean 3-Tab Switcher */}
         <div className="px-4 pt-3">
-          <div className="grid grid-cols-3 gap-1 bg-[#0e1118] p-1 rounded-xl border border-gray-800/80">
+          <div className="grid grid-cols-3 gap-1 bg-surface-inset p-1 rounded-xl border border-gray-800/80">
             <button
               type="button"
               onClick={() => setActiveTab("LIMITS")}
               className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition-colors ${
                 activeTab === "LIMITS"
-                  ? "bg-blue-600 text-white shadow-sm"
+                  ? "bg-accent text-white shadow-sm"
                   : "text-gray-400 hover:text-gray-200"
               }`}
             >
@@ -527,7 +718,7 @@ export function WorkSettingsModal({
               onClick={() => setActiveTab("SCHEDULE")}
               className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-semibold transition-colors ${
                 activeTab === "SCHEDULE"
-                  ? "bg-blue-600 text-white shadow-sm"
+                  ? "bg-accent text-white shadow-sm"
                   : "text-gray-400 hover:text-gray-200"
               }`}
             >
@@ -536,7 +727,7 @@ export function WorkSettingsModal({
               {hasActiveSchedule && (
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${
-                    activeTab === "SCHEDULE" ? "bg-white" : "bg-blue-400"
+                    activeTab === "SCHEDULE" ? "bg-white" : "bg-accent-text"
                   }`}
                 />
               )}
@@ -567,7 +758,7 @@ export function WorkSettingsModal({
         <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
           {activeTab === "LIMITS" && (
             <>
-              <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3.5 flex flex-col gap-3.5">
+              <div className="rounded-xl border border-gray-800/90 bg-surface-inset p-3.5 flex flex-col gap-3.5">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <label className="block text-xs font-bold text-white">
@@ -585,10 +776,12 @@ export function WorkSettingsModal({
                     value={manualAvailableEps}
                     onChange={(e) =>
                       setManualAvailableEps(
-                        e.target.value === "" ? "" : Math.max(0, parseInt(e.target.value, 10) || 0)
+                        e.target.value === ""
+                          ? ""
+                          : Math.max(0, parseInt(e.target.value, 10) || 0)
                       )
                     }
-                    className="w-24 bg-[#181c27] border border-gray-700 rounded-xl px-3 py-2 text-sm font-bold text-white text-center focus:outline-none focus:border-blue-500 shrink-0"
+                    className="w-24 bg-surface-control border border-gray-700 rounded-xl px-3 py-2 text-sm font-bold text-white text-center focus:outline-none focus:border-accent-border-strong shrink-0"
                   />
                 </div>
 
@@ -608,41 +801,136 @@ export function WorkSettingsModal({
                     value={manualMaxEpisode}
                     onChange={(e) =>
                       setManualMaxEpisode(
-                        e.target.value === "" ? "" : Math.max(1, parseInt(e.target.value, 10) || 1)
+                        e.target.value === ""
+                          ? ""
+                          : Math.max(1, parseInt(e.target.value, 10) || 1)
                       )
                     }
-                    className="w-24 bg-[#181c27] border border-gray-700 rounded-xl px-3 py-2 text-sm font-bold text-white text-center focus:outline-none focus:border-blue-500 shrink-0"
+                    className="w-24 bg-surface-control border border-gray-700 rounded-xl px-3 py-2 text-sm font-bold text-white text-center focus:outline-none focus:border-accent-border-strong shrink-0"
                   />
                 </div>
               </div>
 
-              {/* Synchro offset ONLY for Anime (personal setting) */}
+              {/* Personal Dub Offset & Staggered Ending / Break-Week Support (Anime only) */}
               {!isManga && (
-                <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3.5 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
+                <div className="rounded-xl border border-gray-800/90 bg-surface-inset p-3.5 flex flex-col gap-3">
+                  <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5">
-                      <label className="text-xs font-bold text-white">
-                        Synchro-Versatz
-                      </label>
+                      <span className="text-xs font-bold text-white">
+                        Dub- &amp; Synchro-Versatz
+                      </span>
                       <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-white/5 text-gray-400 border border-white/10">
                         Nur für dich
                       </span>
                     </div>
-                    <p className="text-[11px] text-gray-400 leading-snug mt-0.5">
-                      Wie viele Folgen hinkt dein Dub hinterher?
-                    </p>
+                    {(synchroOffset !== 0 && synchroOffset !== "") ||
+                    syncOffsetDays !== 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSynchroOffset(0);
+                          setSyncOffsetDays(0);
+                        }}
+                        className="text-[10px] font-semibold text-gray-400 hover:text-white transition"
+                      >
+                        Zurücksetzen
+                      </button>
+                    ) : null}
                   </div>
-                  <input
-                    type="number"
-                    min={0}
-                    value={synchroOffset}
-                    onChange={(e) =>
-                      setSynchroOffset(
-                        e.target.value === "" ? "" : Math.max(0, parseInt(e.target.value, 10) || 0)
-                      )
-                    }
-                    className="w-20 bg-[#181c27] border border-gray-700 rounded-xl px-3 py-2 text-sm font-bold text-white text-center focus:outline-none focus:border-blue-500 shrink-0"
-                  />
+
+                  {!userWork?.inLibrary ? (
+                    <p className="text-[11px] text-gray-400 leading-snug">
+                      Füge diesen Anime zuerst deiner Bibliothek hinzu, um deinen persönlichen Dub-Versatz zu speichern.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <label className="block text-xs font-semibold text-gray-200">
+                            Folgen-Versatz
+                          </label>
+                          <p className="text-[11px] text-gray-400 leading-snug mt-0.5">
+                            Wie viele Folgen hinkt dein Dub dem Sub hinterher?
+                          </p>
+                        </div>
+                        <input
+                          type="number"
+                          min={0}
+                          value={synchroOffset}
+                          onChange={(e) =>
+                            setSynchroOffset(
+                              e.target.value === ""
+                                ? ""
+                                : Math.max(0, parseInt(e.target.value, 10) || 0)
+                            )
+                          }
+                          className="w-20 bg-surface-control border border-gray-700 rounded-xl px-3 py-2 text-sm font-bold text-white text-center focus:outline-none focus:border-accent-border-strong shrink-0"
+                        />
+                      </div>
+
+                      <div className="border-t border-gray-800/80 pt-3 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <label className="block text-xs font-semibold text-gray-200">
+                            Tage-Versatz (optional)
+                          </label>
+                          <p className="text-[11px] text-gray-400 leading-snug mt-0.5">
+                            Z. B. +2 wenn der Dub 2 Tage später kommt, oder +7 bei Aussetzer
+                          </p>
+                        </div>
+                        <input
+                          type="number"
+                          min={-30}
+                          max={365}
+                          value={syncOffsetDays}
+                          onChange={(e) =>
+                            setSyncOffsetDays(
+                              Math.max(
+                                -30,
+                                Math.min(365, parseInt(e.target.value, 10) || 0)
+                              )
+                            )
+                          }
+                          className="w-20 bg-surface-control border border-gray-700 rounded-xl px-3 py-2 text-sm font-bold text-white text-center focus:outline-none focus:border-accent-border-strong shrink-0"
+                        />
+                      </div>
+
+                      {/* 1-Click Dub Break Week ("Aussetzen") */}
+                      <div className="border-t border-gray-800/80 pt-3 flex flex-col gap-2">
+                        <button
+                          type="button"
+                          onClick={handleDubSkipOneWeek}
+                          className="w-full py-2 px-3 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-200 text-xs font-semibold transition flex items-center justify-center gap-1.5"
+                        >
+                          <PauseCircle size={13} />
+                          Dub setzt diese Woche aus (
+                          {work?.status === "FINISHED"
+                            ? "+7 Tage Nachlauf"
+                            : "+1 Folge Versatz"}
+                          )
+                        </button>
+
+                        {dubPreviewInfo?.isStaggeredDubEnding && (
+                          <div className="rounded-lg border border-accent-border bg-accent-soft px-2.5 py-2 text-[11px] text-accent-soft-text leading-snug">
+                            <span className="font-bold">Dub-Nachlauf aktiv:</span>{" "}
+                            Sub ist beendet, noch{" "}
+                            <span className="font-bold">
+                              {dubPreviewInfo.dubRemainingEpisodes}
+                            </span>{" "}
+                            Dub-Folge
+                            {dubPreviewInfo.dubRemainingEpisodes === 1 ? "" : "n"}{" "}
+                            ausstehend
+                            {dubPreviewInfo.airingAt
+                              ? ` (nächste ca. ${format(
+                                  new Date(dubPreviewInfo.airingAt * 1000),
+                                  "dd.MM., HH:mm"
+                                )})`
+                              : ""}
+                            .
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </>
@@ -651,12 +939,12 @@ export function WorkSettingsModal({
           {activeTab === "SCHEDULE" && (
             <>
               {isWorkFinishedOrComplete && (
-                <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-200">
+                <div className="rounded-xl border border-accent-border bg-accent-soft px-3 py-2 text-[11px] text-accent-soft-text">
                   Alle {unitPlural} sind bereits erschienen – ein wiederkehrender Takt wird beim Speichern automatisch deaktiviert.
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-1.5 bg-[#0e1118] p-1.5 rounded-xl border border-gray-800/80">
+              <div className="grid grid-cols-2 gap-1.5 bg-surface-inset p-1.5 rounded-xl border border-gray-800/80">
                 {(
                   [
                     {
@@ -687,7 +975,7 @@ export function WorkSettingsModal({
                     onClick={() => setEditorMode(mode.id)}
                     className={`flex flex-col items-start p-2.5 rounded-lg text-left transition border ${
                       editorMode === mode.id
-                        ? "bg-blue-600/20 border-blue-500/60 text-white"
+                        ? "bg-accent-soft border-accent-border-strong text-white"
                         : "bg-transparent border-transparent text-gray-400 hover:text-gray-200 hover:bg-white/[0.03]"
                     }`}
                   >
@@ -700,24 +988,18 @@ export function WorkSettingsModal({
               </div>
 
               {editorMode === "WEEKLY" && (
-                <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3.5 flex flex-col gap-3">
+                <div className="rounded-xl border border-gray-800/90 bg-surface-inset p-3.5 flex flex-col gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-400 mb-1.5">
+                      Wochentag
+                    </label>
+                    <WeekdayPillPicker
+                      value={editorDay}
+                      onChange={setEditorDay}
+                    />
+                  </div>
+
                   <div className="grid grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-gray-400 mb-1">
-                        Wochentag
-                      </label>
-                      <select
-                        value={editorDay}
-                        onChange={(e) => setEditorDay(Number(e.target.value))}
-                        className="w-full bg-[#181c27] border border-gray-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-                      >
-                        {DAYS.map((d) => (
-                          <option key={d.value} value={d.value}>
-                            {d.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
                     <div>
                       <label className="block text-[11px] font-semibold text-gray-400 mb-1">
                         Uhrzeit
@@ -726,12 +1008,9 @@ export function WorkSettingsModal({
                         type="time"
                         value={editorTime}
                         onChange={(e) => setEditorTime(e.target.value)}
-                        className="w-full bg-[#181c27] border border-gray-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                        className="w-full bg-surface-control border border-gray-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-accent-border-strong"
                       />
                     </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2.5">
                     <div>
                       <label className="block text-[11px] font-semibold text-gray-400 mb-1">
                         Alle X Wochen
@@ -750,7 +1029,7 @@ export function WorkSettingsModal({
                               )
                             )
                           }
-                          className="w-16 bg-[#181c27] border border-gray-700 rounded-xl px-2.5 py-2 text-xs font-bold text-white text-center focus:outline-none focus:border-blue-500"
+                          className="w-16 bg-surface-control border border-gray-700 rounded-xl px-2.5 py-2 text-xs font-bold text-white text-center focus:outline-none focus:border-accent-border-strong"
                         />
                         <span className="text-[11px] text-gray-400">
                           {editorFreqWeeks === 1
@@ -759,60 +1038,41 @@ export function WorkSettingsModal({
                         </span>
                       </div>
                     </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-gray-400 mb-1">
-                        Startdatum (Optional)
-                      </label>
-                      <input
-                        type="date"
-                        value={editorStartDate}
-                        onChange={(e) => setEditorStartDate(e.target.value)}
-                        className="w-full bg-[#181c27] border border-gray-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-400 mb-1">
+                      Startdatum (Optional)
+                    </label>
+                    <input
+                      type="date"
+                      value={editorStartDate}
+                      onChange={(e) => setEditorStartDate(e.target.value)}
+                      className="w-full bg-surface-control border border-gray-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-accent-border-strong"
+                    />
                   </div>
                 </div>
               )}
 
               {editorMode === "FLEXIBLE" && (
-                <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3.5 flex flex-col gap-3">
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-gray-400 mb-1">
-                        Frühestens ab
-                      </label>
-                      <select
-                        value={editorFlexMinDay}
-                        onChange={(e) =>
-                          setEditorFlexMinDay(Number(e.target.value))
-                        }
-                        className="w-full bg-[#181c27] border border-gray-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-                      >
-                        {DAYS.map((d) => (
-                          <option key={d.value} value={d.value}>
-                            {d.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-gray-400 mb-1">
-                        Spätestens bis
-                      </label>
-                      <select
-                        value={editorFlexMaxDay}
-                        onChange={(e) =>
-                          setEditorFlexMaxDay(Number(e.target.value))
-                        }
-                        className="w-full bg-[#181c27] border border-gray-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-                      >
-                        {DAYS.map((d) => (
-                          <option key={d.value} value={d.value}>
-                            {d.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                <div className="rounded-xl border border-gray-800/90 bg-surface-inset p-3.5 flex flex-col gap-3">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-400 mb-1.5">
+                      Frühestens ab
+                    </label>
+                    <WeekdayPillPicker
+                      value={editorFlexMinDay}
+                      onChange={setEditorFlexMinDay}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-gray-400 mb-1.5">
+                      Spätestens bis
+                    </label>
+                    <WeekdayPillPicker
+                      value={editorFlexMaxDay}
+                      onChange={setEditorFlexMaxDay}
+                    />
                   </div>
 
                   <div className="grid grid-cols-2 gap-2.5">
@@ -833,7 +1093,7 @@ export function WorkSettingsModal({
                             )
                           )
                         }
-                        className="w-full bg-[#181c27] border border-gray-700 rounded-xl px-2.5 py-2 text-xs font-bold text-white focus:outline-none focus:border-blue-500"
+                        className="w-full bg-surface-control border border-gray-700 rounded-xl px-2.5 py-2 text-xs font-bold text-white focus:outline-none focus:border-accent-border-strong"
                       />
                     </div>
                     <div>
@@ -844,7 +1104,7 @@ export function WorkSettingsModal({
                         type="date"
                         value={editorStartDate}
                         onChange={(e) => setEditorStartDate(e.target.value)}
-                        className="w-full bg-[#181c27] border border-gray-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                        className="w-full bg-surface-control border border-gray-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-accent-border-strong"
                       />
                     </div>
                   </div>
@@ -852,7 +1112,7 @@ export function WorkSettingsModal({
               )}
 
               {editorMode === "EXACT" && (
-                <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3.5 flex flex-col gap-3">
+                <div className="rounded-xl border border-gray-800/90 bg-surface-inset p-3.5 flex flex-col gap-3">
                   <div>
                     <label className="block text-[11px] font-semibold text-gray-400 mb-1">
                       Nächster Release (Datum &amp; Uhrzeit)
@@ -861,7 +1121,7 @@ export function WorkSettingsModal({
                       type="datetime-local"
                       value={editorExactDateTime}
                       onChange={(e) => setEditorExactDateTime(e.target.value)}
-                      className="w-full bg-[#181c27] border border-gray-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
+                      className="w-full bg-surface-control border border-gray-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-accent-border-strong"
                     />
                   </div>
                   <div className="flex items-center justify-between gap-2">
@@ -881,14 +1141,14 @@ export function WorkSettingsModal({
                           )
                         )
                       }
-                      className="w-20 bg-[#181c27] border border-gray-700 rounded-xl px-2.5 py-1.5 text-xs font-bold text-white text-center focus:outline-none focus:border-blue-500"
+                      className="w-20 bg-surface-control border border-gray-700 rounded-xl px-2.5 py-1.5 text-xs font-bold text-white text-center focus:outline-none focus:border-accent-border-strong"
                     />
                   </div>
                 </div>
               )}
 
               {editorMode === "ANILIST" && (
-                <p className="text-xs text-gray-400 bg-[#10131b] border border-gray-800/80 rounded-xl px-3.5 py-3">
+                <p className="text-xs text-gray-400 bg-surface-inset border border-gray-800/80 rounded-xl px-3.5 py-3">
                   Verwendet die automatischen Release-Zeiten von AniList (ohne eigenen Timer).
                 </p>
               )}
@@ -896,7 +1156,7 @@ export function WorkSettingsModal({
           )}
 
           {activeTab === "PAUSE" && (
-            <div className="rounded-xl border border-gray-800/90 bg-[#10131b] p-3.5 flex flex-col gap-3">
+            <div className="rounded-xl border border-gray-800/90 bg-surface-inset p-3.5 flex flex-col gap-3">
               {isPauseActive ? (
                 <>
                   <div className="flex flex-col gap-0.5">
@@ -911,7 +1171,7 @@ export function WorkSettingsModal({
                     type="button"
                     disabled={isSaving}
                     onClick={handleUnpause}
-                    className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 transition"
+                    className="w-full py-2.5 rounded-xl bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 transition"
                   >
                     <Play size={13} />
                     Pause für alle aufheben
@@ -920,7 +1180,7 @@ export function WorkSettingsModal({
               ) : (
                 <>
                   <p className="text-[11px] text-gray-400">
-                    Pausiert den globalen Release-Timer für alle Nutzer (z. B. bei Manga-Pause oder Hiatus).
+                    Pausiert den globalen Release-Timer für alle Nutzer (z. B. bei Manga-Pause oder Hiatus). Für persönliche Dub-Aussetzer nutze den Tab „{unitPlural}“.
                   </p>
                   <div className="grid grid-cols-2 gap-2">
                     <button
@@ -961,7 +1221,7 @@ export function WorkSettingsModal({
                       type="date"
                       value={customPauseDate}
                       onChange={(e) => setCustomPauseDate(e.target.value)}
-                      className="flex-1 bg-[#181c27] border border-gray-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                      className="flex-1 bg-surface-control border border-gray-700 rounded-xl px-2.5 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
                     />
                     <button
                       type="button"
@@ -979,7 +1239,7 @@ export function WorkSettingsModal({
         </div>
 
         {/* Clean Footer */}
-        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-gray-800/80 bg-[#11141c]">
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-gray-800/80 bg-surface-inset">
           <button
             type="button"
             disabled={isSaving}
@@ -995,7 +1255,7 @@ export function WorkSettingsModal({
             type="button"
             disabled={isSaving}
             onClick={handleSave}
-            className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold transition shadow-md"
+            className="px-4 py-2 rounded-xl bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-xs font-bold transition shadow-md"
           >
             {isSaving ? "Speichert..." : "Speichern"}
           </button>

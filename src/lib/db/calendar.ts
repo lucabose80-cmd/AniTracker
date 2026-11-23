@@ -1,36 +1,68 @@
 import { db } from "@/lib/firebase";
-import { collection, doc, setDoc, getDoc, getDocs, deleteDoc, deleteField } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  setDoc,
+  getDoc,
+  getDocs,
+  deleteDoc,
+  deleteField,
+  FieldValue,
+} from "firebase/firestore";
+import { AniListDate, AniListMedia } from "@/types/anilist";
 
 export interface CalendarOverride {
   work_id: string;
   airingAt?: number; // Unix timestamp in seconds
   weeklyDay?: number; // 0-6 (0 = Sunday, 1 = Monday, etc.)
   weeklyTime?: string; // "HH:MM"
-  releaseFrequency?: number; // 1, 2, or 4 (weeks)
+  releaseFrequency?: number; // 1..52 (weeks)
   manualMaxEpisode?: number; // Global override for missing episode counts
-  manualAvailableEps?: number; // Global override for currently released chapters
+  manualAvailableEps?: number; // Global override for currently released chapters/episodes
   lastIncrementedAt?: number; // Unix timestamp
-  startDate?: string;           // ISO date string - when the release schedule started
-  rhythmType?: 'strict' | 'flexible'; // strict = exact weekday, flexible = range
+  startDate?: string; // YYYY-MM-DD or ISO date string
+  rhythmType?: "strict" | "flexible"; // strict = exact weekday, flexible = range
   flexibleDayRange?: {
-    minDay: number;             // e.g. 4 (Thursday)
-    maxDay: number;             // e.g. 0 (Sunday)
+    minDay: number; // e.g. 4 (Thursday)
+    maxDay: number; // e.g. 0 (Sunday)
   };
 }
 
-export async function getCalendarOverrides(): Promise<Record<string, CalendarOverride>> {
+/**
+ * Parses a "YYYY-MM-DD" date string in the user's LOCAL timezone (avoids UTC midnight shift).
+ */
+export function parseLocalDate(dateStr?: string | null): Date | null {
+  if (!dateStr) return null;
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr.trim());
+  if (dateOnly) {
+    const year = parseInt(dateOnly[1], 10);
+    const month = parseInt(dateOnly[2], 10) - 1;
+    const day = parseInt(dateOnly[3], 10);
+    const d = new Date(year, month, day, 0, 0, 0, 0);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const parsed = new Date(dateStr);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+export async function getCalendarOverrides(): Promise<
+  Record<string, CalendarOverride>
+> {
   if (!db) return {};
-  
+
   try {
     const overridesRef = collection(db, "calendar_overrides");
     const snapshot = await getDocs(overridesRef);
-    
+
     const overrides: Record<string, CalendarOverride> = {};
-    snapshot.forEach((doc) => {
-      const data = (doc.data() || {}) as CalendarOverride;
-      overrides[data.work_id || doc.id] = { ...data, work_id: data.work_id || doc.id };
+    snapshot.forEach((docSnap) => {
+      const data = (docSnap.data() || {}) as CalendarOverride;
+      overrides[data.work_id || docSnap.id] = {
+        ...data,
+        work_id: data.work_id || docSnap.id,
+      };
     });
-    
+
     return overrides;
   } catch (error) {
     console.error("Error fetching calendar overrides:", error);
@@ -38,7 +70,9 @@ export async function getCalendarOverrides(): Promise<Record<string, CalendarOve
   }
 }
 
-export async function getCalendarOverrideForWork(work_id: string): Promise<CalendarOverride | null> {
+export async function getCalendarOverrideForWork(
+  work_id: string
+): Promise<CalendarOverride | null> {
   if (!db || !work_id?.trim()) return null;
 
   try {
@@ -59,35 +93,33 @@ export async function getCalendarOverrideForWork(work_id: string): Promise<Calen
 }
 
 export async function setCalendarOverride(
-  work_id: string, 
-  airingAt?: number, 
-  weeklyDay?: number, 
-  weeklyTime?: string, 
-  manualMaxEpisode?: number,
-  releaseFrequency?: number,
-  manualAvailableEps?: number,
-  lastIncrementedAt?: number,
-  startDate?: string,
-  rhythmType?: 'strict' | 'flexible',
-  flexibleDayRange?: { minDay: number; maxDay: number }
+  work_id: string,
+  airingAt?: number | null,
+  weeklyDay?: number | null,
+  weeklyTime?: string | null,
+  manualMaxEpisode?: number | null,
+  releaseFrequency?: number | null,
+  manualAvailableEps?: number | null,
+  lastIncrementedAt?: number | null,
+  startDate?: string | null,
+  rhythmType?: "strict" | "flexible" | null,
+  flexibleDayRange?: { minDay: number; maxDay: number } | null
 ): Promise<void> {
   if (!db || !work_id?.trim()) return;
-  
+
   const cleanId = work_id.trim();
   const overrideRef = doc(db, "calendar_overrides", cleanId);
-  const data: Record<string, any> = { work_id: cleanId };
-  
-  // If airingAt is explicitly passed as null, we delete it, otherwise we set it if defined
+  const data: Record<
+    string,
+    string | number | { minDay: number; maxDay: number } | FieldValue
+  > = { work_id: cleanId };
+
   if (airingAt !== undefined) {
-    if ((airingAt as any) === null) {
-      data.airingAt = deleteField();
-    } else {
-      data.airingAt = airingAt;
-    }
+    data.airingAt = airingAt === null ? deleteField() : airingAt;
   }
 
   if (weeklyDay !== undefined) {
-    if ((weeklyDay as any) === null) {
+    if (weeklyDay === null) {
       data.weeklyDay = deleteField();
       data.weeklyTime = deleteField();
       data.releaseFrequency = deleteField();
@@ -96,69 +128,42 @@ export async function setCalendarOverride(
       data.weeklyDay = weeklyDay;
     }
   }
-  
+
   if (weeklyTime !== undefined) {
-    if ((weeklyTime as any) === null) {
-      data.weeklyTime = deleteField();
-    } else {
-      data.weeklyTime = weeklyTime;
-    }
+    data.weeklyTime = weeklyTime === null ? deleteField() : weeklyTime;
   }
 
   if (releaseFrequency !== undefined) {
-    if ((releaseFrequency as any) === null) {
-      data.releaseFrequency = deleteField();
-    } else {
-      data.releaseFrequency = releaseFrequency;
-    }
+    data.releaseFrequency =
+      releaseFrequency === null ? deleteField() : releaseFrequency;
   }
-  
+
   if (manualMaxEpisode !== undefined) {
-    if ((manualMaxEpisode as any) === null) {
-      data.manualMaxEpisode = deleteField();
-    } else {
-      data.manualMaxEpisode = manualMaxEpisode;
-    }
+    data.manualMaxEpisode =
+      manualMaxEpisode === null ? deleteField() : manualMaxEpisode;
   }
 
   if (manualAvailableEps !== undefined) {
-    if ((manualAvailableEps as any) === null) {
-      data.manualAvailableEps = deleteField();
-    } else {
-      data.manualAvailableEps = manualAvailableEps;
-    }
+    data.manualAvailableEps =
+      manualAvailableEps === null ? deleteField() : manualAvailableEps;
   }
 
   if (lastIncrementedAt !== undefined) {
-    if ((lastIncrementedAt as any) === null) {
-      data.lastIncrementedAt = deleteField();
-    } else {
-      data.lastIncrementedAt = lastIncrementedAt;
-    }
+    data.lastIncrementedAt =
+      lastIncrementedAt === null ? deleteField() : lastIncrementedAt;
   }
 
   if (startDate !== undefined) {
-    if ((startDate as any) === null) {
-      data.startDate = deleteField();
-    } else {
-      data.startDate = startDate;
-    }
+    data.startDate = startDate === null ? deleteField() : startDate;
   }
 
   if (rhythmType !== undefined) {
-    if ((rhythmType as any) === null) {
-      data.rhythmType = deleteField();
-    } else {
-      data.rhythmType = rhythmType;
-    }
+    data.rhythmType = rhythmType === null ? deleteField() : rhythmType;
   }
 
   if (flexibleDayRange !== undefined) {
-    if ((flexibleDayRange as any) === null) {
-      data.flexibleDayRange = deleteField();
-    } else {
-      data.flexibleDayRange = flexibleDayRange;
-    }
+    data.flexibleDayRange =
+      flexibleDayRange === null ? deleteField() : flexibleDayRange;
   }
 
   try {
@@ -173,7 +178,12 @@ export async function clearManualMaxEpisode(work_id: string): Promise<void> {
   try {
     const cleanId = work_id.trim();
     const overrideRef = doc(db, "calendar_overrides", cleanId);
-    await setDoc(overrideRef, { manualMaxEpisode: deleteField() }, { merge: true });
+    // Always include work_id so Firestore rules pass even if the document does not exist yet
+    await setDoc(
+      overrideRef,
+      { work_id: cleanId, manualMaxEpisode: deleteField() },
+      { merge: true }
+    );
   } catch (error) {
     console.error(`Error clearing manual max episode for work ${work_id}:`, error);
   }
@@ -191,8 +201,7 @@ export async function deleteCalendarOverride(work_id: string): Promise<void> {
 }
 
 /**
- * Resets only the release schedule override fields (airingAt, weeklyDay, weeklyTime,
- * releaseFrequency, startDate, rhythmType, flexibleDayRange) while preserving
+ * Resets only the release schedule override fields while preserving
  * manualMaxEpisode and manualAvailableEps if set.
  */
 export async function resetScheduleOverride(work_id: string): Promise<void> {
@@ -244,6 +253,8 @@ export interface ComputedWorkReleaseInfo {
   isFlexible: boolean;
   flexibleRangeLabel?: string; // e.g. "Ca. Do – So"
   frequencyWeeks: number;
+  isStaggeredDubEnding: boolean;
+  dubRemainingEpisodes: number;
   source: "EXACT_TIMER" | "RECURRING_CUSTOM" | "ANILIST" | "NONE";
 }
 
@@ -254,6 +265,28 @@ function getMondayStartOfWeekMs(timestampMs: number): number {
   d.setDate(d.getDate() - diffToMonday);
   d.setHours(0, 0, 0, 0);
   return d.getTime();
+}
+
+function getAniListEndAnchorSec(
+  endDate?: AniListDate | null,
+  weeklyTimeStr?: string,
+  syncOffsetSec: number = 0
+): number | null {
+  if (!endDate?.year) return null;
+  const [rawH, rawM] = (weeklyTimeStr || "18:00").split(":").map(Number);
+  const hours = Number.isNaN(rawH) ? 18 : rawH;
+  const minutes = Number.isNaN(rawM) ? 0 : rawM;
+  const d = new Date(
+    endDate.year,
+    (endDate.month || 1) - 1,
+    endDate.day || 1,
+    hours,
+    minutes,
+    0,
+    0
+  );
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.floor(d.getTime() / 1000) + syncOffsetSec;
 }
 
 export function formatPauseStatusLabel(pausedUntilIso?: string): string {
@@ -272,21 +305,24 @@ export function formatPauseStatusLabel(pausedUntilIso?: string): string {
 }
 
 /**
- * Bullet-proof, unified release schedule calculator across Home, Calendar, Library, and Work Detail.
+ * Unified release schedule calculator across Home, Calendar, Library, Review Feed, and Work Detail.
  * Supports:
  * - Weekly & multi-week intervals (1..52 weeks) with startDate or lastIncrementedAt anchor
  * - Exact timer / date (airingAt) with automatic roll-forward if recurring is also set
  * - Approximate / flexible Manga windows (rhythmType === 'flexible', flexibleDayRange)
- * - Active pause suspension (pushes next release beyond paused_until or marks indefinite hiatus)
+ * - Active pause suspension (pushes next release beyond paused_until without hiding already-aired eps)
+ * - Personal Dub offset (synchro_offset_episodes + sync_offset_days), including staggered Dub endings
+ *   after a show finishes Sub airing on AniList and Dub break weeks ("Aussetzen")
  */
 export function computeWorkReleaseInfo(params: {
-  media: any;
+  media?: AniListMedia | null;
   override?: CalendarOverride;
   pauseInfo?: { paused: boolean; paused_until: string } | null;
   userWork?: {
     current_episode?: number;
     status?: string;
     synchro_offset_episodes?: number;
+    sync_offset_days?: number;
     manual_max_episode?: number;
     manual_available_eps?: number | null;
   } | null;
@@ -297,9 +333,15 @@ export function computeWorkReleaseInfo(params: {
   const nowSec = Math.floor(nowMs / 1000);
   const nowIso = new Date(nowMs).toISOString();
 
+  const isAnime = media?.type !== "MANGA";
   const currentEp = Number(userWork?.current_episode) || 0;
-  const offset = Number(userWork?.synchro_offset_episodes) || 0;
+  const offset = isAnime
+    ? Math.max(0, Number(userWork?.synchro_offset_episodes) || 0)
+    : 0;
+  const syncOffsetDays = isAnime ? Number(userWork?.sync_offset_days) || 0 : 0;
+  const syncOffsetSec = Math.round(syncOffsetDays * 86400);
   const freqWeeks = Math.max(1, Number(override?.releaseFrequency) || 1);
+  const intervalSec = freqWeeks * 7 * 86400;
 
   const isGlobalPaused = Boolean(
     pauseInfo?.paused && pauseInfo.paused_until && pauseInfo.paused_until > nowIso
@@ -327,27 +369,76 @@ export function computeWorkReleaseInfo(params: {
     flexibleRangeLabel = "Ungefährer Zeitraum";
   }
 
-  // 1. Compute currently available episodes & next episode number
+  // 1. Compute total limit (max episodes / chapters)
   let totalLimit: number | null = null;
   if (override?.manualMaxEpisode != null && Number(override.manualMaxEpisode) > 0) {
     totalLimit = Number(override.manualMaxEpisode);
-  } else if (userWork?.manual_max_episode != null && Number(userWork.manual_max_episode) > 0) {
+  } else if (
+    userWork?.manual_max_episode != null &&
+    Number(userWork.manual_max_episode) > 0
+  ) {
     totalLimit = Number(userWork.manual_max_episode);
-  } else if (media?.type === "MANGA" && Number(media?.chapters) > 0) {
+  } else if (media && media.type === "MANGA" && Number(media.chapters) > 0) {
     totalLimit = Number(media.chapters);
-  } else if (media?.type !== "MANGA" && Number(media?.episodes) > 0) {
+  } else if (media && media.type !== "MANGA" && Number(media.episodes) > 0) {
     totalLimit = Number(media.episodes);
   }
 
+  // 2. Compute currently available episodes & staggered Dub state
   let availableEpisodes = 0;
   let isManualAvail = false;
   let hasKnownAvailableLimit = false;
+  let isStaggeredDubEnding = false;
+  let dubRemainingEpisodes = 0;
+  let staggeredDubNextAiringAt: number | undefined = undefined;
+  let aniListShiftedNextAiringAt: number | undefined = undefined;
+  let aniListNextEpForUser: number | undefined = undefined;
+
+  const computeStaggeredFinishedDub = (finishedTotal: number) => {
+    const endAnchorSec =
+      getAniListEndAnchorSec(media?.endDate, override?.weeklyTime, syncOffsetSec) ??
+      (override?.lastIncrementedAt
+        ? override.lastIncrementedAt + syncOffsetSec
+        : null);
+
+    if (endAnchorSec !== null) {
+      const elapsedSec = nowSec - endAnchorSec;
+      const weeksSinceEnd =
+        elapsedSec >= 0 ? Math.floor(elapsedSec / intervalSec) : 0;
+      const remainingLag = Math.max(0, offset - weeksSinceEnd);
+      availableEpisodes = Math.max(0, finishedTotal - remainingLag);
+      dubRemainingEpisodes = remainingLag;
+      if (remainingLag > 0) {
+        isStaggeredDubEnding = true;
+        const nextStep = elapsedSec < 0 ? 0 : weeksSinceEnd + 1;
+        staggeredDubNextAiringAt = endAnchorSec + nextStep * intervalSec;
+      }
+    } else {
+      // No endDate available on AniList: do not trap user permanently below total
+      availableEpisodes = finishedTotal;
+    }
+    hasKnownAvailableLimit = true;
+  };
+
   if (override?.manualAvailableEps != null) {
-    availableEpisodes = Number(override.manualAvailableEps);
+    const rawManual = Math.max(0, Number(override.manualAvailableEps));
     isManualAvail = true;
     hasKnownAvailableLimit = true;
+    if (
+      isAnime &&
+      offset > 0 &&
+      media?.status === "FINISHED" &&
+      totalLimit != null &&
+      rawManual >= totalLimit
+    ) {
+      computeStaggeredFinishedDub(totalLimit);
+    } else if (isAnime && offset > 0) {
+      availableEpisodes = Math.max(0, rawManual - offset);
+    } else {
+      availableEpisodes = rawManual;
+    }
   } else if (userWork?.manual_available_eps != null) {
-    availableEpisodes = Number(userWork.manual_available_eps);
+    availableEpisodes = Math.max(0, Number(userWork.manual_available_eps));
     isManualAvail = true;
     hasKnownAvailableLimit = true;
   } else if (media?.status === "NOT_YET_RELEASED") {
@@ -363,20 +454,51 @@ export function computeWorkReleaseInfo(params: {
     }
   } else if (media?.status === "RELEASING" && media?.nextAiringEpisode?.episode) {
     const nextEpNum = Number(media.nextAiringEpisode.episode);
-    const nextAiringAt = Number(media.nextAiringEpisode.airingAt);
-    const hasJustAired = !Number.isNaN(nextAiringAt) && nextAiringAt > 0 && nextAiringAt <= nowSec;
-    availableEpisodes = hasJustAired ? nextEpNum : Math.max(0, nextEpNum - 1);
+    const rawNextAiringAt = Number(media.nextAiringEpisode.airingAt);
+    const shiftedNext =
+      !Number.isNaN(rawNextAiringAt) && rawNextAiringAt > 0
+        ? rawNextAiringAt + syncOffsetSec
+        : 0;
+
+    if (shiftedNext > 0) {
+      if (shiftedNext <= nowSec) {
+        // Stale AniList cache: the shifted episode has already aired
+        const subAvailable = nextEpNum;
+        availableEpisodes = Math.max(0, subAvailable - offset);
+        aniListNextEpForUser = Math.max(1, nextEpNum + 1 - offset);
+        let rolled = shiftedNext;
+        while (rolled <= nowSec) rolled += intervalSec;
+        aniListShiftedNextAiringAt = rolled;
+      } else {
+        // If syncOffsetDays pushes the airing date forward across a week boundary,
+        // account for any still-pending Dub episode from the previous Sub week
+        const pendingIntervals = Math.floor((shiftedNext - nowSec) / intervalSec);
+        const subAvailable = Math.max(0, nextEpNum - 1 - pendingIntervals);
+        availableEpisodes = Math.max(0, subAvailable - offset);
+        aniListNextEpForUser = Math.max(1, nextEpNum - pendingIntervals - offset);
+        aniListShiftedNextAiringAt = shiftedNext - pendingIntervals * intervalSec;
+      }
+    } else {
+      availableEpisodes = Math.max(0, nextEpNum - 1 - offset);
+      aniListNextEpForUser = Math.max(1, nextEpNum - offset);
+    }
     hasKnownAvailableLimit = true;
   } else if (media?.status === "RELEASING") {
-    availableEpisodes = totalLimit != null ? Math.min(currentEp, totalLimit) : currentEp;
+    availableEpisodes =
+      totalLimit != null ? Math.min(currentEp, totalLimit) : currentEp;
     hasKnownAvailableLimit = totalLimit != null;
   } else if (media?.status === "FINISHED") {
-    availableEpisodes = totalLimit != null ? totalLimit : 0;
-    hasKnownAvailableLimit = totalLimit != null;
-  }
-
-  if (!isManualAvail && offset > 0) {
-    availableEpisodes = Math.max(0, availableEpisodes - offset);
+    if (totalLimit != null) {
+      if (isAnime && offset > 0) {
+        computeStaggeredFinishedDub(totalLimit);
+      } else {
+        availableEpisodes = totalLimit;
+        hasKnownAvailableLimit = true;
+      }
+    } else {
+      availableEpisodes = 0;
+      hasKnownAvailableLimit = false;
+    }
   }
 
   if (totalLimit != null && hasKnownAvailableLimit) {
@@ -388,22 +510,19 @@ export function computeWorkReleaseInfo(params: {
     : totalLimit;
 
   let nextEpisodeNumber = availableEpisodes + 1;
-  if (!isManualAvail && media?.nextAiringEpisode?.episode) {
-    const nextEpNum = Number(media.nextAiringEpisode.episode);
-    const nextAiringAt = Number(media.nextAiringEpisode.airingAt);
-    const hasJustAired = !Number.isNaN(nextAiringAt) && nextAiringAt > 0 && nextAiringAt <= nowSec;
-    const rawNext = hasJustAired ? nextEpNum + 1 : nextEpNum;
-    nextEpisodeNumber = Math.max(1, rawNext - offset);
+  if (isStaggeredDubEnding) {
+    nextEpisodeNumber = availableEpisodes + 1;
+  } else if (!isManualAvail && aniListNextEpForUser !== undefined) {
+    nextEpisodeNumber = aniListNextEpForUser;
   }
 
+  // Pausing stops future releases, but should NOT hide already-aired unwatched episodes
   const behindCount =
-    isPaused ||
-    userWork?.status === "COMPLETED" ||
-    userWork?.status === "DROPPED"
+    userWork?.status === "COMPLETED" || userWork?.status === "DROPPED"
       ? 0
       : Math.max(0, availableEpisodes - currentEp);
 
-  // 2. Compute next airing timestamp (Unix seconds)
+  // 3. Compute next airing timestamp (Unix seconds)
   let computedAiringAt: number | undefined = undefined;
   let source: ComputedWorkReleaseInfo["source"] = "NONE";
 
@@ -415,24 +534,21 @@ export function computeWorkReleaseInfo(params: {
 
   // Priority A: Exact custom timer (airingAt)
   if (typeof override?.airingAt === "number" && override.airingAt > 0) {
-    if (override.airingAt >= nowSec) {
-      computedAiringAt = override.airingAt;
+    const baseAiringAt = override.airingAt + (isAnime ? syncOffsetSec : 0);
+    if (baseAiringAt >= nowSec) {
+      computedAiringAt = baseAiringAt;
       source = "EXACT_TIMER";
     } else if (effectiveTargetDay !== undefined && effectiveTargetDay >= 0) {
-      // Exact timer has passed, but a recurring rhythm is also configured -> roll forward cleanly
-      const stepSec = freqWeeks * 7 * 24 * 3600;
-      let rolled = override.airingAt;
+      let rolled = baseAiringAt;
       while (rolled < nowSec) {
-        rolled += stepSec;
+        rolled += intervalSec;
       }
       computedAiringAt = rolled;
       source = "RECURRING_CUSTOM";
     } else if (override.releaseFrequency && override.releaseFrequency >= 1) {
-      // Exact timer with frequency -> roll forward by releaseFrequency weeks
-      const stepSec = freqWeeks * 7 * 24 * 3600;
-      let rolled = override.airingAt;
+      let rolled = baseAiringAt;
       while (rolled < nowSec) {
-        rolled += stepSec;
+        rolled += intervalSec;
       }
       computedAiringAt = rolled;
       source = "EXACT_TIMER";
@@ -463,9 +579,10 @@ export function computeWorkReleaseInfo(params: {
     candidate.setDate(candidate.getDate() + diffDays);
     let candidateSec = Math.floor(candidate.getTime() / 1000);
 
-    // Anchor calculation for multi-week intervals or future startDate
-    const startAnchorSec = override?.startDate
-      ? Math.floor(new Date(override.startDate).getTime() / 1000)
+    // Anchor calculation for multi-week intervals or future startDate (timezone-safe!)
+    const parsedStart = parseLocalDate(override?.startDate);
+    const startAnchorSec = parsedStart
+      ? Math.floor(parsedStart.getTime() / 1000)
       : override?.lastIncrementedAt || 0;
 
     if (startAnchorSec > 0 && !Number.isNaN(startAnchorSec)) {
@@ -487,10 +604,16 @@ export function computeWorkReleaseInfo(params: {
         }
         candidateSec += weeksToAdd * 7 * 24 * 3600;
       } else if (startAnchorSec > candidateSec) {
-        // Weekly schedule with a startDate in the future: jump to the first matching weekday on/after startDate
         while (candidateSec < startAnchorSec) {
           candidateSec += 7 * 24 * 3600;
         }
+      }
+    }
+
+    if (isAnime && syncOffsetSec !== 0) {
+      candidateSec += syncOffsetSec;
+      while (candidateSec < nowSec) {
+        candidateSec += intervalSec;
       }
     }
 
@@ -498,16 +621,25 @@ export function computeWorkReleaseInfo(params: {
     source = "RECURRING_CUSTOM";
   }
 
-  // Priority C: AniList nextAiringEpisode fallback
-  if (
+  // Priority C: AniList nextAiringEpisode fallback (shifted by personal sync_offset_days)
+  if (computedAiringAt === undefined && aniListShiftedNextAiringAt !== undefined) {
+    computedAiringAt = aniListShiftedNextAiringAt;
+    source = "ANILIST";
+  } else if (
     computedAiringAt === undefined &&
     typeof media?.nextAiringEpisode?.airingAt === "number"
   ) {
-    computedAiringAt = media.nextAiringEpisode.airingAt;
+    computedAiringAt = media.nextAiringEpisode.airingAt + (isAnime ? syncOffsetSec : 0);
     source = "ANILIST";
   }
 
-  // 3. If paused until a specific date (not indefinite), push the next airing date past paused_until
+  // Priority D: Staggered Dub ending schedule (after AniList marks Sub FINISHED)
+  if (computedAiringAt === undefined && staggeredDubNextAiringAt !== undefined) {
+    computedAiringAt = staggeredDubNextAiringAt;
+    source = "ANILIST";
+  }
+
+  // 4. If paused until a specific date (not indefinite), push the next airing date past paused_until
   if (
     computedAiringAt !== undefined &&
     isGlobalPaused &&
@@ -518,9 +650,8 @@ export function computeWorkReleaseInfo(params: {
       new Date(pauseInfo.paused_until).getTime() / 1000
     );
     if (!Number.isNaN(pauseUntilSec) && pauseUntilSec > computedAiringAt) {
-      const stepSec = freqWeeks * 7 * 24 * 3600;
       while (computedAiringAt <= pauseUntilSec) {
-        computedAiringAt += stepSec;
+        computedAiringAt += intervalSec;
       }
     }
   }
@@ -529,7 +660,9 @@ export function computeWorkReleaseInfo(params: {
     media?.status === "CANCELLED" ||
     (totalLimit != null && hasKnownAvailableLimit && availableEpisodes >= totalLimit) ||
     (media?.status === "FINISHED" &&
-      (totalLimit == null || (hasKnownAvailableLimit && availableEpisodes >= totalLimit)));
+      !isStaggeredDubEnding &&
+      (totalLimit == null ||
+        (hasKnownAvailableLimit && availableEpisodes >= totalLimit)));
 
   const hasSchedule = Boolean(
     !isReleaseComplete && computedAiringAt !== undefined && !isIndefinitePause
@@ -539,7 +672,9 @@ export function computeWorkReleaseInfo(params: {
     hasSchedule,
     airingAt: hasSchedule ? computedAiringAt : undefined,
     nextEpisodeNumber:
-      totalLimit != null ? Math.min(nextEpisodeNumber, totalLimit) : nextEpisodeNumber,
+      totalLimit != null
+        ? Math.min(nextEpisodeNumber, totalLimit)
+        : nextEpisodeNumber,
     availableEpisodes,
     maxAllowedProgress,
     behindCount,
@@ -550,7 +685,8 @@ export function computeWorkReleaseInfo(params: {
     isFlexible,
     flexibleRangeLabel,
     frequencyWeeks: freqWeeks,
+    isStaggeredDubEnding,
+    dubRemainingEpisodes,
     source: hasSchedule ? source : "NONE",
   };
 }
-

@@ -1,34 +1,43 @@
-'use client';
+"use client";
 
-import { useEffect } from 'react';
-import { useAppStore } from '@/lib/store';
-import { auth, db } from '@/lib/firebase';
-import { syncExistingPushToken, setupOnMessage } from '@/lib/fcm';
+import { useEffect } from "react";
+import { useAppStore, applyAccentThemeToDocument } from "@/lib/store";
+import { auth, db } from "@/lib/firebase";
+import { syncExistingPushToken, setupOnMessage } from "@/lib/fcm";
+import type { User } from "firebase/auth";
 
 export function ServiceWorkerManager() {
-  const setIsOnline = useAppStore(state => state.setIsOnline);
+  const setIsOnline = useAppStore((state) => state.setIsOnline);
+  const accentTheme = useAppStore((state) => state.accentTheme);
+
+  // Sync accent theme to <html data-accent="...">
+  useEffect(() => {
+    applyAccentThemeToDocument(accentTheme);
+  }, [accentTheme]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
 
     // Register /sw.js and unregister legacy firebase-messaging-sw.js
-    if ('serviceWorker' in navigator) {
+    if ("serviceWorker" in navigator) {
       navigator.serviceWorker
         .getRegistrations()
         .then(async (registrations) => {
           let hasMainSw = false;
           for (const registration of registrations) {
-            if (registration.active?.scriptURL.includes('firebase-messaging-sw.js')) {
+            if (
+              registration.active?.scriptURL.includes("firebase-messaging-sw.js")
+            ) {
               await registration.unregister();
-            } else if (registration.active?.scriptURL.includes('/sw.js')) {
+            } else if (registration.active?.scriptURL.includes("/sw.js")) {
               hasMainSw = true;
             }
           }
           if (!hasMainSw) {
             try {
-              await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+              await navigator.serviceWorker.register("/sw.js", { scope: "/" });
             } catch (swErr) {
-              console.warn('ServiceWorker registration failed:', swErr);
+              console.warn("ServiceWorker registration failed:", swErr);
             }
           }
         })
@@ -38,15 +47,15 @@ export function ServiceWorkerManager() {
     // Online/Offline Detection
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
     setIsOnline(navigator.onLine);
 
-    // Foreground push handler (shows system notification if browser permission is granted while app is open)
+    // Foreground push handler
     const unsubscribeForegroundFcm = setupOnMessage((payload) => {
       if (
-        typeof Notification !== 'undefined' &&
-        Notification.permission === 'granted' &&
+        typeof Notification !== "undefined" &&
+        Notification.permission === "granted" &&
         payload?.notification
       ) {
         navigator.serviceWorker.ready
@@ -55,13 +64,13 @@ export function ServiceWorkerManager() {
               payload.data?.tag ||
               `anipulse-fg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
             const notifIcon =
-              payload.notification.icon ||
+              payload.notification?.icon ||
               payload.data?.icon ||
-              '/anipulse-192x192.png';
-            reg.showNotification(payload.notification.title || 'AniPulse', {
-              body: payload.notification.body || '',
+              "/anipulse-192x192.png";
+            reg.showNotification(payload.notification?.title || "AniPulse", {
+              body: payload.notification?.body || "",
               icon: notifIcon,
-              badge: '/anipulse-badge-96.png',
+              badge: "/anipulse-badge-96.png",
               tag: notifTag,
               renotify: true,
               requireInteraction: true,
@@ -74,37 +83,50 @@ export function ServiceWorkerManager() {
       }
     });
 
-    // --- APP VERSION CHECK via Firestore ---
     let unsubscribeVersionListener: (() => void) | null = null;
+    let unsubscribeNotifications: (() => void) | null = null;
     let unsubscribeAuth: (() => void) | null = null;
+    let isDisposed = false;
 
-    const setupVersionCheck = async (user: any) => {
-      if (!user || !db) return;
-      if (unsubscribeVersionListener) return; // already set up
+    const cleanupUserListeners = () => {
+      if (unsubscribeVersionListener) {
+        unsubscribeVersionListener();
+        unsubscribeVersionListener = null;
+      }
+      if (unsubscribeNotifications) {
+        unsubscribeNotifications();
+        unsubscribeNotifications = null;
+      }
+    };
 
-      const { doc, onSnapshot, collection, setDoc } = await import('firebase/firestore');
+    const setupVersionCheck = async (user: User) => {
+      if (!user || !db || isDisposed) return;
 
-      const versionDocRef = doc(db, 'app_config', 'version');
+      const { doc, onSnapshot, collection, setDoc } = await import(
+        "firebase/firestore"
+      );
+      if (isDisposed) return;
+
+      const versionDocRef = doc(db, "app_config", "version");
 
       unsubscribeVersionListener = onSnapshot(versionDocRef, async (snap) => {
         if (!snap.exists()) return;
 
         const remoteVersion = snap.data()?.version;
-        const storedVersion = localStorage.getItem('anitracker_seen_version');
+        const storedVersion = localStorage.getItem("anitracker_seen_version");
 
         if (remoteVersion && remoteVersion !== storedVersion) {
-          localStorage.setItem('anitracker_seen_version', remoteVersion);
+          localStorage.setItem("anitracker_seen_version", remoteVersion);
 
-          // Only show notification if user has seen a version before (not first load)
           if (storedVersion !== null) {
-            const notifRef = doc(collection(db!, 'notifications'));
+            const notifRef = doc(collection(db, "notifications"));
             await setDoc(notifRef, {
               notification_id: notifRef.id,
               user_id: user.uid,
-              actor_id: 'SYSTEM',
+              actor_id: "SYSTEM",
               actor_name: `System Update (v${remoteVersion})`,
-              actor_avatar: '/anipulse-192x192.png',
-              type: 'APP_UPDATE',
+              actor_avatar: "/anipulse-192x192.png",
+              type: "APP_UPDATE",
               text: `Neu: v${remoteVersion} ist da! Klicke hier zum Aktualisieren.`,
               timestamp: new Date().toISOString(),
               read: false,
@@ -114,22 +136,25 @@ export function ServiceWorkerManager() {
       });
     };
 
-    let unsubscribeNotifications: (() => void) | null = null;
-
     (async () => {
-      const { onAuthStateChanged } = await import('firebase/auth');
+      const { onAuthStateChanged } = await import("firebase/auth");
+      if (isDisposed) return;
       unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-        if (user) {
-          setupVersionCheck(user);
+        // Always clean up previous listeners before setting up new ones
+        cleanupUserListeners();
 
-          // Automatically refresh and sync FCM token for this device if permission is already granted
+        if (user && !isDisposed) {
+          setupVersionCheck(user);
           syncExistingPushToken(user.uid).catch(console.warn);
 
-          // Setup global unread notifications listener without requiring composite index
-          const { collection, query, where, onSnapshot } = await import('firebase/firestore');
+          const { collection, query, where, onSnapshot } = await import(
+            "firebase/firestore"
+          );
+          if (isDisposed) return;
+
           const q = query(
-            collection(db!, 'notifications'),
-            where('user_id', '==', user.uid)
+            collection(db, "notifications"),
+            where("user_id", "==", user.uid)
           );
 
           unsubscribeNotifications = onSnapshot(
@@ -137,10 +162,11 @@ export function ServiceWorkerManager() {
             (snap) => {
               const unread = snap.docs.filter((d) => {
                 const data = d.data();
-                if (data?.deleted === true) {
-                  return false;
-                }
-                if (data?.type === 'NEW_EPISODE_THREAD' || data?.type === 'COMMENT_ON_THREAD') {
+                if (data?.deleted === true) return false;
+                if (
+                  data?.type === "NEW_EPISODE_THREAD" ||
+                  data?.type === "COMMENT_ON_THREAD"
+                ) {
                   return false;
                 }
                 return data?.read === false;
@@ -148,29 +174,24 @@ export function ServiceWorkerManager() {
               useAppStore.getState().setUnreadNotifications(unread);
             },
             (err) => {
-              console.error('Unread notifications listener error:', err);
+              console.error("Unread notifications listener error:", err);
             }
           );
         } else {
           useAppStore.getState().setUnreadNotifications(0);
-          if (unsubscribeNotifications) {
-            unsubscribeNotifications();
-            unsubscribeNotifications = null;
-          }
         }
       });
     })();
 
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      isDisposed = true;
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
       if (unsubscribeForegroundFcm) unsubscribeForegroundFcm();
-      if (unsubscribeVersionListener) unsubscribeVersionListener();
-      if (unsubscribeNotifications) unsubscribeNotifications();
+      cleanupUserListeners();
       if (unsubscribeAuth) unsubscribeAuth();
     };
   }, [setIsOnline]);
 
   return null;
 }
-

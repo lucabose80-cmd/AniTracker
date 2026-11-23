@@ -8,11 +8,18 @@ import {
   limit,
   orderBy,
   query,
+  runTransaction,
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
-import { ActivityFeed, EpisodeFeedback, ReviewListItem } from "@/types/database";
+import {
+  ActivityFeed,
+  EpisodeFeedback,
+  InAppNotification,
+  ReviewListItem,
+} from "@/types/database";
 import { getUserProfile } from "@/lib/db/users";
 
 export function getReviewItemTargetEpisode(item: ReviewListItem): number {
@@ -113,6 +120,43 @@ function areReviewItemsEqual(a: ReviewListItem, b: ReviewListItem): boolean {
   );
 }
 
+function buildFeedbackDoc(
+  feedbackId: string,
+  userId: string,
+  item: ReviewListItem,
+  timestamp: string,
+  activityId?: string,
+  existingReactions?: Record<string, string[]>
+): EpisodeFeedback {
+  const feedbackDoc: EpisodeFeedback = {
+    feedback_id: feedbackId,
+    user_id: userId,
+    work_id: item.work_id,
+    episode_num: item.episode_num,
+    media_type: item.media_type,
+    text: (item.text || "").slice(0, 2000),
+    timestamp,
+    reactions: existingReactions || {},
+  };
+  if (activityId) {
+    feedbackDoc.activity_id = activityId;
+  }
+  if (
+    typeof item.episode_end === "number" &&
+    !Number.isNaN(item.episode_end) &&
+    item.episode_end > item.episode_num
+  ) {
+    feedbackDoc.episode_end = item.episode_end;
+  }
+  if (Array.isArray(item.episodes) && item.episodes.length > 0) {
+    feedbackDoc.episodes = item.episodes;
+  }
+  if (typeof item.rating === "number" && !Number.isNaN(item.rating)) {
+    feedbackDoc.rating = item.rating;
+  }
+  return feedbackDoc;
+}
+
 interface ReviewUpdateAnalysis {
   hasChanges: boolean;
   addedItems: ReviewListItem[];
@@ -136,7 +180,6 @@ function analyzeReviewListUpdate(
   const usedOldIndices = new Set<number>();
   const unmatchedNew: ReviewListItem[] = [];
 
-  // Pass 1: exact matches (unchanged items)
   for (const newItem of newItems) {
     const exactIdx = oldItems.findIndex(
       (oldItem, idx) => !usedOldIndices.has(idx) && areReviewItemsEqual(oldItem, newItem)
@@ -148,7 +191,6 @@ function analyzeReviewListUpdate(
     }
   }
 
-  // Pass 2: match modified items by work_id vs newly added items
   const addedItems: ReviewListItem[] = [];
   const modifiedItems: ReviewUpdateAnalysis["modifiedItems"] = [];
 
@@ -199,6 +241,7 @@ function analyzeReviewListUpdate(
 async function notifyOtherUsersAboutReview(params: {
   userId: string;
   activityId?: string;
+  notifType: InAppNotification["type"];
   pushTitle: (actorName: string) => string;
   bodyText: string;
   link?: string;
@@ -211,19 +254,14 @@ async function notifyOtherUsersAboutReview(params: {
   let actorAvatar = "";
   try {
     const profile = await getUserProfile(params.userId);
-    if (profile?.username) {
-      actorName = profile.username;
-    }
-    if (profile?.avatar_url) {
-      actorAvatar = profile.avatar_url;
-    }
+    if (profile?.username) actorName = profile.username;
+    if (profile?.avatar_url) actorAvatar = profile.avatar_url;
   } catch (e) {
     console.error("Failed to fetch actor profile for notification:", e);
   }
 
   const highlight = params.highlightItem;
 
-  // Create in-app notifications for other users
   try {
     const usersSnap = await getDocs(collection(db, "users"));
     const notifCol = collection(db, "notifications");
@@ -232,20 +270,22 @@ async function notifyOtherUsersAboutReview(params: {
         .filter((uDoc) => uDoc.id !== params.userId)
         .map((uDoc) => {
           const notifRef = doc(notifCol);
-          const payload: Record<string, any> = {
+          const payload: Record<string, unknown> = {
             notification_id: notifRef.id,
             user_id: uDoc.id,
             actor_id: params.userId,
-            actor_name: actorName,
+            actor_name: actorName.slice(0, 100),
             actor_avatar: actorAvatar,
-            type: "REPLY_TO_COMMENT",
-            text: params.bodyText,
+            type: params.notifType,
+            text: params.bodyText.slice(0, 1000),
             timestamp: params.timestamp,
             read: false,
           };
           if (params.activityId) payload.activity_id = params.activityId;
           if (highlight?.work_id) payload.work_id = highlight.work_id;
-          if (highlight?.work_title) payload.work_title = highlight.work_title;
+          if (highlight?.work_title) {
+            payload.work_title = highlight.work_title.slice(0, 200);
+          }
           if (highlight?.media_type) payload.media_type = highlight.media_type;
           if (typeof highlight?.episode_num === "number") {
             payload.episode_num = getReviewItemTargetEpisode(highlight);
@@ -266,7 +306,9 @@ async function notifyOtherUsersAboutReview(params: {
       type: "social",
       title: params.pushTitle(actorName),
       body: params.bodyText,
-      link: params.link || "/",
+      link:
+        params.link ||
+        (params.activityId ? `/?activity_id=${params.activityId}` : "/"),
       icon: highlight?.work_cover,
       workId: highlight?.work_id,
     }),
@@ -275,7 +317,7 @@ async function notifyOtherUsersAboutReview(params: {
 
 /**
  * Creates a REVIEW_LIST activity feed post and individual episode_feedback
- * documents for each item so ratings/notes are queryable per work and episode.
+ * documents atomically via writeBatch so ratings/notes are queryable per work and episode.
  */
 export async function createReviewList(
   userId: string,
@@ -289,7 +331,6 @@ export async function createReviewList(
   const newActivityRef = doc(feedRef);
   const activity_id = newActivityRef.id;
   const timestamp = new Date().toISOString();
-
   const work_ids = Array.from(new Set(sanitizedItems.map((i) => i.work_id)));
 
   const newActivity: ActivityFeed = {
@@ -303,29 +344,16 @@ export async function createReviewList(
     timestamp,
   };
 
-  await setDoc(newActivityRef, newActivity);
+  const batch = writeBatch(db);
+  batch.set(newActivityRef, newActivity);
 
   const feedbackCol = collection(db, "episode_feedback");
-  await Promise.all(
-    sanitizedItems.map((item) => {
-      const fbRef = doc(feedbackCol);
-      const feedbackDoc: EpisodeFeedback = {
-        feedback_id: fbRef.id,
-        user_id: userId,
-        work_id: item.work_id,
-        episode_num: item.episode_num,
-        media_type: item.media_type,
-        text: item.text,
-        activity_id,
-        timestamp,
-        reactions: {},
-      };
-      if (typeof item.rating === "number") {
-        feedbackDoc.rating = item.rating;
-      }
-      return setDoc(fbRef, feedbackDoc);
-    })
-  );
+  sanitizedItems.forEach((item) => {
+    const fbRef = doc(feedbackCol);
+    batch.set(fbRef, buildFeedbackDoc(fbRef.id, userId, item, timestamp, activity_id));
+  });
+
+  await batch.commit();
 
   const workSummary = sanitizedItems
     .map((i) => i.work_title)
@@ -343,9 +371,10 @@ export async function createReviewList(
   await notifyOtherUsersAboutReview({
     userId,
     activityId: activity_id,
+    notifType: "REVIEW_POST",
     pushTitle: (actorName) => `${actorName} hat ein Review gepostet`,
     bodyText,
-    link: "/",
+    link: `/?activity_id=${activity_id}`,
     highlightItem: firstItem,
     timestamp,
   });
@@ -354,9 +383,8 @@ export async function createReviewList(
 }
 
 /**
- * Updates an existing REVIEW_LIST activity (verifying ownership), syncs all
- * linked episode_feedback documents, and notifies other users when meaningful
- * changes (new chapters/episodes, rating changes, text edits, etc.) were made.
+ * Updates an existing REVIEW_LIST activity atomically, preserves reactions on
+ * matching episode_feedback docs, and notifies other users on meaningful changes.
  */
 export async function updateReviewList(
   activityId: string,
@@ -380,41 +408,46 @@ export async function updateReviewList(
   const sanitizedItems = newItems.map(sanitizeReviewItem);
   const work_ids = Array.from(new Set(sanitizedItems.map((i) => i.work_id)));
 
-  await updateDoc(activityRef, {
+  const feedbackCol = collection(db, "episode_feedback");
+  const oldFbSnap = await getDocs(
+    query(feedbackCol, where("activity_id", "==", activityId))
+  );
+
+  // Preserve reactions by work_id + episode_num when replacing feedback entries
+  const oldReactionsByKey = new Map<string, Record<string, string[]>>();
+  oldFbSnap.docs.forEach((d) => {
+    const fb = d.data() as EpisodeFeedback;
+    if (fb.reactions && Object.keys(fb.reactions).length > 0) {
+      oldReactionsByKey.set(`${fb.work_id}_${fb.episode_num}`, fb.reactions);
+      if (!oldReactionsByKey.has(fb.work_id)) {
+        oldReactionsByKey.set(fb.work_id, fb.reactions);
+      }
+    }
+  });
+
+  const batch = writeBatch(db);
+  batch.update(activityRef, {
     text: newTitle,
     review_items: sanitizedItems,
     work_ids,
   });
 
-  // Replace linked episode_feedback documents for this activity_id
-  const feedbackCol = collection(db, "episode_feedback");
-  const q = query(feedbackCol, where("activity_id", "==", activityId));
-  const oldFbSnap = await getDocs(q);
-  await Promise.all(oldFbSnap.docs.map((d) => deleteDoc(d.ref)));
+  oldFbSnap.docs.forEach((d) => batch.delete(d.ref));
 
   const timestamp = data.timestamp || new Date().toISOString();
-  await Promise.all(
-    sanitizedItems.map((item) => {
-      const fbRef = doc(feedbackCol);
-      const feedbackDoc: EpisodeFeedback = {
-        feedback_id: fbRef.id,
-        user_id: userId,
-        work_id: item.work_id,
-        episode_num: item.episode_num,
-        media_type: item.media_type,
-        text: item.text,
-        activity_id: activityId,
-        timestamp,
-        reactions: {},
-      };
-      if (typeof item.rating === "number") {
-        feedbackDoc.rating = item.rating;
-      }
-      return setDoc(fbRef, feedbackDoc);
-    })
-  );
+  sanitizedItems.forEach((item) => {
+    const fbRef = doc(feedbackCol);
+    const preserved =
+      oldReactionsByKey.get(`${item.work_id}_${item.episode_num}`) ||
+      oldReactionsByKey.get(item.work_id);
+    batch.set(
+      fbRef,
+      buildFeedbackDoc(fbRef.id, userId, item, timestamp, activityId, preserved)
+    );
+  });
 
-  // Notify other users if anything in the review was added or modified
+  await batch.commit();
+
   const analysis = analyzeReviewListUpdate(
     oldTitle,
     oldItems,
@@ -476,6 +509,7 @@ export async function updateReviewList(
     await notifyOtherUsersAboutReview({
       userId,
       activityId,
+      notifType: "REVIEW_UPDATE",
       pushTitle: (actorName) =>
         hasNewEpisodesOrItems
           ? `${actorName} hat ein Review ergänzt`
@@ -483,7 +517,7 @@ export async function updateReviewList(
           ? `${actorName} hat eine Bewertung angepasst`
           : `${actorName} hat ein Review aktualisiert`,
       bodyText,
-      link: "/",
+      link: `/?activity_id=${activityId}`,
       highlightItem: analysis.highlightItem,
       timestamp: new Date().toISOString(),
     });
@@ -498,8 +532,7 @@ export async function updateReviewList(
 }
 
 /**
- * Adds a single episode/chapter feedback entry (with optional 1-10 rating)
- * directly from a work's detail page.
+ * Adds a single episode/chapter feedback entry directly from a work's detail page.
  */
 export async function addSingleEpisodeFeedback(
   userId: string,
@@ -511,20 +544,7 @@ export async function addSingleEpisodeFeedback(
   const fbRef = doc(feedbackCol);
   const timestamp = new Date().toISOString();
 
-  const feedbackDoc: EpisodeFeedback = {
-    feedback_id: fbRef.id,
-    user_id: userId,
-    work_id: item.work_id,
-    episode_num: item.episode_num,
-    media_type: item.media_type,
-    text: item.text,
-    timestamp,
-    reactions: {},
-  };
-  if (typeof item.rating === "number" && !Number.isNaN(item.rating)) {
-    feedbackDoc.rating = item.rating;
-  }
-
+  const feedbackDoc = buildFeedbackDoc(fbRef.id, userId, item, timestamp);
   await setDoc(fbRef, feedbackDoc);
 
   const epLabel = formatReviewItemEpLabel(item);
@@ -532,6 +552,7 @@ export async function addSingleEpisodeFeedback(
     typeof feedbackDoc.rating === "number" ? ` · ★ ${feedbackDoc.rating}/10` : "";
   await notifyOtherUsersAboutReview({
     userId,
+    notifType: "REVIEW_POST",
     pushTitle: (actorName) => `${actorName} hat ein Feedback gepostet`,
     bodyText: `${item.work_title} (${epLabel}${ratingPart}): ${item.text.slice(0, 100)}`,
     link: `/work/${item.work_id}`,
@@ -540,6 +561,24 @@ export async function addSingleEpisodeFeedback(
   });
 
   return feedbackDoc;
+}
+
+/**
+ * Deletes a standalone episode_feedback document owned by userId.
+ */
+export async function deleteSingleEpisodeFeedback(
+  feedbackId: string,
+  userId: string
+): Promise<void> {
+  if (!db || !feedbackId || !userId) return;
+  const fbRef = doc(db, "episode_feedback", feedbackId);
+  const snap = await getDoc(fbRef);
+  if (!snap.exists()) return;
+  const data = snap.data() as EpisodeFeedback;
+  if (data.user_id !== userId) {
+    throw new Error("Nicht berechtigt, dieses Feedback zu löschen.");
+  }
+  await deleteDoc(fbRef);
 }
 
 /**
@@ -567,10 +606,6 @@ export async function getAllEpisodeFeedback(
   }
 }
 
-/**
- * Fetches all episode feedback entries for a given work,
- * sorted by episode_num descending, then timestamp descending.
- */
 export async function getEpisodeFeedbackForWork(
   workId: string
 ): Promise<EpisodeFeedback[]> {
@@ -588,10 +623,6 @@ export async function getEpisodeFeedbackForWork(
   return items.sort(sortFeedbackDesc);
 }
 
-/**
- * Fetches a user's episode feedback entries and computes their average
- * 1-10 episode rating for a given work.
- */
 export async function getUserEpisodeRatingsForWork(
   userId: string,
   workId: string
@@ -620,8 +651,7 @@ export async function getUserEpisodeRatingsForWork(
 }
 
 /**
- * Toggles a user's emoji reaction on an activity_feed document and returns
- * the updated reactions map.
+ * Atomically toggles a user's emoji reaction on an activity_feed document using a transaction.
  */
 export async function toggleActivityReaction(
   activityId: string,
@@ -631,32 +661,55 @@ export async function toggleActivityReaction(
   if (!db) return {};
 
   const activityRef = doc(db, "activity_feed", activityId);
-  const snap = await getDoc(activityRef);
-  if (!snap.exists()) return {};
+  try {
+    return await runTransaction(db, async (tx) => {
+      const snap = await tx.get(activityRef);
+      if (!snap.exists()) return {};
 
-  const data = snap.data() as ActivityFeed;
-  const reactions: Record<string, string[]> = { ...(data.reactions || {}) };
-  const currentUsers = Array.isArray(reactions[emoji]) ? [...reactions[emoji]] : [];
+      const data = snap.data() as ActivityFeed;
+      const reactions: Record<string, string[]> = { ...(data.reactions || {}) };
+      const currentUsers = Array.isArray(reactions[emoji])
+        ? [...reactions[emoji]]
+        : [];
 
-  if (currentUsers.includes(userId)) {
-    const filtered = currentUsers.filter((uid) => uid !== userId);
-    if (filtered.length === 0) {
-      delete reactions[emoji];
+      if (currentUsers.includes(userId)) {
+        const filtered = currentUsers.filter((uid) => uid !== userId);
+        if (filtered.length === 0) {
+          delete reactions[emoji];
+        } else {
+          reactions[emoji] = filtered;
+        }
+      } else {
+        reactions[emoji] = [...currentUsers, userId];
+      }
+
+      tx.update(activityRef, { reactions });
+      return reactions;
+    });
+  } catch {
+    // Fallback to standard update if offline/transaction unavailable
+    const snap = await getDoc(activityRef);
+    if (!snap.exists()) return {};
+    const data = snap.data() as ActivityFeed;
+    const reactions: Record<string, string[]> = { ...(data.reactions || {}) };
+    const currentUsers = Array.isArray(reactions[emoji])
+      ? [...reactions[emoji]]
+      : [];
+    if (currentUsers.includes(userId)) {
+      const filtered = currentUsers.filter((uid) => uid !== userId);
+      if (filtered.length === 0) delete reactions[emoji];
+      else reactions[emoji] = filtered;
     } else {
-      reactions[emoji] = filtered;
+      reactions[emoji] = [...currentUsers, userId];
     }
-  } else {
-    reactions[emoji] = [...currentUsers, userId];
+    await updateDoc(activityRef, { reactions });
+    return reactions;
   }
-
-  await updateDoc(activityRef, { reactions });
-  return reactions;
 }
 
 /**
- * Deletes a REVIEW_LIST activity (verifying ownership), deletes all linked
- * episode_feedback documents, and returns the deleted review_items so the caller
- * can roll back the user's episode/chapter progress.
+ * Deletes a REVIEW_LIST activity (verifying ownership) and all linked
+ * episode_feedback documents atomically, returning the deleted review_items.
  */
 export async function deleteReviewList(
   activityId: string,
@@ -675,14 +728,15 @@ export async function deleteReviewList(
 
   const deletedItems = Array.isArray(data.review_items) ? data.review_items : [];
 
-  await deleteDoc(activityRef);
-
   const feedbackCol = collection(db, "episode_feedback");
-  const q = query(feedbackCol, where("activity_id", "==", activityId));
-  const fbSnap = await getDocs(q);
+  const fbSnap = await getDocs(
+    query(feedbackCol, where("activity_id", "==", activityId))
+  );
 
-  await Promise.all(fbSnap.docs.map((d) => deleteDoc(d.ref)));
+  const batch = writeBatch(db);
+  batch.delete(activityRef);
+  fbSnap.docs.forEach((d) => batch.delete(d.ref));
+  await batch.commit();
 
   return deletedItems;
 }
-

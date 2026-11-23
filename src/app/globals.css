@@ -1,31 +1,139 @@
 @import "tailwindcss";
 
-@theme {
-  --color-background: #0f1115;
+:root {
+  color-scheme: dark;
+
+  /* Unified Dark Surface Tokens */
+  --bg-app: #0f1115;
+  --bg-surface: #151821;
+  --bg-surface-elevated: #1a1d24;
+  --bg-surface-inset: #10131b;
+  --bg-surface-control: #181c27;
+
+  /* Default Accent Theme: Emerald Green */
+  --accent-primary: #059669;
+  --accent-hover: #10b981;
+  --accent-strong: #047857;
+  --accent-text: #34d399;
+  --accent-text-light: #6ee7b7;
+  --accent-text-soft: #a7f3d0;
+  --accent-soft: rgba(16, 185, 129, 0.14);
+  --accent-soft-hover: rgba(16, 185, 129, 0.24);
+  --accent-border: rgba(16, 185, 129, 0.35);
+  --accent-border-strong: rgba(16, 185, 129, 0.6);
+  --accent-bubble: #112622;
+  --accent-tint: rgba(6, 78, 59, 0.22);
+  --accent-glow: rgba(16, 185, 129, 0.45);
+  --accent-grad-from: #34d399;
+  --accent-grad-to: #10b981;
+}
+
+:root[data-accent="blue"] {
+  /* Optional Accent Theme: AniPulse Blue */
+  --accent-primary: #2563eb;
+  --accent-hover: #3b82f6;
+  --accent-strong: #1d4ed8;
+  --accent-text: #60a5fa;
+  --accent-text-light: #93c5fd;
+  --accent-text-soft: #bfdbfe;
+  --accent-soft: rgba(37, 99, 235, 0.16);
+  --accent-soft-hover: rgba(37, 99, 235, 0.28);
+  --accent-border: rgba(59, 130, 246, 0.4);
+  --accent-border-strong: rgba(59, 130, 246, 0.65);
+  --accent-bubble: #132138;
+  --accent-tint: rgba(23, 37, 84, 0.28);
+  --accent-glow: rgba(37, 99, 235, 0.5);
+  --accent-grad-from: #38bdf8;
+  --accent-grad-to: #3b82f6;
+}
+
+@theme inline {
+  --color-background: var(--bg-app);
   --color-foreground: #ededed;
-  --color-card: #1a1d24;
+  --color-card: var(--bg-surface-elevated);
   --color-card-foreground: #ededed;
-  --color-primary: #2563eb;
+  --color-primary: var(--accent-primary);
   --color-primary-foreground: #ffffff;
   --color-border: #1f2937;
-  
+
+  /* Surface utilities */
+  --color-app: var(--bg-app);
+  --color-surface: var(--bg-surface);
+  --color-surface-elevated: var(--bg-surface-elevated);
+  --color-surface-inset: var(--bg-surface-inset);
+  --color-surface-control: var(--bg-surface-control);
+
+  /* Dynamic accent utilities (Emerald default / Blue toggle) */
+  --color-accent: var(--accent-primary);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-text: var(--accent-text);
+  --color-accent-light: var(--accent-text-light);
+  --color-accent-soft-text: var(--accent-text-soft);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-soft-hover: var(--accent-soft-hover);
+  --color-accent-border: var(--accent-border);
+  --color-accent-border-strong: var(--accent-border-strong);
+  --color-accent-bubble: var(--accent-bubble);
+  --color-accent-tint: var(--accent-tint);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-:root {
-  color-scheme: dark;
+body {
+  background-color: var(--bg-app);
+  color: #ededed;
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
 
-body {
-  background-color: var(--color-background);
-  color: var(--color-foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+::selection {
+  background-color: var(--accent-soft-hover);
+}
+
+@keyframes fadeInSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
   }
-}
 
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .no-scrollbar,
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar,
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  .animate-fade-in {
+    animation: fadeInSlideDown 0.2s ease-out both;
+  }
+
+  .bg-accent-gradient-text {
+    background-image: linear-gradient(to right, var(--accent-grad-from), var(--accent-grad-to));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .shadow-accent-glow {
+    box-shadow: 0 0 36px -8px var(--accent-glow);
+  }
+}

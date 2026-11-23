@@ -63,39 +63,18 @@ export async function POST(req: Request) {
 
       if (!notifsSnap.empty) {
         const batch = adminDb.batch();
-        notifsSnap.docs.forEach((d: any) => batch.delete(d.ref));
+        notifsSnap.docs.forEach((d) => batch.delete(d.ref));
         await batch.commit();
       }
     } catch (nErr) {
       console.warn("Failed to delete related notifications:", nErr);
     }
 
-    // 6. Revert check-in if this was an EPISODE_THREAD
-    if (actData.action_type === "EPISODE_THREAD" && actData.work_id && actData.episode_num != null) {
-      try {
-        const userWorkRef = adminDb
-          .collection("user_works")
-          .doc(`${userId}_${actData.work_id}`);
-        const userWorkSnap = await userWorkRef.get();
-
-        if (userWorkSnap.exists) {
-          const uData = userWorkSnap.data()!;
-          if (uData.current_episode === actData.episode_num) {
-            const revertedEp = Math.max(0, actData.episode_num - 1);
-            await userWorkRef.update({ current_episode: revertedEp });
-          }
-        }
-      } catch (wErr) {
-        console.warn("Failed to revert user_work current_episode:", wErr);
-      }
-    }
-
     return NextResponse.json({ success: true });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("API delete activity error:", err);
-    return NextResponse.json(
-      { error: err?.message || "Fehler beim Löschen des Beitrags" },
-      { status: 500 }
-    );
+    const message =
+      err instanceof Error ? err.message : "Fehler beim Löschen des Beitrags";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
