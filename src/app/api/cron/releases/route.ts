@@ -726,23 +726,25 @@ export async function GET(req: Request) {
 
     // ─── PART 1B: Nachlaufende Dub-Episoden bei FINISHED Anime ───────────────
     try {
-      const dubWorksSnap = await adminDb
+      const currentWorksSnap = await adminDb
         .collection("user_works")
         .where("status", "==", "CURRENT")
-        .where("synchro_offset_episodes", ">", 0)
         .get();
+      const dubDocs = currentWorksSnap.docs.filter(
+        (d) => Number(d.data().synchro_offset_episodes) > 0
+      );
 
-      if (!dubWorksSnap.empty) {
+      if (dubDocs.length > 0) {
         const dubWorkIds = [
           ...new Set(
-            dubWorksSnap.docs
+            dubDocs
               .map((d) => parseInt(String(d.data().work_id), 10))
               .filter((n) => !Number.isNaN(n) && n > 0)
           ),
         ];
         const dubMediaMap = await fetchAniListMediaBatch(dubWorkIds);
 
-        for (const d of dubWorksSnap.docs) {
+        for (const d of dubDocs) {
           const uWork = d.data();
           const wid = String(uWork.work_id);
           if (pausedWorkIds.has(wid)) continue;
