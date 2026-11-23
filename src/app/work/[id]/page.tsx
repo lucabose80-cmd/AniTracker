@@ -5,17 +5,18 @@ import { useParams, useRouter } from "next/navigation";
 import { fetchAniList, GET_WORK_DETAILS } from "@/lib/anilist";
 import { calculateOverallScore } from "@/lib/scoring";
 import { UserWork, EmotionalImpact, WatchMode } from "@/types/database";
-import { Star, ChevronLeft, Save, Library as LibraryIcon, Check, Calendar as CalendarIcon, PlayCircle, CheckCircle, PauseCircle, Bookmark, Settings, X } from "lucide-react";
+import { Star, ChevronLeft, Save, Library as LibraryIcon, Check, Calendar as CalendarIcon, PlayCircle, CheckCircle, PauseCircle, Bookmark, Settings } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
-import { setCalendarOverride, getCalendarOverrides, clearManualMaxEpisode, resetScheduleOverride, formatPauseStatusLabel } from "@/lib/db/calendar";
+import { CalendarOverride, getCalendarOverrides, formatPauseStatusLabel } from "@/lib/db/calendar";
 import { auth } from "@/lib/firebase";
 import { saveUserWork, getUserWork, updateEpisodeProgress, removeUserWork, updateUserWorkStatus } from "@/lib/db/works";
 import { addToHistory } from "@/lib/db/users";
 import { WorkSocialFeed } from "./WorkSocialFeed";
 import { createActivity } from "@/lib/db/feed";
 import { getUserEpisodeRatingsForWork } from "@/lib/db/feedback";
-import { getPausedWorksMap, pauseWorkForWeeks, pauseWorkIndefinitely, unpauseWork } from "@/lib/db/pauses";
+import { WorkPauseRecord, getPausedWorksMap, pauseWorkForWeeks, unpauseWork } from "@/lib/db/pauses";
+import { WorkSettingsModal } from "@/components/ui/WorkSettingsModal";
 import { useAppStore } from "@/lib/store";
 
 export default function WorkDetailPage() {
@@ -30,10 +31,13 @@ export default function WorkDetailPage() {
   const [userWorkStatus, setUserWorkStatus] = useState<UserWork["status"]>("NONE");
   const [showEvaluation, setShowEvaluation] = useState(false);
   const [currentEpisode, setCurrentEpisode] = useState(0);
+  const [episodeInputText, setEpisodeInputText] = useState("0");
   const [manualMaxEpisode, setManualMaxEpisode] = useState<number | "">("");
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [synchroOffset, setSynchroOffset] = useState<number | "">(0);
   const [manualAvailableEps, setManualAvailableEps] = useState<number | "">("");
+  const [workOverride, setWorkOverride] = useState<CalendarOverride | undefined>(undefined);
+  const [pauseRecord, setPauseRecord] = useState<WorkPauseRecord | null>(null);
   const [droppedReason, setDroppedReason] = useState("");
   const [isWorkPaused, setIsWorkPaused] = useState(false);
   const [pausedUntilIso, setPausedUntilIso] = useState<string>("");
@@ -62,20 +66,16 @@ export default function WorkDetailPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
 
-  const [customDay, setCustomDay] = useState<number>(-1);
-  const [customTime, setCustomTime] = useState<string>("18:00");
-  const [releaseFrequency, setReleaseFrequency] = useState<number>(1);
-  const [hasCustomOverride, setHasCustomOverride] = useState(false);
-  const [startDate, setStartDate] = useState<string>("");
-  const [rhythmType, setRhythmType] = useState<"strict" | "flexible">("strict");
-  const [flexibleMinDay, setFlexibleMinDay] = useState<number>(4);
-  const [flexibleMaxDay, setFlexibleMaxDay] = useState<number>(0);
   const [episodeRatingStats, setEpisodeRatingStats] = useState<{ average: number | null; count: number }>({
     average: null,
     count: 0,
   });
   const lastSavedScoreRef = useRef<number>(0);
   const lastSavedCommentRef = useRef<string>("");
+
+  useEffect(() => {
+    setEpisodeInputText(String(currentEpisode));
+  }, [currentEpisode]);
 
   useEffect(() => {
     let isMounted = true;
@@ -91,44 +91,25 @@ export default function WorkDetailPage() {
           user
             ? getUserEpisodeRatingsForWork(user.uid, id)
             : Promise.resolve({ average: null, count: 0, items: [] }),
-          getPausedWorksMap().catch((): Record<string, any> => ({})),
+          getPausedWorksMap().catch((): Record<string, WorkPauseRecord> => ({})),
         ]);
 
         if (!isMounted) return;
 
         setWork(data.Media);
         setEpisodeRatingStats({ average: epRatings.average, count: epRatings.count });
-        const pauseRecord = pausedMap[id];
-        setIsWorkPaused(Boolean(pauseRecord));
-        setPausedUntilIso(pauseRecord?.paused_until || "");
+        const loadedPause = pausedMap[id] || null;
+        setPauseRecord(loadedPause);
+        setIsWorkPaused(Boolean(loadedPause));
+        setPausedUntilIso(loadedPause?.paused_until || "");
 
-        if (overrides[id]) {
-          const ov = overrides[id];
-          if (ov.weeklyDay !== undefined) {
-            setHasCustomOverride(true);
-            setCustomDay(ov.weeklyDay);
-          }
-          if (ov.weeklyTime !== undefined) {
-            setCustomTime(ov.weeklyTime);
-          }
-          if (ov.releaseFrequency !== undefined) {
-            setReleaseFrequency(ov.releaseFrequency);
-          }
-          if (ov.startDate !== undefined) {
-            setStartDate(ov.startDate);
-          }
-          if (ov.rhythmType !== undefined) {
-            setRhythmType(ov.rhythmType);
-          }
-          if (ov.flexibleDayRange) {
-            setFlexibleMinDay(ov.flexibleDayRange.minDay);
-            setFlexibleMaxDay(ov.flexibleDayRange.maxDay);
-            if (ov.weeklyDay === undefined) {
-              setCustomDay(ov.flexibleDayRange.minDay);
-            }
-          }
+        const ov = overrides[id];
+        setWorkOverride(ov);
+        if (ov) {
           if (ov.manualMaxEpisode !== undefined) {
             setManualMaxEpisode(ov.manualMaxEpisode);
+          } else {
+            setManualMaxEpisode("");
           }
           if (ov.manualAvailableEps !== undefined) {
             const loadedMax =
@@ -144,7 +125,12 @@ export default function WorkDetailPage() {
                 ? Math.min(Number(ov.manualAvailableEps), loadedMax)
                 : ov.manualAvailableEps
             );
+          } else {
+            setManualAvailableEps("");
           }
+        } else {
+          setManualMaxEpisode("");
+          setManualAvailableEps("");
         }
         const isRomance = data.Media.genres?.includes("Romance") || false;
         setIsRomanceMainFocus(isRomance);
@@ -166,7 +152,7 @@ export default function WorkDetailPage() {
           setWatchMode(userWork.classification?.watchMode || "SUB");
           setMalRated(userWork.mal_rated || false);
           setSynchroOffset(userWork.synchro_offset_episodes || 0);
-          if (!overrides[id] || overrides[id].manualAvailableEps === undefined) {
+          if (!ov || ov.manualAvailableEps === undefined) {
             setManualAvailableEps(userWork.manual_available_eps ?? "");
           }
           if (userWork.evaluation.romanceAndChemistry > 0) setHasRomance(true);
@@ -377,7 +363,6 @@ export default function WorkDetailPage() {
         mal_rated: malRated,
         dropped_reason: droppedReason.trim(),
         synchro_offset_episodes: synchroOffset === "" ? 0 : synchroOffset,
-        manual_available_eps: manualAvailableEps === "" ? null : manualAvailableEps,
         auto_added: false,
         status: userWorkStatus !== "NONE" ? userWorkStatus : "COMPLETED"
       });
@@ -457,6 +442,7 @@ export default function WorkDetailPage() {
     setIsSaving(true);
     try {
       await unpauseWork(id);
+      setPauseRecord(null);
       setIsWorkPaused(false);
       setPausedUntilIso("");
       if (userWorkStatus === "PAUSED") {
@@ -473,7 +459,7 @@ export default function WorkDetailPage() {
     }
   };
 
-  const handlePauseWork = async (weeksOrIndefinite: number | "INDEFINITE") => {
+  const handlePauseWork = async (weeks: number) => {
     const user = auth?.currentUser;
     if (!user) {
       alert("Bitte erst einloggen!");
@@ -481,14 +467,11 @@ export default function WorkDetailPage() {
     }
     setIsSaving(true);
     try {
-      if (weeksOrIndefinite === "INDEFINITE") {
-        await pauseWorkIndefinitely(id, user.uid);
-        setPausedUntilIso("9999-12-31T23:59:59.999Z");
-      } else {
-        await pauseWorkForWeeks(id, user.uid, weeksOrIndefinite);
-        const pausedMap = await getPausedWorksMap();
-        setPausedUntilIso(pausedMap[id]?.paused_until || "");
-      }
+      await pauseWorkForWeeks(id, user.uid, weeks);
+      const pausedMap = await getPausedWorksMap();
+      const rec = pausedMap[id] || null;
+      setPauseRecord(rec);
+      setPausedUntilIso(rec?.paused_until || "");
       setIsWorkPaused(true);
       setSaveMessage("Werk pausiert!");
       setTimeout(() => setSaveMessage(""), 3000);
@@ -515,9 +498,14 @@ export default function WorkDetailPage() {
     let newEp = currentEpisode + increment;
     if (newEp < 0) newEp = 0;
     if (newEp > effectiveMaxEps) newEp = effectiveMaxEps;
+    if (newEp === currentEpisode) {
+      setEpisodeInputText(String(currentEpisode));
+      return;
+    }
     
     const prevEp = currentEpisode;
     setCurrentEpisode(newEp);
+    setEpisodeInputText(String(newEp));
     
     if (inLibrary) {
       try {
@@ -525,16 +513,24 @@ export default function WorkDetailPage() {
       } catch (error) {
         console.error(error);
         setCurrentEpisode(prevEp);
+        setEpisodeInputText(String(prevEp));
         alert("Fehler beim Speichern der Episode");
       }
     }
   };
 
-  const handleSaveCustomRelease = async () => {
-    if (!id) return;
-    await setCalendarOverride(id, null as any, customDay, customTime, undefined, releaseFrequency, undefined, undefined, startDate || undefined, rhythmType, rhythmType === 'flexible' ? { minDay: flexibleMinDay, maxDay: flexibleMaxDay } : undefined);
-    setHasCustomOverride(true);
-    alert("Wöchentlicher Release-Zeitpunkt gespeichert!");
+  const commitEpisodeInput = () => {
+    const parsed = parseInt(episodeInputText, 10);
+    if (Number.isNaN(parsed)) {
+      setEpisodeInputText(String(currentEpisode));
+      return;
+    }
+    let clamped = Math.max(0, parsed);
+    if (clamped > effectiveMaxEps) clamped = effectiveMaxEps;
+    setEpisodeInputText(String(clamped));
+    if (clamped !== currentEpisode) {
+      handleUpdateEpisode(clamped - currentEpisode);
+    }
   };
 
   if (isLoading) {
@@ -657,14 +653,13 @@ export default function WorkDetailPage() {
                 type="number"
                 min="0"
                 max={effectiveMaxEps !== 9999 ? effectiveMaxEps : undefined}
-                value={currentEpisode}
-                onChange={e => {
-                  const val = parseInt(e.target.value);
-                  if (!isNaN(val)) {
-                    let newEp = val;
-                    if (newEp < 0) newEp = 0;
-                    if (newEp > effectiveMaxEps) newEp = effectiveMaxEps;
-                    handleUpdateEpisode(newEp - currentEpisode);
+                value={episodeInputText}
+                onChange={(e) => setEpisodeInputText(e.target.value)}
+                onBlur={commitEpisodeInput}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    commitEpisodeInput();
+                    (e.target as HTMLInputElement).blur();
                   }
                 }}
                 className="w-16 bg-transparent text-center focus:outline-none border-b-2 border-transparent focus:border-blue-500 m-0 p-0"
@@ -673,7 +668,7 @@ export default function WorkDetailPage() {
               <span className="text-sm text-gray-500 ml-1">/ {calculatedMaxEps !== 9999 ? calculatedMaxEps : "?"}</span>
               <button
                 onClick={() => setShowSettingsModal(true)}
-                title="Release-Zeiten, Takt & Pause für alle anpassen"
+                title="Werk-Einstellungen (Stand, Takt & Pause)"
                 className="ml-3 text-gray-400 hover:text-white transition bg-gray-800 rounded p-1.5"
               >
                 <Settings size={14} />
@@ -687,334 +682,36 @@ export default function WorkDetailPage() {
           </div>
         </div>
 
-        {/* SETTINGS MODAL */}
-        {showSettingsModal && (
-          <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-            <div className="bg-[#1a1d24] border border-gray-800 rounded-2xl p-6 w-full max-w-sm shadow-xl max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-bold">Werk Einstellungen</h3>
-                <button onClick={() => setShowSettingsModal(false)} className="text-gray-500 hover:text-white">
-                  <X size={20} />
-                </button>
-              </div>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 mb-1">Manuelle Gesamt-Folgen</label>
-                  <input 
-                    type="number" 
-                    placeholder={work.episodes || work.chapters || "?"} 
-                    value={manualMaxEpisode}
-                    onChange={(e) => setManualMaxEpisode(e.target.value === "" ? "" : parseInt(e.target.value))}
-                    className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                  />
-                  <p className="text-[10px] text-gray-500 mt-1">Falls AniList die falsche Folgenanzahl hat.</p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 mb-1">Synchro-Versatz (Folgen)</label>
-                  <input 
-                    type="number" 
-                    min="0"
-                    value={synchroOffset}
-                    onChange={(e) => setSynchroOffset(e.target.value === "" ? "" : parseInt(e.target.value))}
-                    className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                  />
-                  <p className="text-[10px] text-gray-500 mt-1">Wie viele Folgen hinkt die Synchro hinterher? Dadurch wird die maximal auswählbare Folge reduziert.</p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-400 mb-1">Bisher erschienen (Kapitel/Folgen)</label>
-                  <input 
-                    type="number" 
-                    min="0"
-                    value={manualAvailableEps}
-                    onChange={(e) => setManualAvailableEps(e.target.value === "" ? "" : parseInt(e.target.value))}
-                    className="w-full bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                  />
-                  <p className="text-[10px] text-gray-500 mt-1">Hier eintragen, wenn AniList die aktuelle Kapitel-/Folgenzahl nicht kennt.</p>
-                </div>
-
-                <div className="pt-2 border-t border-gray-800">
-                  <label className="block text-xs font-bold text-gray-400 mb-2">Wöchentlicher Release (Optional)</label>
-                  <div className="flex gap-2 text-sm">
-                    <select 
-                      value={customDay} 
-                      onChange={e => setCustomDay(parseInt(e.target.value))} 
-                      className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500"
-                    >
-                      <option value={-1}>Kein Release-Tag</option>
-                      <option value={1}>Montag</option>
-                      <option value={2}>Dienstag</option>
-                      <option value={3}>Mittwoch</option>
-                      <option value={4}>Donnerstag</option>
-                      <option value={5}>Freitag</option>
-                      <option value={6}>Samstag</option>
-                      <option value={0}>Sonntag</option>
-                    </select>
-                    <input 
-                      type="time" 
-                      value={customTime} 
-                      onChange={e => setCustomTime(e.target.value)} 
-                      className="w-24 bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500" 
-                    />
-                  </div>
-                  {customDay !== -1 && (
-                    <>
-                      <div className="mt-2 flex items-center gap-2">
-                        <label className="text-xs text-gray-400 font-semibold shrink-0">
-                          Abstand (Alle X Wochen):
-                        </label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={52}
-                          value={releaseFrequency}
-                          onChange={(e) =>
-                            setReleaseFrequency(
-                              Math.max(
-                                1,
-                                Math.min(52, parseInt(e.target.value, 10) || 1)
-                              )
-                            )
-                          }
-                          className="w-20 bg-[#141a29] border border-gray-700 rounded-lg px-3 py-1.5 text-white text-center font-bold outline-none focus:border-blue-500"
-                        />
-                        <span className="text-xs text-gray-400">
-                          {releaseFrequency === 1
-                            ? "Wöchentlich"
-                            : `Alle ${releaseFrequency} Wo.`}
-                        </span>
-                      </div>
-
-                      <div className="flex flex-col gap-1 w-full mt-2">
-                        <label className="text-xs text-gray-400 font-semibold">
-                          Startdatum / Anker (für Takt-Berechnung)
-                        </label>
-                        <input
-                          type="date"
-                          value={startDate}
-                          onChange={(e) => setStartDate(e.target.value)}
-                          className="bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500 w-full"
-                        />
-                      </div>
-
-                      <div className="flex flex-col gap-1 w-full mt-2">
-                        <label className="text-xs text-gray-400 font-semibold">
-                          Rhythmus
-                        </label>
-                        <select
-                          value={rhythmType}
-                          onChange={(e) => setRhythmType(e.target.value as any)}
-                          className="bg-[#141a29] border border-gray-700 rounded-lg px-3 py-2 text-white outline-none focus:border-blue-500 w-full"
-                        >
-                          <option value="strict">
-                            Pünktlich (Fester Tag &amp; Zeit)
-                          </option>
-                          <option value="flexible">
-                            Flexibel / Ungefähr (Zeitfenster für Manga)
-                          </option>
-                        </select>
-                      </div>
-
-                      {rhythmType === "flexible" && (
-                        <div className="flex gap-2 items-center mt-1 w-full">
-                          <select
-                            value={flexibleMinDay}
-                            onChange={(e) =>
-                              setFlexibleMinDay(Number(e.target.value))
-                            }
-                            className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-2 py-2 text-white outline-none focus:border-blue-500"
-                          >
-                            <option value={1}>Mo</option>
-                            <option value={2}>Di</option>
-                            <option value={3}>Mi</option>
-                            <option value={4}>Do</option>
-                            <option value={5}>Fr</option>
-                            <option value={6}>Sa</option>
-                            <option value={0}>So</option>
-                          </select>
-                          <span className="text-gray-400 text-xs">bis</span>
-                          <select
-                            value={flexibleMaxDay}
-                            onChange={(e) =>
-                              setFlexibleMaxDay(Number(e.target.value))
-                            }
-                            className="flex-1 bg-[#141a29] border border-gray-700 rounded-lg px-2 py-2 text-white outline-none focus:border-blue-500"
-                          >
-                            <option value={1}>Mo</option>
-                            <option value={2}>Di</option>
-                            <option value={3}>Mi</option>
-                            <option value={4}>Do</option>
-                            <option value={5}>Fr</option>
-                            <option value={6}>Sa</option>
-                            <option value={0}>So</option>
-                          </select>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-
-                {/* Quick Pause & Reset in Work Settings Modal */}
-                <div className="pt-2 border-t border-gray-800 flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-amber-400">
-                      Release-Pause (Schnellsteuerung)
-                    </span>
-                    {isWorkPaused && (
-                      <span className="text-[11px] font-bold text-amber-300">
-                        {formatPauseStatusLabel(pausedUntilIso)}
-                      </span>
-                    )}
-                  </div>
-                  {isWorkPaused ? (
-                    <button
-                      type="button"
-                      onClick={handleUnpause}
-                      className="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition"
-                    >
-                      Pause sofort aufheben
-                    </button>
-                  ) : (
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => handlePauseWork(1)}
-                        className="py-1.5 px-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-200 text-xs font-semibold transition"
-                      >
-                        1 Wo. Pause
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePauseWork(2)}
-                        className="py-1.5 px-2 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-200 text-xs font-semibold transition"
-                      >
-                        2 Wo. Pause
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handlePauseWork("INDEFINITE")}
-                        className="py-1.5 px-2 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-200 text-xs font-semibold transition"
-                      >
-                        Hiatus
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between gap-2 mt-6">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await resetScheduleOverride(id);
-                    await unpauseWork(id).catch(() => {});
-                    setCustomDay(-1);
-                    setReleaseFrequency(1);
-                    setStartDate("");
-                    setRhythmType("strict");
-                    setHasCustomOverride(false);
-                    setIsWorkPaused(false);
-                    setPausedUntilIso("");
-                    setSaveMessage("Auf AniList-Standard zurückgesetzt!");
-                    setTimeout(() => setSaveMessage(""), 3000);
-                  }}
-                  className="text-xs font-semibold text-gray-400 hover:text-rose-300 px-2.5 py-2 rounded-lg bg-white/5 hover:bg-rose-500/15 transition"
-                >
-                  Standard (Reset)
-                </button>
-                <button 
-                  onClick={async () => {
-                    const user = auth?.currentUser;
-                    if (user) {
-                      if (manualMaxEpisode === "") await clearManualMaxEpisode(id);
-
-                      const effectiveMax =
-                        manualMaxEpisode !== "" && Number(manualMaxEpisode) > 0
-                          ? Number(manualMaxEpisode)
-                          : work?.type === "MANGA" && Number(work?.chapters) > 0
-                          ? Number(work.chapters)
-                          : work?.type !== "MANGA" && Number(work?.episodes) > 0
-                          ? Number(work.episodes)
-                          : null;
-
-                      let sanitizedAvailable: number | null =
-                        manualAvailableEps === "" ? null : Math.max(0, Number(manualAvailableEps));
-                      if (
-                        sanitizedAvailable !== null &&
-                        effectiveMax !== null &&
-                        sanitizedAvailable > effectiveMax
-                      ) {
-                        sanitizedAvailable = effectiveMax;
-                        setManualAvailableEps(effectiveMax);
-                      }
-
-                      const isFinishedByCount =
-                        effectiveMax !== null &&
-                        sanitizedAvailable !== null &&
-                        sanitizedAvailable >= effectiveMax;
-                      const isFinishedWorkWithoutPending =
-                        (work?.status === "FINISHED" || work?.status === "CANCELLED") &&
-                        (effectiveMax === null ||
-                          sanitizedAvailable === null ||
-                          sanitizedAvailable >= effectiveMax);
-                      const shouldClearSchedule =
-                        customDay === -1 || isFinishedByCount || isFinishedWorkWithoutPending;
-
-                      const effectiveDay = shouldClearSchedule
-                        ? (null as any)
-                        : rhythmType === "flexible"
-                        ? flexibleMinDay
-                        : customDay;
-
-                      await setCalendarOverride(
-                        id,
-                        null as any,
-                        effectiveDay,
-                        shouldClearSchedule ? (null as any) : customTime,
-                        manualMaxEpisode === ""
-                          ? undefined
-                          : (manualMaxEpisode as number),
-                        shouldClearSchedule ? (null as any) : releaseFrequency,
-                        sanitizedAvailable === null
-                          ? (null as any)
-                          : sanitizedAvailable,
-                        undefined,
-                        shouldClearSchedule || !startDate
-                          ? (null as any)
-                          : startDate,
-                        shouldClearSchedule ? (null as any) : rhythmType,
-                        !shouldClearSchedule && rhythmType === "flexible"
-                          ? { minDay: flexibleMinDay, maxDay: flexibleMaxDay }
-                          : (null as any)
-                      );
-
-                      if (shouldClearSchedule && customDay !== -1) {
-                        setCustomDay(-1);
-                      }
-
-                      if (inLibrary) {
-                        // Update synchro_offset_episodes in DB (manual_available_eps is now global)
-                        await saveUserWork(user.uid, id, { 
-                          synchro_offset_episodes: synchroOffset === "" ? 0 : synchroOffset,
-                        });
-                      }
-                      
-                      setHasCustomOverride(!shouldClearSchedule);
-                      setShowSettingsModal(false);
-                      setSaveMessage("Einstellungen für alle gespeichert!");
-                      setTimeout(() => setSaveMessage(""), 3000);
-                    }
-                  }}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-lg text-sm transition"
-                >
-                  Speichern
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* UNIFIED WORK SETTINGS MODAL */}
+        <WorkSettingsModal
+          isOpen={showSettingsModal}
+          onClose={() => setShowSettingsModal(false)}
+          workId={id}
+          work={work}
+          override={workOverride}
+          pauseInfo={pauseRecord}
+          userWork={{
+            inLibrary,
+            synchro_offset_episodes: synchroOffset === "" ? 0 : Number(synchroOffset),
+            manual_available_eps: manualAvailableEps === "" ? null : Number(manualAvailableEps),
+          }}
+          initialTab="LIMITS"
+          onSaved={async (result) => {
+            setManualMaxEpisode(result.manualMaxEpisode);
+            setManualAvailableEps(result.manualAvailableEps);
+            setSynchroOffset(result.synchroOffset);
+            setIsWorkPaused(result.isPaused);
+            setPausedUntilIso(result.pausedUntil);
+            const [freshOverrides, freshPauses] = await Promise.all([
+              getCalendarOverrides().catch(() => ({} as Record<string, CalendarOverride>)),
+              getPausedWorksMap().catch(() => ({} as Record<string, WorkPauseRecord>)),
+            ]);
+            setWorkOverride(freshOverrides[id]);
+            setPauseRecord(freshPauses[id] || null);
+            setSaveMessage("Einstellungen gespeichert!");
+            setTimeout(() => setSaveMessage(""), 3000);
+          }}
+        />
 
 
 
